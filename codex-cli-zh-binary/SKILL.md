@@ -1,6 +1,6 @@
 ---
 name: codex-cli-zh-binary
-description: Install, switch, verify, or restore a prebuilt Chinese-localized OpenAI Codex CLI binary on Windows by patching only the active npm `codex` wrapper. Use when the user wants a no-build Chinese Codex CLI, asks to replace the current `codex` command with a localized `codex.exe`, needs to reapply localization after `npm install -g @openai/codex`, or needs to restore/remove this wrapper override. Triggers include 安装中文 Codex CLI, Codex CLI 汉化项目, Codex CLI 中文汉化, Codex 中文版, 替换当前 codex 为中文版, npm 更新后恢复汉化.
+description: Install, switch, verify, or restore a prebuilt Chinese-localized OpenAI Codex CLI binary on Windows by patching only the active npm `codex` wrapper. Use when the user wants a no-build Chinese Codex CLI, asks to replace the current `codex` command with a localized `codex.exe`, needs to reapply localization after `npm install -g @openai/codex`, or needs to restore/remove this wrapper override. Triggers include 安装中文 Codex CLI, codex汉化项目, Codex CLI 汉化项目, Codex CLI 中文汉化, Codex 中文版, 替换当前 codex 为中文版, npm 更新后恢复汉化.
 ---
 
 # Codex CLI 中文二进制替换

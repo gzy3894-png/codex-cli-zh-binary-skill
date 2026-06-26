@@ -2,7 +2,7 @@
 
 这是一个 Codex CLI 汉化项目 / 中文汉化 Skill，面向 Windows 上通过 npm 安装的 OpenAI Codex CLI。它用预编译的中文 `codex.exe` 接管当前 npm wrapper，适合想把本机 `codex` 命令切到 Codex 中文版、但不想重新编译源码的场景。
 
-如果你在找 `codex 汉化项目`、`Codex CLI 中文汉化`、`Codex 中文版` 或 Windows 下的一键中文化方案，这个仓库提供的是“不编译源码，只替换当前 npm wrapper 指向的二进制”的路径。
+如果你在找 `codex汉化项目`、`codex 汉化项目`、`Codex CLI 中文汉化`、`Codex 中文版` 或 Windows 下的一键中文化方案，这个仓库提供的是“不编译源码，只替换当前 npm wrapper 指向的二进制”的路径。
 
 它的改动范围刻意保持很小：不改用户配置、不碰 CC Switch、不处理 Codex Desktop，只定位当前终端实际会执行的 npm wrapper，并让新开的 Codex CLI 启动中文二进制。
 
