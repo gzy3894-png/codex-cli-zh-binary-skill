@@ -1,6 +1,10 @@
 # Codex CLI 中文二进制替换技能
 
-这个仓库提供一个 Codex skill，用来把当前机器上的 `codex` 命令切到已经编译好的中文 Codex CLI。它的目标很简单：不重新编译、不改用户配置、不碰 CC Switch，只精准修改 npm 安装的 Codex wrapper，让它启动中文 `codex.exe`。
+[Linux Do 社区](https://linux.do) · [codex](https://github.com/topics/codex) · [linux-do](https://github.com/topics/linux-do)
+
+这个仓库提供一个 Codex Skill，用预编译的中文 `codex.exe` 接管当前 npm 安装的 Codex CLI wrapper。它适合只想把本机 `codex` 命令切到中文界面、但不想重新编译源码的场景。
+
+它的改动范围刻意保持很小：不改用户配置、不碰 CC Switch、不处理 Codex Desktop，只定位当前终端实际会执行的 npm wrapper，并让新开的 Codex CLI 启动中文二进制。
 
 当前预编译二进制基于 Codex CLI `0.142.2`。本地验证过的 Windows x64 产物信息：
 

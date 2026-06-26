@@ -1,19 +1,30 @@
 ---
 name: codex-cli-zh-binary
-description: Install or restore a prebuilt Chinese-localized OpenAI Codex CLI binary by precisely patching the active npm codex wrapper. Use when Codex needs a no-build Windows CLI localization install, needs to switch the current `codex` command to a compiled Chinese `codex.exe`, needs to recover after `npm install -g @openai/codex` overwrote the wrapper, needs to restore the official wrapper backup, or the user asks to 安装中文 Codex CLI / 替换当前 codex 为中文版 / npm 更新后恢复汉化.
+description: Install, switch, verify, or restore a prebuilt Chinese-localized OpenAI Codex CLI binary on Windows by patching only the active npm `codex` wrapper. Use when the user wants a no-build Chinese Codex CLI, asks to replace the current `codex` command with a localized `codex.exe`, needs to reapply localization after `npm install -g @openai/codex`, or needs to restore/remove this wrapper override. Triggers include 安装中文 Codex CLI, 替换当前 codex 为中文版, npm 更新后恢复汉化.
 ---
 
 # Codex CLI 中文二进制替换
 
-## 作用
+## 适用范围
 
-只用于 Windows 上通过 npm 安装的 Codex CLI。不要用它修改 Codex Desktop、MSIX 包、CC Switch 或 Claude 配置。
+只用于 Windows 上通过 npm 安装的 Codex CLI。不要用它修改 Codex Desktop、MSIX 包、CC Switch、Claude 配置或用户的 `config.toml`。
 
-这个技能不重新编译源码。它安装已经编译好的中文 `codex.exe`，再精准修改当前 `codex` 命令对应的 npm wrapper，让新开的 Codex CLI 启动这个中文二进制。
+这个技能不重新编译源码。它安装已经编译好的中文 `codex.exe`，再精确修改当前 `codex` 命令对应的 npm wrapper，让新开的 Codex CLI 启动这个中文二进制。
+
+## 工作方式
+
+按下面的顺序处理，除非用户明确给出 `-WrapperPath`、`-BinaryPath` 或其他脚本参数：
+
+1. 用 `Get-Command codex -All` 解析当前终端实际会执行的 `codex`。
+2. 从命令入口反推 npm wrapper：`node_modules\@openai\codex\bin\codex.js`。
+3. 确认 wrapper 里存在 `findCodexExecutable`，避免修改未知文件。
+4. 下载或复制中文 `codex.exe` 到独立安装目录。
+5. 备份原始 `codex.js`，写入带 `codex-cli-zh-binary` 标记的 override。
+6. 如果中文二进制不存在，override 必须回退到官方 `findCodexExecutable()`。
 
 ## 安装
 
-优先运行脚本。脚本会用 `Get-Command` 解析当前终端实际会执行的 `codex`，找到匹配的 npm wrapper，备份 `codex.js`，然后写入带标记的 override。
+优先运行脚本：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\codex-cli-zh-binary\scripts\install-codex-cli-zh-binary.ps1"
