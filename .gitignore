@@ -1,0 +1,8 @@
+*.exe
+*.pdb
+*.bak
+dist/
+tmp/
+release/
+.DS_Store
+Thumbs.db

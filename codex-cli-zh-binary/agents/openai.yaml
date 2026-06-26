@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex CLI 中文替换"
+  short_description: "用已编译的中文 Codex CLI 替换当前命令入口"
+  default_prompt: "使用 $codex-cli-zh-binary 把当前 codex 命令切换到已编译的中文 Codex CLI。"
