@@ -64,14 +64,36 @@ openssl libffi perl procps termux-tools
 7. 安装结果
 -----------
 
-默认安装到:
+默认二进制安装到:
+$PREFIX/bin/codex-zh-bin
+
+包装命令安装到:
 $PREFIX/bin/codex-zh
 
-并把命令:
-codex
+并把命令 codex 指向 codex-zh。
 
-指向:
-codex-zh
+包装命令会自动修正 HOME、CODEX_HOME、TMPDIR 和 PATH，避免 root/su
+shell 下 Codex 把状态库写到 /.codex。
 
 安装后检查:
 codex --version
+
+
+8. su/root shell 里 codex 找不到
+-------------------------------
+
+如果提示:
+/system/bin/sh: codex: inaccessible or not found
+
+先执行:
+export PATH="/data/data/com.termux/files/usr/bin:$PATH"
+
+再执行:
+codex --version
+codex
+
+如果之前已经出现:
+Location: /.codex/state_5.sqlite
+
+重新运行安装脚本即可。新版包装命令会把 HOME 固定回:
+/data/data/com.termux/files/home

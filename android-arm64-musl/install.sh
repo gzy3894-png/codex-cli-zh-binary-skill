@@ -201,6 +201,58 @@ choose_cache_dir() {
   printf '%s\n' "$HOME/.cache/codex-zh"
 }
 
+shell_quote() {
+  printf "'"
+  printf '%s' "$1" | sed "s/'/'\\\\''/g"
+  printf "'"
+}
+
+create_codex_wrapper() {
+  dest="$1"
+  binary="$2"
+  runtime_prefix="$3"
+  runtime_home="$4"
+
+  prefix_q="$(shell_quote "$runtime_prefix")"
+  binary_q="$(shell_quote "$binary")"
+  home_q="$(shell_quote "$runtime_home")"
+
+  cat > "$dest" <<EOF
+#!/usr/bin/env sh
+prefix_dir=$prefix_q
+binary_path=$binary_q
+default_home=$home_q
+
+if [ -z "\${PREFIX:-}" ]; then
+  export PREFIX="\$prefix_dir"
+fi
+
+case ":\${PATH:-}:" in
+  *":\$prefix_dir/bin:"*) ;;
+  *) export PATH="\$prefix_dir/bin:\${PATH:-}" ;;
+esac
+
+if [ -z "\${HOME:-}" ] || [ "\$HOME" = "/" ] || [ ! -w "\$HOME" ]; then
+  export HOME="\$default_home"
+fi
+mkdir -p "\$HOME" "\$HOME/.codex" 2>/dev/null || true
+
+case "\${CODEX_HOME:-}" in
+  ""|"/"|"/.codex") export CODEX_HOME="\$HOME/.codex" ;;
+esac
+mkdir -p "\$CODEX_HOME" 2>/dev/null || true
+
+if [ -z "\${TMPDIR:-}" ]; then
+  export TMPDIR="\$prefix_dir/tmp"
+fi
+mkdir -p "\$TMPDIR" 2>/dev/null || true
+
+exec "\$binary_path" "\$@"
+EOF
+
+  chmod 755 "$dest"
+}
+
 case "$(uname -m 2>/dev/null || true)" in
   aarch64|arm64) ;;
   *) warn "这个包是 Android/Linux ARM64 构建；当前架构是 $(uname -m 2>/dev/null || echo unknown)" ;;
@@ -258,31 +310,57 @@ actual_bin_sha="$(sha256_file "$src")"
 
 install_dir="$(choose_install_dir)"
 mkdir -p "$install_dir"
-real_path="$install_dir/codex-zh"
+real_path="$install_dir/codex-zh-bin"
+wrapper_path="$install_dir/codex-zh"
 target_path="$install_dir/$INSTALL_NAME"
 
 cp "$src" "$real_path"
 chmod 755 "$real_path"
 
+if [ -n "${PREFIX:-}" ]; then
+  runtime_prefix="$PREFIX"
+elif [ "$(basename "$install_dir")" = "bin" ]; then
+  runtime_prefix="$(dirname "$install_dir")"
+else
+  runtime_prefix="$install_dir"
+fi
+
+if [ -n "${CODEX_ZH_HOME:-}" ]; then
+  runtime_home="$CODEX_ZH_HOME"
+elif [ -n "${PREFIX:-}" ]; then
+  runtime_home="$PREFIX/home"
+elif [ -n "${HOME:-}" ] && [ "$HOME" != "/" ]; then
+  runtime_home="$HOME"
+else
+  runtime_home="$runtime_prefix/home"
+fi
+
+create_codex_wrapper "$wrapper_path" "$real_path" "$runtime_prefix" "$runtime_home"
+
 if [ "$INSTALL_NAME" != "codex-zh" ]; then
   if [ -e "$target_path" ] || [ -L "$target_path" ]; then
     current_link="$(readlink "$target_path" 2>/dev/null || true)"
-    if [ "$current_link" != "$real_path" ]; then
+    if [ "$current_link" != "$wrapper_path" ]; then
       backup="$target_path.bak.$(date +%Y%m%d%H%M%S)"
       info "备份已有命令 $target_path 到 $backup"
       mv "$target_path" "$backup"
     fi
   fi
-  ln -sf "$real_path" "$target_path" 2>/dev/null || cp "$real_path" "$target_path"
+  ln -sf "$wrapper_path" "$target_path" 2>/dev/null || cp "$wrapper_path" "$target_path"
 fi
 
 installed_sha="$(sha256_file "$real_path")"
 [ "$installed_sha" = "$BIN_SHA256" ] || die "已安装二进制 sha256 不匹配: $installed_sha"
 
-info "已安装: $real_path"
+info "已安装二进制: $real_path"
+info "已安装包装命令: $wrapper_path"
 if [ "$INSTALL_NAME" != "codex-zh" ]; then
   info "命令: $target_path"
 fi
+case ":${PATH:-}:" in
+  *":$install_dir:"*) ;;
+  *) warn "当前 PATH 不包含 $install_dir；如果提示 codex not found，先运行: export PATH=\"$install_dir:\$PATH\"" ;;
+esac
 
 if [ "$SKIP_RUN" = "1" ]; then
   info "跳过运行检查，因为 CODEX_ZH_SKIP_RUN=1"

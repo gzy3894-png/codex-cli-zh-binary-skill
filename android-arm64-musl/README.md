@@ -58,8 +58,18 @@ wget -O- https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill
 - 安装 Codex 运行和常见工作环境依赖，默认包含 Python/Node.js/native build 工具
 - 下载本目录的 `codex-0.142.4-zh-aarch64-unknown-linux-musl.tar.gz`
 - 校验压缩包和二进制 SHA256
-- 安装到 `$PREFIX/bin/codex-zh`，并把 `codex` 指向它
+- 安装二进制到 `$PREFIX/bin/codex-zh-bin`
+- 安装包装命令到 `$PREFIX/bin/codex-zh`，并把 `codex` 指向它
+- 包装命令会自动修正 `HOME`、`CODEX_HOME`、`TMPDIR` 和 `PATH`，避免 root/su shell 下跑到 `/.codex`
 - 运行 `codex --version` 做安装后检查
+
+如果你是在 `su` 或 Android root shell 里运行，提示 `codex: inaccessible or not found`，先执行：
+
+```sh
+export PATH="/data/data/com.termux/files/usr/bin:$PATH"
+```
+
+如果之前已经出现 `Location: /.codex/state_5.sqlite`，重新运行安装命令即可。新版 `codex` 包装命令会把状态目录固定回 Termux home。
 
 ## 可选环境变量
 
@@ -68,6 +78,7 @@ CODEX_ZH_SKIP_DEPS=1 sh install.sh
 CODEX_ZH_SKIP_RUN=1 sh install.sh
 CODEX_ZH_DEPS_PROFILE=minimal sh install.sh
 CODEX_ZH_CACHE_DIR="$HOME/.cache/codex-zh" sh install.sh
+CODEX_ZH_HOME="/data/data/com.termux/files/home" sh install.sh
 CODEX_ZH_INSTALL_NAME=codex-zh sh install.sh
 CODEX_ZH_INSTALL_DIR="$HOME/.local/bin" sh install.sh
 ```

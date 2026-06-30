@@ -53,6 +53,14 @@ DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpk
 
 没有 `pkg`、`curl`、`wget` 的纯 Android shell 不能远程一键安装；需要先手动提供下载器或本地复制安装文件。脚本会自动安装终端依赖、下载汉化版 ARM64 musl 二进制、校验 SHA256，并把 `codex` 命令指向 `codex-zh`。
 
+如果在 `su` 或 Android root shell 里提示 `codex: inaccessible or not found`，先运行：
+
+```sh
+export PATH="/data/data/com.termux/files/usr/bin:$PATH"
+```
+
+如果看到 `Location: /.codex/state_5.sqlite`，重新运行安装脚本。新版脚本会安装 `codex` 包装命令，自动把 `HOME`/`CODEX_HOME` 修回 Termux home。
+
 ## 编译技能分支
 
 源码编译技能在 `compile-skill` 分支：
