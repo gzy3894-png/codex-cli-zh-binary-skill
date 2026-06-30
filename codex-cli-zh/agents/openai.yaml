@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex CLI 源码汉化"
+  short_description: "源码汉化、编译并验证 Codex CLI 中文版"
+  default_prompt: "使用 $codex-cli-zh 从源码汉化并编译 Codex CLI 中文版。"

@@ -1,0 +1,4200 @@
+{
+  "version": 1,
+  "description": "Phase 1 source-level Simplified Chinese translations for hard-coded Codex CLI/TUI prompts outside slash-command descriptions.",
+  "targets": [
+    {
+      "path": "codex-rs/tui/src/bottom_pane/approval_overlay.rs",
+      "replacements": [
+        {
+          "from": "Would you like to run the following command?",
+          "to": "是否运行以下命令？"
+        },
+        {
+          "from": "Do you want to approve network access to \\\"{}\\\"?",
+          "to": "是否批准访问网络主机 “{}”？"
+        },
+        {
+          "from": "Would you like to grant these permissions?",
+          "to": "是否授予这些权限？"
+        },
+        {
+          "from": "Would you like to make the following edits?",
+          "to": "是否应用以下编辑？"
+        },
+        {
+          "from": "{server_name} needs your approval.",
+          "to": "{server_name} 需要你的批准。"
+        },
+        {
+          "from": "Yes, just this once",
+          "to": "是，仅本次"
+        },
+        {
+          "from": "Yes, proceed",
+          "to": "是，继续"
+        },
+        {
+          "from": "Yes, and don't ask again for commands that start with `{rendered_prefix}`",
+          "to": "是，并且本会话中不再询问以 `{rendered_prefix}` 开头的命令"
+        },
+        {
+          "from": "Yes, and allow this host for this conversation",
+          "to": "是，本次对话允许此主机"
+        },
+        {
+          "from": "Yes, and allow these permissions for this session",
+          "to": "是，本会话允许这些权限"
+        },
+        {
+          "from": "Yes, and don't ask again for this command in this session",
+          "to": "是，本会话不再询问此命令"
+        },
+        {
+          "from": "Yes, and allow this host in the future",
+          "to": "是，以后允许此主机"
+        },
+        {
+          "from": "No, and block this host in the future",
+          "to": "否，以后阻止此主机"
+        },
+        {
+          "from": "No, continue without running it",
+          "to": "否，不运行并继续"
+        },
+        {
+          "from": "No, and tell Codex what to do differently",
+          "to": "否，并告诉 Codex 如何调整"
+        },
+        {
+          "from": "Yes, and don't ask again for these files",
+          "to": "是，本会话不再询问这些文件"
+        },
+        {
+          "from": "Yes, grant these permissions for this turn",
+          "to": "是，为本轮授予这些权限"
+        },
+        {
+          "from": "Yes, grant for this turn with strict auto review",
+          "to": "是，本轮授予并启用严格自动审查"
+        },
+        {
+          "from": "Yes, grant these permissions for this session",
+          "to": "是，为本会话授予这些权限"
+        },
+        {
+          "from": "No, continue without permissions",
+          "to": "否，不授予权限并继续"
+        },
+        {
+          "from": "Yes, provide the requested info",
+          "to": "是，提供请求的信息"
+        },
+        {
+          "from": "No, but continue without it",
+          "to": "否，但不提供并继续"
+        },
+        {
+          "from": "Cancel this request",
+          "to": "取消此请求"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/bottom_pane/mcp_server_elicitation.rs",
+      "replacements": [
+        {
+          "from": "Run the tool and continue.",
+          "to": "运行工具并继续。"
+        },
+        {
+          "from": "Allow this request and continue.",
+          "to": "允许此请求并继续。"
+        },
+        {
+          "from": "Allow",
+          "to": "允许"
+        },
+        {
+          "from": "Run the tool and remember this choice for this session.",
+          "to": "运行工具，并在本会话记住此选择。"
+        },
+        {
+          "from": "Allow this request and remember this choice for this session.",
+          "to": "允许此请求，并在本会话记住此选择。"
+        },
+        {
+          "from": "Allow for this session",
+          "to": "本会话允许"
+        },
+        {
+          "from": "Run the tool and remember this choice for future tool calls.",
+          "to": "运行工具，并为以后的工具调用记住此选择。"
+        },
+        {
+          "from": "Allow this request and remember this choice for future requests.",
+          "to": "允许此请求，并为以后的请求记住此选择。"
+        },
+        {
+          "from": "Always allow",
+          "to": "始终允许"
+        },
+        {
+          "from": "Cancel",
+          "to": "取消"
+        },
+        {
+          "from": "Cancel this tool call",
+          "to": "取消此工具调用"
+        },
+        {
+          "from": "Deny",
+          "to": "拒绝"
+        },
+        {
+          "from": "Decline this request and continue.",
+          "to": "拒绝此请求并继续。"
+        },
+        {
+          "from": "Cancel this request",
+          "to": "取消此请求"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/onboarding/auth.rs",
+      "replacements": [
+        {
+          "from": "Sign in with ChatGPT to use Codex as part of your paid plan",
+          "to": "使用 ChatGPT 登录，通过你的付费计划使用 Codex"
+        },
+        {
+          "from": "or connect an API key for usage-based billing",
+          "to": "或连接 API key，按用量计费"
+        },
+        {
+          "from": "ChatGPT login is disabled",
+          "to": "ChatGPT 登录已禁用"
+        },
+        {
+          "from": "Usage included with Plus, Pro, Business, and Enterprise plans",
+          "to": "Plus、Pro、Business 和 Enterprise 计划已包含用量"
+        },
+        {
+          "from": "Sign in from another device with a one-time code",
+          "to": "使用一次性代码从另一台设备登录"
+        },
+        {
+          "from": "Sign in with ChatGPT",
+          "to": "使用 ChatGPT 登录"
+        },
+        {
+          "from": "Sign in with Device Code",
+          "to": "使用设备代码登录"
+        },
+        {
+          "from": "Provide your own API key",
+          "to": "提供你自己的 API key"
+        },
+        {
+          "from": "Pay for what you use",
+          "to": "按实际使用量付费"
+        },
+        {
+          "from": "  API key login is disabled by this workspace. Sign in with ChatGPT to continue.",
+          "to": "  此工作区已禁用 API key 登录。请使用 ChatGPT 登录继续。"
+        },
+        {
+          "from": " to continue",
+          "to": " 继续"
+        },
+        {
+          "from": "✓ API key configured",
+          "to": "✓ API key 已配置"
+        },
+        {
+          "from": "  Codex will use usage-based billing with your API key.",
+          "to": "  Codex 将使用你的 API key 按量计费。"
+        },
+        {
+          "from": "Use your own OpenAI API key for usage-based billing",
+          "to": "使用你自己的 OpenAI API key 按量计费"
+        },
+        {
+          "from": "  Paste or type your API key below. It will be stored locally in auth.json.",
+          "to": "  在下方粘贴或输入 API key。它会保存在本地 auth.json 中。"
+        },
+        {
+          "from": "  Detected OPENAI_API_KEY environment variable.",
+          "to": "  检测到 OPENAI_API_KEY 环境变量。"
+        },
+        {
+          "from": "  Paste a different key if you prefer to use another account.",
+          "to": "  如果想使用其他账号，请粘贴另一个 key。"
+        },
+        {
+          "from": "Paste or type your API key",
+          "to": "粘贴或输入你的 API key"
+        },
+        {
+          "from": " to save",
+          "to": " 保存"
+        },
+        {
+          "from": " to go back",
+          "to": " 返回"
+        },
+        {
+          "from": "API key cannot be empty",
+          "to": "API key 不能为空"
+        },
+        {
+          "from": "Unexpected account/login/start response: {other:?}",
+          "to": "意外的 account/login/start 响应：{other:?}"
+        },
+        {
+          "from": "Failed to save API key: {err}",
+          "to": "保存 API key 失败：{err}"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/bottom_pane/app_link_view.rs",
+      "replacements": [
+        {
+          "from": "Open sign-in URL",
+          "to": "打开登录 URL"
+        },
+        {
+          "from": "Back",
+          "to": "返回"
+        },
+        {
+          "from": "I already signed in",
+          "to": "我已登录"
+        },
+        {
+          "from": "Open link",
+          "to": "打开链接"
+        },
+        {
+          "from": "I finished",
+          "to": "我已完成"
+        },
+        {
+          "from": "Manage on ChatGPT",
+          "to": "在 ChatGPT 中管理"
+        },
+        {
+          "from": "Disable app",
+          "to": "停用应用"
+        },
+        {
+          "from": "Enable app",
+          "to": "启用应用"
+        },
+        {
+          "from": "Install on ChatGPT",
+          "to": "在 ChatGPT 中安装"
+        },
+        {
+          "from": "I already Installed it",
+          "to": "我已安装"
+        },
+        {
+          "from": "Finish in Browser",
+          "to": "在浏览器中完成"
+        },
+        {
+          "from": "Finish App Setup",
+          "to": "完成应用设置"
+        },
+        {
+          "from": "Sign in to the app on ChatGPT in the browser window that just opened.",
+          "to": "请在刚打开的浏览器窗口中，在 ChatGPT 上登录该应用。"
+        },
+        {
+          "from": "Complete authentication in the browser window that just opened.",
+          "to": "请在刚打开的浏览器窗口中完成身份验证。"
+        },
+        {
+          "from": "Then return here and select \\\"I already signed in\\\".",
+          "to": "然后回到这里并选择“我已登录”。"
+        },
+        {
+          "from": "Complete the requested action in the browser window that just opened.",
+          "to": "请在刚打开的浏览器窗口中完成请求的操作。"
+        },
+        {
+          "from": "Then return here and select \\\"I finished\\\".",
+          "to": "然后回到这里并选择“我已完成”。"
+        },
+        {
+          "from": "Complete app setup on ChatGPT in the browser window that just opened.",
+          "to": "请在刚打开的浏览器窗口中，在 ChatGPT 上完成应用设置。"
+        },
+        {
+          "from": "Sign in there if needed, then return here and select \\\"I already Installed it\\\".",
+          "to": "如有需要请先在那里登录，然后回到这里并选择“我已安装”。"
+        },
+        {
+          "from": "Sign-in URL:",
+          "to": "登录 URL："
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/onboarding/trust_directory.rs",
+      "replacements": [
+        {
+          "from": "You are in ",
+          "to": "当前位置："
+        },
+        {
+          "from": "Note: You’re in a subdirectory of a Git project. Trusting will apply to the repository root: {}",
+          "to": "注意：你当前位于 Git 项目的子目录。信任操作将应用到仓库根目录：{}"
+        },
+        {
+          "from": "Do you trust the contents of this directory? Working with untrusted \\\n                 contents comes with higher risk of prompt injection. Trusting the \\\n                 directory allows project-local config, hooks, and exec policies to load.",
+          "to": "你信任此目录中的内容吗？处理不受信任的内容会带来更高的提示注入风险。信任此目录后，将允许加载项目本地配置、hooks 和执行策略。"
+        },
+        {
+          "from": "Yes, continue",
+          "to": "是，继续"
+        },
+        {
+          "from": "No, quit",
+          "to": "否，退出"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/startup_hooks_review.rs",
+      "replacements": [
+        {
+          "from": "Hooks can run outside the sandbox after you trust them.",
+          "to": "信任 hooks 后，它们可以在沙盒外运行。"
+        },
+        {
+          "from": "Trusting hooks...",
+          "to": "正在信任 hooks..."
+        },
+        {
+          "from": "Review hooks",
+          "to": "查看 hooks"
+        },
+        {
+          "from": "Trust all and continue",
+          "to": "全部信任并继续"
+        },
+        {
+          "from": "Continue without trusting (hooks won't run)",
+          "to": "不信任并继续（hooks 不会运行）"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/status/card.rs",
+      "replacements": [
+        {
+          "from": "Read Only with network access",
+          "to": "只读（允许网络）"
+        },
+        {
+          "from": "Read Only",
+          "to": "只读"
+        },
+        {
+          "from": "Read Only ({approval})",
+          "to": "只读 ({approval})"
+        },
+        {
+          "from": "Workspace with network access{} ({approval})",
+          "to": "工作区（允许网络）{} ({approval})"
+        },
+        {
+          "from": "Workspace{} ({approval})",
+          "to": "工作区{} ({approval})"
+        },
+        {
+          "from": "Full Access",
+          "to": "完全访问"
+        },
+        {
+          "from": "No Sandbox ({approval})",
+          "to": "无沙盒 ({approval})"
+        },
+        {
+          "from": "Custom ({sandbox}, {approval})",
+          "to": "自定义 ({sandbox}, {approval})"
+        },
+        {
+          "from": "Profile {id} ({sandbox}, {approval})",
+          "to": "配置 {id} ({sandbox}, {approval})"
+        },
+        {
+          "from": "Approve for me",
+          "to": "替我批准"
+        },
+        {
+          "from": "Ask for approval",
+          "to": "请求批准"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget.rs",
+      "replacements": [
+        {
+          "from": "Prefix a command with ! to run it locally",
+          "to": "在命令前加 ! 可在本地运行"
+        },
+        {
+          "from": "Example: !ls",
+          "to": "示例：!ls"
+        },
+        {
+          "from": "Ask for approval",
+          "to": "请求批准"
+        },
+        {
+          "from": "Approve for me",
+          "to": "替我批准"
+        },
+        {
+          "from": "Only ask for actions detected as potentially unsafe.",
+          "to": "仅在检测到可能不安全的操作时询问。"
+        },
+        {
+          "from": "loading",
+          "to": "加载中"
+        },
+        {
+          "from": "Enable subagents?",
+          "to": "启用子代理？"
+        },
+        {
+          "from": "Yes, enable",
+          "to": "是，启用"
+        },
+        {
+          "from": "Not now",
+          "to": "暂不启用"
+        },
+        {
+          "from": "Subagents will be enabled in the next session.",
+          "to": "子代理将在下个会话启用。"
+        },
+        {
+          "from": "Enable memories?",
+          "to": "启用记忆？"
+        },
+        {
+          "from": "Memories will be enabled in the next session.",
+          "to": "记忆将在下个会话启用。"
+        },
+        {
+          "from": "Apply reasoning change",
+          "to": "应用推理设置变更"
+        },
+        {
+          "from": "Apply to Plan mode override",
+          "to": "仅应用到 Plan 模式覆盖项"
+        },
+        {
+          "from": "Apply to global default and Plan mode override",
+          "to": "应用到全局默认值和 Plan 模式覆盖项"
+        },
+        {
+          "from": "Not available in TUI yet.",
+          "to": "TUI 中暂不可用。"
+        },
+        {
+          "from": "Explain this codebase",
+          "to": "解释这个代码库"
+        },
+        {
+          "from": "Summarize recent commits",
+          "to": "总结最近的提交"
+        },
+        {
+          "from": "Implement {feature}",
+          "to": "实现 {feature}"
+        },
+        {
+          "from": "Find and fix a bug in @filename",
+          "to": "查找并修复 @filename 中的 bug"
+        },
+        {
+          "from": "Write tests for @filename",
+          "to": "为 @filename 编写测试"
+        },
+        {
+          "from": "Improve documentation in @filename",
+          "to": "改进 @filename 中的文档"
+        },
+        {
+          "from": "Run /review on my current changes",
+          "to": "对我当前的改动运行 /review"
+        },
+        {
+          "from": "Use /skills to list available skills",
+          "to": "使用 /skills 列出可用技能"
+        },
+        {
+          "from": "Check recently modified functions for compatibility",
+          "to": "检查最近修改的函数是否兼容"
+        },
+        {
+          "from": "How many files have been modified?",
+          "to": "有多少文件已被修改？"
+        },
+        {
+          "from": "Will this algorithm scale well?",
+          "to": "这个算法的扩展性好吗？"
+        },
+        {
+          "from": "Raw output mode on: transcript text is shown for clean terminal selection.",
+          "to": "原始输出模式已开启：会话文本将以便于终端选择的方式显示。"
+        },
+        {
+          "from": "Raw output mode off: rich transcript rendering restored.",
+          "to": "原始输出模式已关闭：已恢复富文本会话渲染。"
+        },
+        {
+          "from": "Vim mode enabled.",
+          "to": "Vim 模式已启用。"
+        },
+        {
+          "from": "Vim mode disabled.",
+          "to": "Vim 模式已关闭。"
+        },
+        {
+          "from": "Session renamed to ",
+          "to": "会话已重命名为 "
+        },
+        {
+          "from": ". To resume this session run ",
+          "to": "。要恢复此会话，请运行 "
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/app/config_persistence.rs",
+      "replacements": [
+        {
+          "from": "Failed to set permission profile `{profile_id}`: {err}",
+          "to": "无法设置权限配置 `{profile_id}`：{err}"
+        },
+        {
+          "from": "Permissions updated to {display_label}",
+          "to": "权限已更新为 {display_label}"
+        },
+        {
+          "from": "Approve for me",
+          "to": "替我批准"
+        },
+        {
+          "from": "Ask for approval",
+          "to": "请求批准"
+        },
+        {
+          "from": "Failed to enable Approve for me",
+          "to": "启用“替我批准”失败"
+        },
+        {
+          "from": "Failed to enable Approve for me: {err}",
+          "to": "启用“替我批准”失败：{err}"
+        },
+        {
+          "from": "Failed to refresh overridden Approve for me settings",
+          "to": "刷新覆盖后的“替我批准”设置失败"
+        },
+        {
+          "from": "Failed to refresh overridden Approve for me settings: {err}",
+          "to": "刷新覆盖后的“替我批准”设置失败：{err}"
+        },
+        {
+          "from": "Permissions updated to {label}",
+          "to": "权限已更新为 {label}"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/status_surfaces.rs",
+      "replacements": [
+        {
+          "from": "Read Only",
+          "to": "只读"
+        },
+        {
+          "from": "Workspace",
+          "to": "工作区"
+        },
+        {
+          "from": "Full Access",
+          "to": "完全访问"
+        },
+        {
+          "from": "Custom permissions",
+          "to": "自定义权限"
+        },
+        {
+          "from": "Approve for me",
+          "to": "替我批准"
+        },
+        {
+          "from": "Ask for approval",
+          "to": "请求批准"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/windows_sandbox_prompts.rs",
+      "replacements": [
+        {
+          "from": "Full Access mode",
+          "to": "完全访问模式"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/resume_picker.rs",
+      "replacements": [
+        {
+          "from": "thread {}",
+          "to": "会话 {}"
+        },
+        {
+          "from": "Resume a previous session",
+          "to": "恢复以前的会话"
+        },
+        {
+          "from": "Fork a previous session",
+          "to": "派生以前的会话"
+        },
+        {
+          "from": "resume",
+          "to": "恢复"
+        },
+        {
+          "from": "fork",
+          "to": "派生"
+        },
+        {
+          "from": "Created",
+          "to": "创建时间"
+        },
+        {
+          "from": "Updated",
+          "to": "更新时间"
+        },
+        {
+          "from": "No transcript available for this session",
+          "to": "此会话没有可用记录"
+        },
+        {
+          "from": "Failed to read session metadata from {}",
+          "to": "无法从 {} 读取会话元数据"
+        },
+        {
+          "from": "Failed to read session metadata from selected session",
+          "to": "无法从所选会话读取会话元数据"
+        },
+        {
+          "from": "Could not load transcript preview",
+          "to": "无法加载会话预览"
+        },
+        {
+          "from": "Failed to save view mode: {err}",
+          "to": "保存视图模式失败：{err}"
+        },
+        {
+          "from": "(no message yet)",
+          "to": "（还没有消息）"
+        },
+        {
+          "from": "Type to search",
+          "to": "输入以搜索"
+        },
+        {
+          "from": "Search: {}",
+          "to": "搜索：{}"
+        },
+        {
+          "from": "Sort:",
+          "to": "排序："
+        },
+        {
+          "from": "Sort: ",
+          "to": "排序："
+        },
+        {
+          "from": "Filter:",
+          "to": "筛选："
+        },
+        {
+          "from": "Filter: ",
+          "to": "筛选："
+        },
+        {
+          "from": "Cwd",
+          "to": "当前目录"
+        },
+        {
+          "from": "All",
+          "to": "全部"
+        },
+        {
+          "from": "transcript",
+          "to": "记录"
+        },
+        {
+          "from": "quit",
+          "to": "退出"
+        },
+        {
+          "from": "start new",
+          "to": "新建"
+        },
+        {
+          "from": "new",
+          "to": "新建"
+        },
+        {
+          "from": "exit",
+          "to": "退出"
+        },
+        {
+          "from": "clear search",
+          "to": "清除搜索"
+        },
+        {
+          "from": "clear",
+          "to": "清除"
+        },
+        {
+          "from": "dense view",
+          "to": "紧凑视图"
+        },
+        {
+          "from": "comfortable view",
+          "to": "舒适视图"
+        },
+        {
+          "from": "dense",
+          "to": "紧凑"
+        },
+        {
+          "from": "comfy",
+          "to": "舒适"
+        },
+        {
+          "from": "focus sort/filter",
+          "to": "聚焦排序/筛选"
+        },
+        {
+          "from": "focus",
+          "to": "聚焦"
+        },
+        {
+          "from": "change option",
+          "to": "切换选项"
+        },
+        {
+          "from": "option",
+          "to": "选项"
+        },
+        {
+          "from": "preview",
+          "to": "预览"
+        },
+        {
+          "from": "expand",
+          "to": "展开"
+        },
+        {
+          "from": "exp",
+          "to": "展开"
+        },
+        {
+          "from": "browse",
+          "to": "浏览"
+        },
+        {
+          "from": "Loading transcript…",
+          "to": "正在加载记录…"
+        },
+        {
+          "from": "↑ more",
+          "to": "↑ 更多"
+        },
+        {
+          "from": "Loading older sessions…",
+          "to": "正在加载更早的会话…"
+        },
+        {
+          "from": "↓ loading more",
+          "to": "↓ 正在加载更多"
+        },
+        {
+          "from": "↓ more",
+          "to": "↓ 更多"
+        },
+        {
+          "from": "no branch",
+          "to": "无分支"
+        },
+        {
+          "from": "no cwd",
+          "to": "无当前目录"
+        },
+        {
+          "from": "Loading recent transcript...",
+          "to": "正在加载最近记录..."
+        },
+        {
+          "from": "Session:",
+          "to": "会话："
+        },
+        {
+          "from": "Created:",
+          "to": "创建："
+        },
+        {
+          "from": "Updated:",
+          "to": "更新："
+        },
+        {
+          "from": "Directory:",
+          "to": "目录："
+        },
+        {
+          "from": "Branch:",
+          "to": "分支："
+        },
+        {
+          "from": "Conversation:",
+          "to": "对话："
+        },
+        {
+          "from": "No transcript preview available",
+          "to": "没有可用的记录预览"
+        },
+        {
+          "from": "now",
+          "to": "刚刚"
+        },
+        {
+          "from": "{seconds}s ago",
+          "to": "{seconds}秒前"
+        },
+        {
+          "from": "{minutes}m ago",
+          "to": "{minutes}分钟前"
+        },
+        {
+          "from": "{hours}h ago",
+          "to": "{hours}小时前"
+        },
+        {
+          "from": "{days}d ago",
+          "to": "{days}天前"
+        },
+        {
+          "from": "second",
+          "to": "秒"
+        },
+        {
+          "from": "minute",
+          "to": "分钟"
+        },
+        {
+          "from": "hour",
+          "to": "小时"
+        },
+        {
+          "from": "day",
+          "to": "天"
+        },
+        {
+          "from": "1 {unit} ago",
+          "to": "1 {unit}前"
+        },
+        {
+          "from": "{value} {unit}s ago",
+          "to": "{value} {unit}前"
+        },
+        {
+          "from": "Searching…",
+          "to": "正在搜索…"
+        },
+        {
+          "from": "Search scanned first {} sessions; more may exist",
+          "to": "已搜索前 {} 个会话；可能还有更多"
+        },
+        {
+          "from": "No results for your search",
+          "to": "没有匹配的搜索结果"
+        },
+        {
+          "from": "Loading sessions…",
+          "to": "正在加载会话…"
+        },
+        {
+          "from": "No sessions yet",
+          "to": "还没有会话"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/model_popups.rs",
+      "replacements": [
+        {
+          "from": "Model selection is disabled until startup completes.",
+          "to": "启动完成前无法选择模型。"
+        },
+        {
+          "from": "Models are being updated; please try /model again in a moment.",
+          "to": "模型列表正在更新，请稍后再试 /model。"
+        },
+        {
+          "from": "Warning: OpenAI base URL is overridden to {base_url}. Selecting models may not be supported or work properly.",
+          "to": "警告：OpenAI base URL 已覆盖为 {base_url}。模型选择可能不受支持或无法正常工作。"
+        },
+        {
+          "from": "Choose a specific model and reasoning level (current: {current_label})",
+          "to": "选择具体模型和推理等级（当前：{current_label}）"
+        },
+        {
+          "from": "All models",
+          "to": "全部模型"
+        },
+        {
+          "from": "Select Model",
+          "to": "选择模型"
+        },
+        {
+          "from": "Pick a quick auto mode or browse all models.",
+          "to": "选择快速自动模式，或浏览全部模型。"
+        },
+        {
+          "from": "No additional models are available right now.",
+          "to": "当前没有其他可用模型。"
+        },
+        {
+          "from": "Select Model and Effort",
+          "to": "选择模型和推理等级"
+        },
+        {
+          "from": "Access legacy models by running codex -m <model_name> or in your config.toml",
+          "to": "如需使用旧模型，请运行 codex -m <model_name> 或在 config.toml 中配置"
+        },
+        {
+          "from": "no reasoning",
+          "to": "不使用推理"
+        },
+        {
+          "from": "{} reasoning",
+          "to": "{} 推理"
+        },
+        {
+          "from": "the selected reasoning",
+          "to": "所选推理等级"
+        },
+        {
+          "from": "Always use {reasoning_phrase} in Plan mode.",
+          "to": "Plan 模式始终使用 {reasoning_phrase}。"
+        },
+        {
+          "from": "user-chosen Plan override ({})",
+          "to": "用户选择的 Plan 覆盖项（{}）"
+        },
+        {
+          "from": "built-in Plan default ({})",
+          "to": "内置 Plan 默认值（{}）"
+        },
+        {
+          "from": "built-in Plan default (no reasoning)",
+          "to": "内置 Plan 默认值（不使用推理）"
+        },
+        {
+          "from": "built-in Plan default",
+          "to": "内置 Plan 默认值"
+        },
+        {
+          "from": "Set the global default reasoning level and the Plan mode override. This replaces the current {plan_reasoning_source}.",
+          "to": "设置全局默认推理等级和 Plan 模式覆盖项。这会替换当前的 {plan_reasoning_source}。"
+        },
+        {
+          "from": "Choose where to apply {reasoning_phrase}.",
+          "to": "选择将 {reasoning_phrase} 应用到哪里。"
+        },
+        {
+          "from": " (default)",
+          "to": "（默认）"
+        },
+        {
+          "from": "⚠ {effort_label} reasoning effort can quickly consume Plus plan rate limits.",
+          "to": "⚠ {effort_label} 推理等级可能很快消耗 Plus 计划速率额度。"
+        },
+        {
+          "from": "Select Reasoning Level for {model_slug}",
+          "to": "为 {model_slug} 选择推理等级"
+        },
+        {
+          "from": "None",
+          "to": "无"
+        },
+        {
+          "from": "Minimal",
+          "to": "极简"
+        },
+        {
+          "from": "Low",
+          "to": "低"
+        },
+        {
+          "from": "Medium",
+          "to": "中"
+        },
+        {
+          "from": "High",
+          "to": "高"
+        },
+        {
+          "from": "Extra high",
+          "to": "极高"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/history_cell/session.rs",
+      "replacements": [
+        {
+          "from": "**Tip:** {}",
+          "to": "**提示：** {}"
+        },
+        {
+          "from": "Tip: {}",
+          "to": "提示：{}"
+        },
+        {
+          "from": "  To get started, describe a task or try one of these commands:",
+          "to": "  要开始使用，请描述任务，或试试以下命令："
+        },
+        {
+          "from": " - create an AGENTS.md file with instructions for Codex",
+          "to": " - 创建包含 Codex 指令的 AGENTS.md 文件"
+        },
+        {
+          "from": " - show current session configuration",
+          "to": " - 显示当前会话配置"
+        },
+        {
+          "from": " - choose what Codex is allowed to do",
+          "to": " - 选择 Codex 被允许执行的操作"
+        },
+        {
+          "from": " - choose what model and reasoning effort to use",
+          "to": " - 选择使用的模型和推理等级"
+        },
+        {
+          "from": " - review any changes and find issues",
+          "to": " - 审查当前改动并发现问题"
+        },
+        {
+          "from": "model changed:",
+          "to": "模型已变更："
+        },
+        {
+          "from": "requested: {requested_model}",
+          "to": "请求模型：{requested_model}"
+        },
+        {
+          "from": "used: {}",
+          "to": "实际使用：{}"
+        },
+        {
+          "from": " to change",
+          "to": " 可更改"
+        },
+        {
+          "from": "directory:",
+          "to": "目录："
+        },
+        {
+          "from": "permissions:",
+          "to": "权限："
+        },
+        {
+          "from": "model:",
+          "to": "模型："
+        },
+        {
+          "from": "fast",
+          "to": "快速"
+        },
+        {
+          "from": "YOLO mode",
+          "to": "YOLO 模式"
+        },
+        {
+          "from": "OpenAI Codex (v{})",
+          "to": "OpenAI Codex（v{}）"
+        },
+        {
+          "from": "model: {}{}",
+          "to": "模型：{}{}"
+        },
+        {
+          "from": "directory: {}",
+          "to": "目录：{}"
+        },
+        {
+          "from": "permissions: YOLO mode",
+          "to": "权限：YOLO 模式"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/bottom_pane/status_line_setup.rs",
+      "replacements": [
+        {
+          "from": "Current model name",
+          "to": "当前模型名称"
+        },
+        {
+          "from": "Current model name with reasoning level",
+          "to": "当前模型名称和推理等级"
+        },
+        {
+          "from": "Current reasoning level",
+          "to": "当前推理等级"
+        },
+        {
+          "from": "Current working directory",
+          "to": "当前工作目录"
+        },
+        {
+          "from": "Project name (omitted when unavailable)",
+          "to": "项目名称（不可用时省略）"
+        },
+        {
+          "from": "Current Git branch (omitted when unavailable)",
+          "to": "当前 Git 分支（不可用时省略）"
+        },
+        {
+          "from": "Open pull request number for the current branch (omitted when unavailable)",
+          "to": "当前分支的开放 PR 编号（不可用时省略）"
+        },
+        {
+          "from": "Committed branch changes against the default branch (omitted when unavailable)",
+          "to": "相对默认分支的已提交变更（不可用时省略）"
+        },
+        {
+          "from": "Compact session run-state text (Ready, Working, Thinking)",
+          "to": "紧凑会话运行状态文本（就绪、工作中、思考中）"
+        },
+        {
+          "from": "Active permission profile or sandbox mode",
+          "to": "当前权限配置或沙盒模式"
+        },
+        {
+          "from": "Active command approval mode",
+          "to": "当前命令批准模式"
+        },
+        {
+          "from": "Percentage of context window remaining (omitted when unknown)",
+          "to": "上下文窗口剩余百分比（未知时省略）"
+        },
+        {
+          "from": "Percentage of context window used (omitted when unknown)",
+          "to": "上下文窗口已用百分比（未知时省略）"
+        },
+        {
+          "from": "Remaining usage on the primary usage limit (omitted when unavailable)",
+          "to": "主要用量限制的剩余额度（不可用时省略）"
+        },
+        {
+          "from": "Remaining usage on the secondary usage limit (omitted when unavailable)",
+          "to": "次要用量限制的剩余额度（不可用时省略）"
+        },
+        {
+          "from": "Codex application version",
+          "to": "Codex 应用版本"
+        },
+        {
+          "from": "Total context window size in tokens (omitted when unknown)",
+          "to": "上下文窗口总 token 数（未知时省略）"
+        },
+        {
+          "from": "Total tokens used in session (omitted when zero)",
+          "to": "当前会话总 token 用量（为零时省略）"
+        },
+        {
+          "from": "Total input tokens used in session",
+          "to": "当前会话输入 token 总量"
+        },
+        {
+          "from": "Total output tokens used in session",
+          "to": "当前会话输出 token 总量"
+        },
+        {
+          "from": "Current thread identifier (omitted until thread starts)",
+          "to": "当前线程标识符（线程开始前省略）"
+        },
+        {
+          "from": "Whether Fast mode is currently active",
+          "to": "Fast 模式当前是否启用"
+        },
+        {
+          "from": "Whether raw scrollback mode is active",
+          "to": "原始回滚模式是否启用"
+        },
+        {
+          "from": "Current thread title, or thread identifier when unnamed",
+          "to": "当前线程标题；未命名时显示线程标识符"
+        },
+        {
+          "from": "Workspace notification headline (Enterprise workspaces only; omitted when unavailable)",
+          "to": "工作区通知标题（仅企业工作区；不可用时省略）"
+        },
+        {
+          "from": "Latest task progress from update_plan (omitted until available)",
+          "to": "update_plan 的最新任务进度（可用前省略）"
+        },
+        {
+          "from": "Use theme colors",
+          "to": "使用主题颜色"
+        },
+        {
+          "from": "Apply colors from the active /theme",
+          "to": "应用当前 /theme 的颜色"
+        },
+        {
+          "from": "Configure Status Line",
+          "to": "配置状态栏"
+        },
+        {
+          "from": "Select which items to display in the status line.",
+          "to": "选择要在状态栏中显示的项目。"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/bottom_pane/title_setup.rs",
+      "replacements": [
+        {
+          "from": "Codex app name",
+          "to": "Codex 应用名称"
+        },
+        {
+          "from": "Project name (falls back to current directory name)",
+          "to": "项目名称（回退为当前目录名）"
+        },
+        {
+          "from": "Current working directory",
+          "to": "当前工作目录"
+        },
+        {
+          "from": "Spinner while working, action-required message while blocked.",
+          "to": "工作时显示旋转指示，阻塞时显示需要操作的消息。"
+        },
+        {
+          "from": "Compact session run-state text (Ready, Working, Thinking)",
+          "to": "紧凑会话运行状态文本（就绪、工作中、思考中）"
+        },
+        {
+          "from": "Current thread title, or thread identifier when unnamed",
+          "to": "当前线程标题；未命名时显示线程标识符"
+        },
+        {
+          "from": "Current Git branch (omitted when unavailable)",
+          "to": "当前 Git 分支（不可用时省略）"
+        },
+        {
+          "from": "Percentage of context window remaining (omitted when unknown)",
+          "to": "上下文窗口剩余百分比（未知时省略）"
+        },
+        {
+          "from": "Percentage of context window used (omitted when unknown)",
+          "to": "上下文窗口已用百分比（未知时省略）"
+        },
+        {
+          "from": "Remaining usage on the primary usage limit (omitted when unavailable)",
+          "to": "主要用量限制的剩余额度（不可用时省略）"
+        },
+        {
+          "from": "Remaining usage on the secondary usage limit (omitted when unavailable)",
+          "to": "次要用量限制的剩余额度（不可用时省略）"
+        },
+        {
+          "from": "Codex application version",
+          "to": "Codex 应用版本"
+        },
+        {
+          "from": "Total tokens used in session (omitted when zero)",
+          "to": "当前会话总 token 用量（为零时省略）"
+        },
+        {
+          "from": "Total input tokens used in session",
+          "to": "当前会话输入 token 总量"
+        },
+        {
+          "from": "Total output tokens used in session",
+          "to": "会话已使用的输出 token 总量"
+        },
+        {
+          "from": "Current thread identifier (omitted until thread starts)",
+          "to": "当前线程标识符（线程开始前省略）"
+        },
+        {
+          "from": "Whether Fast mode is currently active",
+          "to": "Fast 模式当前是否启用"
+        },
+        {
+          "from": "Current model name",
+          "to": "当前模型名称"
+        },
+        {
+          "from": "Current model name with reasoning level",
+          "to": "当前模型名称和推理等级"
+        },
+        {
+          "from": "Current reasoning level",
+          "to": "当前推理等级"
+        },
+        {
+          "from": "Latest task progress from update_plan (omitted until available)",
+          "to": "update_plan 的最新任务进度（可用前省略）"
+        },
+        {
+          "from": "Configure Terminal Title",
+          "to": "配置终端标题"
+        },
+        {
+          "from": "Select which items to display in the terminal title.",
+          "to": "选择要在终端标题中显示的项目。"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/settings_popups.rs",
+      "replacements": [
+        {
+          "from": "Personality selection is disabled until startup completes.",
+          "to": "启动完成前无法选择个性。"
+        },
+        {
+          "from": "Current model ({current_model}) doesn't support personalities. Try /model to pick a different model.",
+          "to": "当前模型（{current_model}）不支持个性。请尝试 /model 选择其他模型。"
+        },
+        {
+          "from": "Select Personality",
+          "to": "选择个性"
+        },
+        {
+          "from": "Choose a communication style for Codex.",
+          "to": "选择 Codex 的沟通风格。"
+        },
+        {
+          "from": "None",
+          "to": "无"
+        },
+        {
+          "from": "Friendly",
+          "to": "友好"
+        },
+        {
+          "from": "Pragmatic",
+          "to": "务实"
+        },
+        {
+          "from": "No personality instructions.",
+          "to": "不使用个性指令。"
+        },
+        {
+          "from": "Warm, collaborative, and helpful.",
+          "to": "温暖、协作、有帮助。"
+        },
+        {
+          "from": "Concise, task-focused, and direct.",
+          "to": "简洁、聚焦任务、直接。"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/permission_popups.rs",
+      "replacements": [
+        {
+          "from": "The non-admin sandbox protects your files and prevents network access under most circumstances. However, it carries greater risk if prompt injected. To upgrade to the default sandbox, run ",
+          "to": "非管理员沙盒通常会保护你的文件并阻止网络访问。不过，如果发生提示注入，风险会更高。若要升级到默认沙盒，请运行 "
+        },
+        {
+          "from": "Update Model Permissions",
+          "to": "更新模型权限"
+        },
+        {
+          "from": "No recent auto-review denials in this thread.",
+          "to": "本会话最近没有自动审查拒绝。"
+        },
+        {
+          "from": "Denials are recorded after auto-review rejects an action.",
+          "to": "自动审查拒绝某个操作后会记录在这里。"
+        },
+        {
+          "from": "That thread is no longer available.",
+          "to": "该会话不再可用。"
+        },
+        {
+          "from": "Command",
+          "to": "命令"
+        },
+        {
+          "from": "Rationale",
+          "to": "原因"
+        },
+        {
+          "from": "Auto-review did not include a rationale.",
+          "to": "自动审查未提供原因。"
+        },
+        {
+          "from": "Auto-review Denials",
+          "to": "自动审查拒绝记录"
+        },
+        {
+          "from": "Select a denied action to approve.",
+          "to": "选择要批准重试的已拒绝操作。"
+        },
+        {
+          "from": "That auto-review denial is no longer available.",
+          "to": "该自动审查拒绝记录不再可用。"
+        },
+        {
+          "from": "Approval recorded for one retry of the selected auto-review denial.",
+          "to": "已记录批准，将对选中的自动审查拒绝操作重试一次。"
+        },
+        {
+          "from": "The model will see the approval context; the retry still goes through auto-review.",
+          "to": "模型会看到批准上下文；重试仍会经过自动审查。"
+        },
+        {
+          "from": "Permissions updated to {label}",
+          "to": "权限已更新为 {label}"
+        },
+        {
+          "from": "Enable full access?",
+          "to": "启用完全访问？"
+        },
+        {
+          "from": "When Codex runs with full access, it can edit any file on your computer and run commands with network, without your approval. ",
+          "to": "Codex 以完全访问运行时，可以编辑计算机上的任何文件，并在不经你批准的情况下运行联网命令。"
+        },
+        {
+          "from": "Exercise caution when enabling full access. This significantly increases the risk of data loss, leaks, or unexpected behavior.",
+          "to": "启用完全访问请谨慎。这会显著增加数据丢失、泄露或意外行为的风险。"
+        },
+        {
+          "from": "Yes, continue anyway",
+          "to": "是，仍然继续"
+        },
+        {
+          "from": "Apply full access for this session",
+          "to": "为本会话应用完全访问"
+        },
+        {
+          "from": "Yes, and don't ask again",
+          "to": "是，并且不再询问"
+        },
+        {
+          "from": "Enable full access and remember this choice",
+          "to": "启用完全访问并记住此选择"
+        },
+        {
+          "from": "Cancel",
+          "to": "取消"
+        },
+        {
+          "from": "Go back without enabling full access",
+          "to": "返回，不启用完全访问"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/permissions_menu.rs",
+      "replacements": [
+        {
+          "from": "Internal error: missing the 'read-only' approval preset.",
+          "to": "内部错误：缺少 “read-only” 批准预设。"
+        },
+        {
+          "from": "Internal error: missing the 'auto' approval preset.",
+          "to": "内部错误：缺少 “auto” 批准预设。"
+        },
+        {
+          "from": "Internal error: missing the 'full-access' approval preset.",
+          "to": "内部错误：缺少 “full-access” 批准预设。"
+        },
+        {
+          "from": "Configured permission profile.",
+          "to": "已配置的权限配置。"
+        },
+        {
+          "from": "Update Model Permissions",
+          "to": "更新模型权限"
+        },
+        {
+          "from": "Disabled by requirements.",
+          "to": "已被要求限制禁用。"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/utils/approval-presets/src/lib.rs",
+      "replacements": [
+        {
+          "from": "Read Only",
+          "to": "只读"
+        },
+        {
+          "from": "Codex can read files in the current workspace. Approval is required to edit files or access the internet.",
+          "to": "Codex 可以读取当前工作区中的文件。编辑文件或访问互联网需要批准。"
+        },
+        {
+          "from": "Default",
+          "to": "默认"
+        },
+        {
+          "from": "Codex can read and edit files in the current workspace, and run commands. Approval is required to access the internet or edit other files. (Identical to Agent mode)",
+          "to": "Codex 可以读取和编辑当前工作区中的文件，并运行命令。访问互联网或编辑其他文件需要批准。（等同于代理模式）"
+        },
+        {
+          "from": "Full Access",
+          "to": "完全访问"
+        },
+        {
+          "from": "Codex can edit files outside this workspace and access the internet without asking for approval. Exercise caution when using.",
+          "to": "Codex 可以编辑此工作区外的文件，并无需批准即可访问互联网。使用时请谨慎。"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/connectors.rs",
+      "replacements": [
+        {
+          "from": "Apps are disabled.",
+          "to": "应用功能已禁用。"
+        },
+        {
+          "from": "Enable the apps feature to use $ or /apps.",
+          "to": "启用应用功能后才能使用 $ 或 /apps。"
+        },
+        {
+          "from": "No apps available.",
+          "to": "没有可用应用。"
+        },
+        {
+          "from": "Apps",
+          "to": "应用"
+        },
+        {
+          "from": "Loading installed and available apps...",
+          "to": "正在加载已安装和可用应用..."
+        },
+        {
+          "from": "Loading apps...",
+          "to": "正在加载应用..."
+        },
+        {
+          "from": "This updates when the full list is ready.",
+          "to": "完整列表就绪后会自动更新。"
+        },
+        {
+          "from": "Use $ to insert an installed app into your prompt.",
+          "to": "使用 $ 将已安装应用插入提示。"
+        },
+        {
+          "from": "Installed {installed} of {total} available apps.",
+          "to": "已安装 {installed}/{total} 个可用应用。"
+        },
+        {
+          "from": "{status_label}. Press Enter to open the app page to install, manage, or enable/disable this app.",
+          "to": "{status_label}。按 Enter 打开应用页面，以安装、管理、启用或禁用此应用。"
+        },
+        {
+          "from": "{status_label}. Press Enter to open the app page to install this app.",
+          "to": "{status_label}。按 Enter 打开应用页面以安装此应用。"
+        },
+        {
+          "from": "{status_label}. App link unavailable.",
+          "to": "{status_label}。应用链接不可用。"
+        },
+        {
+          "from": "Manage this app in your browser.",
+          "to": "在浏览器中管理此应用。"
+        },
+        {
+          "from": "Install this app in your browser, then reload Codex.",
+          "to": "在浏览器中安装此应用，然后重新加载 Codex。"
+        },
+        {
+          "from": "Type to search apps",
+          "to": "输入以搜索应用"
+        },
+        {
+          "from": "Installed",
+          "to": "已安装"
+        },
+        {
+          "from": "Installed · Disabled",
+          "to": "已安装 · 已禁用"
+        },
+        {
+          "from": "Can be installed",
+          "to": "可安装"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/ide_context.rs",
+      "replacements": [
+        {
+          "from": "IDE context is off.",
+          "to": "IDE 上下文已关闭。"
+        },
+        {
+          "from": "Usage: /ide [on|off|status]",
+          "to": "用法：/ide [on|off|status]"
+        },
+        {
+          "from": "IDE context was skipped for this message.",
+          "to": "本条消息已跳过 IDE 上下文。"
+        },
+        {
+          "from": "IDE context is on.",
+          "to": "IDE 上下文已开启。"
+        },
+        {
+          "from": "Future messages will include your current IDE selection and open tabs.",
+          "to": "后续消息会包含当前 IDE 选区和打开的标签页。"
+        },
+        {
+          "from": "Connected to your IDE.",
+          "to": "已连接到你的 IDE。"
+        },
+        {
+          "from": "IDE context could not be enabled.",
+          "to": "无法启用 IDE 上下文。"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/goal_menu.rs",
+      "replacements": [
+        {
+          "from": "Edit goal",
+          "to": "编辑目标"
+        },
+        {
+          "from": "Type a goal objective and press Enter",
+          "to": "输入目标并按 Enter"
+        },
+        {
+          "from": "Resume paused goal?",
+          "to": "恢复已暂停的目标？"
+        },
+        {
+          "from": "Goal: {objective}",
+          "to": "目标：{objective}"
+        },
+        {
+          "from": "Resume goal",
+          "to": "恢复目标"
+        },
+        {
+          "from": "Mark it active and continue when idle",
+          "to": "标记为活跃，并在空闲时继续"
+        },
+        {
+          "from": "Leave paused",
+          "to": "保持暂停"
+        },
+        {
+          "from": "Keep it paused; use /goal resume later",
+          "to": "保持暂停；稍后可用 /goal resume 恢复"
+        },
+        {
+          "from": "Goal",
+          "to": "目标"
+        },
+        {
+          "from": "Status: ",
+          "to": "状态："
+        },
+        {
+          "from": "Objective: ",
+          "to": "目标内容："
+        },
+        {
+          "from": "Time used: ",
+          "to": "已用时间："
+        },
+        {
+          "from": "Tokens used: ",
+          "to": "已用 Token："
+        },
+        {
+          "from": "Token budget: ",
+          "to": "Token 预算："
+        },
+        {
+          "from": "Commands: /goal edit, /goal pause, /goal clear",
+          "to": "命令：/goal edit、/goal pause、/goal clear"
+        },
+        {
+          "from": "Commands: /goal edit, /goal resume, /goal clear",
+          "to": "命令：/goal edit、/goal resume、/goal clear"
+        },
+        {
+          "from": "Commands: /goal edit, /goal clear",
+          "to": "命令：/goal edit、/goal clear"
+        },
+        {
+          "from": "active",
+          "to": "进行中"
+        },
+        {
+          "from": "paused",
+          "to": "已暂停"
+        },
+        {
+          "from": "blocked",
+          "to": "已阻塞"
+        },
+        {
+          "from": "usage limited",
+          "to": "受用量限制"
+        },
+        {
+          "from": "limited by budget",
+          "to": "受预算限制"
+        },
+        {
+          "from": "complete",
+          "to": "已完成"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/login/src/device_code_auth.rs",
+      "replacements": [
+        {
+          "from": "\\nWelcome to Codex [v{ANSI_GRAY}{version}{ANSI_RESET}]\\n{ANSI_GRAY}OpenAI's command-line coding agent{ANSI_RESET}\\n\\\r\n\\nFollow these steps to sign in with ChatGPT using device code authorization:\\n\\\r\n\\n1. Open this link in your browser and sign in to your account\\n   {ANSI_BLUE}{verification_url}{ANSI_RESET}\\n\\\r\n\\n2. Enter this one-time code {ANSI_GRAY}(expires in 15 minutes){ANSI_RESET}\\n   {ANSI_BLUE}{code}{ANSI_RESET}\\n\\\r\n\\n{ANSI_GRAY}Device codes are a common phishing target. Never share this code.{ANSI_RESET}\\n",
+          "to": "\\n欢迎使用 Codex [v{ANSI_GRAY}{version}{ANSI_RESET}]\\n{ANSI_GRAY}OpenAI 命令行编码代理{ANSI_RESET}\\n\\\r\n\\n请按以下步骤使用 ChatGPT 设备码授权登录：\\n\\\r\n\\n1. 在浏览器中打开此链接并登录你的账号\\n   {ANSI_BLUE}{verification_url}{ANSI_RESET}\\n\\\r\n\\n2. 输入此一次性代码 {ANSI_GRAY}（15 分钟后过期）{ANSI_RESET}\\n   {ANSI_BLUE}{code}{ANSI_RESET}\\n\\\r\n\\n{ANSI_GRAY}设备码常被用于钓鱼。切勿分享此代码。{ANSI_RESET}\\n"
+        },
+        {
+          "from": "device code login is not enabled for this Codex server. Use the browser login or verify the server URL.",
+          "to": "此 Codex 服务器未启用设备码登录。请使用浏览器登录或检查服务器 URL。"
+        },
+        {
+          "from": "device code request failed with status {status}",
+          "to": "设备码请求失败，状态码 {status}"
+        },
+        {
+          "from": "device auth timed out after 15 minutes",
+          "to": "设备授权已在 15 分钟后超时"
+        },
+        {
+          "from": "device auth failed with status {}",
+          "to": "设备授权失败，状态码 {}"
+        },
+        {
+          "from": "device code exchange failed: {err}",
+          "to": "设备码交换失败：{err}"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/review_popups.rs",
+      "replacements": [
+        {
+          "from": "Review against a base branch",
+          "to": "基于基础分支审查"
+        },
+        {
+          "from": "(PR Style)",
+          "to": "（PR 风格）"
+        },
+        {
+          "from": "Review uncommitted changes",
+          "to": "审查未提交的改动"
+        },
+        {
+          "from": "Review a commit",
+          "to": "审查某次提交"
+        },
+        {
+          "from": "Custom review instructions",
+          "to": "自定义审查指令"
+        },
+        {
+          "from": "Select a review preset",
+          "to": "选择审查预设"
+        },
+        {
+          "from": "(detached HEAD)",
+          "to": "（分离 HEAD）"
+        },
+        {
+          "from": "Select a base branch",
+          "to": "选择基础分支"
+        },
+        {
+          "from": "Type to search branches",
+          "to": "输入以搜索分支"
+        },
+        {
+          "from": "Select a commit to review",
+          "to": "选择要审查的提交"
+        },
+        {
+          "from": "Type to search commits",
+          "to": "输入以搜索提交"
+        },
+        {
+          "from": "Type instructions and press Enter",
+          "to": "输入指令并按 Enter"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/plan_implementation.rs",
+      "replacements": [
+        {
+          "from": "Implement this plan?",
+          "to": "实施这个计划？"
+        },
+        {
+          "from": "Yes, implement this plan",
+          "to": "是，实施此计划"
+        },
+        {
+          "from": "Yes, clear context and implement",
+          "to": "是，清空上下文并实施"
+        },
+        {
+          "from": "No, stay in Plan mode",
+          "to": "否，留在计划模式"
+        },
+        {
+          "from": "Implement the plan.",
+          "to": "实施计划。"
+        },
+        {
+          "from": "A previous agent produced the plan below to accomplish the user's task. ",
+          "to": "之前的代理为完成用户任务生成了下面的计划。"
+        },
+        {
+          "from": "Implement the plan in a fresh context. Treat the plan as the source of ",
+          "to": "在全新上下文中实施此计划。将计划视为"
+        },
+        {
+          "from": "user intent, re-read files as needed, and carry the work through ",
+          "to": "用户意图的来源，按需重新读取文件，并持续推进"
+        },
+        {
+          "from": "implementation and verification.",
+          "to": "实现和验证。"
+        },
+        {
+          "from": "Default mode unavailable",
+          "to": "默认模式不可用"
+        },
+        {
+          "from": "No approved plan available",
+          "to": "没有可用的已批准计划"
+        },
+        {
+          "from": "Fresh thread with this plan.",
+          "to": "使用此计划开启新会话。"
+        },
+        {
+          "from": "Fresh thread. Context: {label}.",
+          "to": "新会话。上下文：{label}。"
+        },
+        {
+          "from": "Switch to Default and start coding.",
+          "to": "切换到默认模式并开始编码。"
+        },
+        {
+          "from": "Continue planning with the model.",
+          "to": "继续与模型一起规划。"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/skills.rs",
+      "replacements": [
+        {
+          "from": "List skills",
+          "to": "列出技能"
+        },
+        {
+          "from": "Tip: press {list_shortcut} to open this list directly.",
+          "to": "提示：按 {list_shortcut} 可直接打开此列表。"
+        },
+        {
+          "from": "Enable/Disable Skills",
+          "to": "启用/禁用技能"
+        },
+        {
+          "from": "Enable or disable skills.",
+          "to": "启用或禁用技能。"
+        },
+        {
+          "from": "Skills",
+          "to": "技能"
+        },
+        {
+          "from": "Choose an action",
+          "to": "选择操作"
+        },
+        {
+          "from": "No skills available.",
+          "to": "没有可用技能。"
+        },
+        {
+          "from": "{enabled_count} skills enabled, {disabled_count} skills disabled",
+          "to": "已启用 {enabled_count} 个技能，已禁用 {disabled_count} 个技能"
+        },
+        {
+          "from": "{name} ({} skill)",
+          "to": "{name}（{} 技能）"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/rate_limits.rs",
+      "replacements": [
+        {
+          "from": "usage",
+          "to": "用量"
+        },
+        {
+          "from": "secondary usage",
+          "to": "次级用量"
+        },
+        {
+          "from": "Heads up, you have less than {remaining_percent:.0}% of your {limit_label} limit left. Run /status for a breakdown.",
+          "to": "提醒：你的 {limit_label} 限制剩余不足 {remaining_percent:.0}%。运行 /status 查看详情。"
+        },
+        {
+          "from": "daily",
+          "to": "每日"
+        },
+        {
+          "from": "weekly",
+          "to": "每周"
+        },
+        {
+          "from": "monthly",
+          "to": "每月"
+        },
+        {
+          "from": "annual",
+          "to": "每年"
+        },
+        {
+          "from": "Uses fewer credits for upcoming turns.",
+          "to": "后续轮次消耗更少额度。"
+        },
+        {
+          "from": "Switch to {switch_model}",
+          "to": "切换到 {switch_model}"
+        },
+        {
+          "from": "Keep current model",
+          "to": "保留当前模型"
+        },
+        {
+          "from": "Keep current model (never show again)",
+          "to": "保留当前模型（不再提醒）"
+        },
+        {
+          "from": "Hide future rate limit reminders about switching models.",
+          "to": "以后不再显示切换模型的额度提醒。"
+        },
+        {
+          "from": "Approaching rate limits",
+          "to": "即将达到用量限制"
+        },
+        {
+          "from": "Switch to {switch_model} for lower credit usage?",
+          "to": "切换到 {switch_model} 以降低额度消耗？"
+        },
+        {
+          "from": "You've reached your workspace credit limit",
+          "to": "已达到工作区额度限制"
+        },
+        {
+          "from": "Your workspace is out of credits. Ask your workspace owner to add more. Notify owner?",
+          "to": "你的工作区额度已用尽。请工作区所有者添加额度。是否通知所有者？"
+        },
+        {
+          "from": "Usage limit reached",
+          "to": "已达到用量限制"
+        },
+        {
+          "from": "Request a limit increase from your owner to continue using codex. Request increase?",
+          "to": "向所有者请求提高限制以继续使用 Codex。是否发送请求？"
+        },
+        {
+          "from": "Yes",
+          "to": "是"
+        },
+        {
+          "from": "No",
+          "to": "否"
+        },
+        {
+          "from": "Workspace owner notified.",
+          "to": "已通知工作区所有者。"
+        },
+        {
+          "from": "Workspace owner was already notified recently.",
+          "to": "最近已经通知过工作区所有者。"
+        },
+        {
+          "from": "Could not notify your workspace owner. Please try again.",
+          "to": "无法通知工作区所有者。请重试。"
+        },
+        {
+          "from": "Limit increase requested.",
+          "to": "已请求提高限制。"
+        },
+        {
+          "from": "A limit increase was already requested recently.",
+          "to": "最近已经请求过提高限制。"
+        },
+        {
+          "from": "Could not request a limit increase. Please try again.",
+          "to": "无法请求提高限制。请重试。"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/app/event_dispatch.rs",
+      "replacements": [
+        {
+          "from": "Failed to start TUI session picker: {err}",
+          "to": "启动 TUI 会话选择器失败：{err}"
+        },
+        {
+          "from": "No saved chat found matching '{id_or_name}'.",
+          "to": "找不到匹配 “{id_or_name}” 的已保存聊天。"
+        },
+        {
+          "from": "To continue this session, run ",
+          "to": "若要继续此会话，请运行 "
+        },
+        {
+          "from": "Failed to attach to forked app-server thread: {err}",
+          "to": "附加到分支 app-server 会话失败：{err}"
+        },
+        {
+          "from": "Failed to fork current session through the app server: {err}",
+          "to": "通过 app server 创建当前会话分支失败：{err}"
+        },
+        {
+          "from": "A thread must contain at least one turn before it can be forked.",
+          "to": "会话至少需要包含一轮对话后才能创建分支。"
+        },
+        {
+          "from": "Logout failed: {err}",
+          "to": "退出登录失败：{err}"
+        },
+        {
+          "from": "No changes detected.",
+          "to": "未检测到变更。"
+        },
+        {
+          "from": "Model changed to {model}",
+          "to": "模型已切换为 {model}"
+        },
+        {
+          "from": "Failed to save default model: {error}",
+          "to": "保存默认模型失败：{error}"
+        },
+        {
+          "from": "Personality set to {label}",
+          "to": "个性已设为 {label}"
+        },
+        {
+          "from": "Failed to save default personality: {err}",
+          "to": "保存默认个性失败：{err}"
+        },
+        {
+          "from": "Service tier set to {service_tier}",
+          "to": "服务层级已设为 {service_tier}"
+        },
+        {
+          "from": "Service tier cleared",
+          "to": "已清除服务层级"
+        },
+        {
+          "from": "Failed to save default service tier: {err}",
+          "to": "保存默认服务层级失败：{err}"
+        },
+        {
+          "from": "Failed to set approval policy",
+          "to": "设置批准策略失败"
+        },
+        {
+          "from": "Failed to set permission profile",
+          "to": "设置权限配置失败"
+        },
+        {
+          "from": "Failed to set permission profile: {err}",
+          "to": "设置权限配置失败：{err}"
+        },
+        {
+          "from": "Failed to save approvals reviewer: {err}",
+          "to": "保存批准审查器失败：{err}"
+        },
+        {
+          "from": "Failed to save full access confirmation preference: {err}",
+          "to": "保存完全访问确认偏好失败：{err}"
+        },
+        {
+          "from": "Failed to save Agent mode warning preference: {err}",
+          "to": "保存代理模式警告偏好失败：{err}"
+        },
+        {
+          "from": "Failed to save rate limit reminder preference: {err}",
+          "to": "保存额度提醒偏好失败：{err}"
+        },
+        {
+          "from": "Failed to save Plan mode reasoning effort: {err}",
+          "to": "保存计划模式推理强度失败：{err}"
+        },
+        {
+          "from": "Failed to save model migration prompt preference: {err}",
+          "to": "保存模型迁移提示偏好失败：{err}"
+        },
+        {
+          "from": "Failed to update skill config for {path_display}: {err}",
+          "to": "更新技能配置失败（{path_display}）：{err}"
+        },
+        {
+          "from": "Failed to update app config for {id}: {err}",
+          "to": "更新应用配置失败（{id}）：{err}"
+        },
+        {
+          "from": "P A T C H",
+          "to": "补 丁"
+        },
+        {
+          "from": "E X E C",
+          "to": "命 令"
+        },
+        {
+          "from": "Environment: ",
+          "to": "环境："
+        },
+        {
+          "from": "Reason: ",
+          "to": "原因："
+        },
+        {
+          "from": "Permission rule: ",
+          "to": "权限规则："
+        },
+        {
+          "from": "P E R M I S S I O N S",
+          "to": "权 限"
+        },
+        {
+          "from": "Server: ",
+          "to": "服务器："
+        },
+        {
+          "from": "E L I C I T A T I O N",
+          "to": "引 导 请 求"
+        },
+        {
+          "from": "Failed to save status line settings: {error}",
+          "to": "保存状态栏设置失败：{error}"
+        },
+        {
+          "from": "Failed to save terminal title items: {err}",
+          "to": "保存终端标题项目失败：{err}"
+        },
+        {
+          "from": "Failed to save theme: {err}",
+          "to": "保存主题失败：{err}"
+        },
+        {
+          "from": "Failed to save shortcut: {err}",
+          "to": "保存快捷键失败：{err}"
+        },
+        {
+          "from": "Failed to refresh shortcuts: {err}",
+          "to": "刷新快捷键失败：{err}"
+        },
+        {
+          "from": "Removed custom shortcut for `{context}.{action}`.",
+          "to": "已移除 `{context}.{action}` 的自定义快捷键。"
+        },
+        {
+          "from": "Failed to remove shortcut: {err}",
+          "to": "移除快捷键失败：{err}"
+        },
+        {
+          "from": "A thread must start before it can be archived.",
+          "to": "会话开始后才能归档。"
+        },
+        {
+          "from": "'/archive' is unavailable in side conversations. Press Ctrl+C to return to the main thread first.",
+          "to": "旁路对话中不可使用 /archive。请先按 Ctrl+C 返回主会话。"
+        },
+        {
+          "from": "Failed to archive current thread: {err}",
+          "to": "归档当前会话失败：{err}"
+        },
+        {
+          "from": "A thread must start before it can be deleted.",
+          "to": "会话开始后才能删除。"
+        },
+        {
+          "from": "'/delete' is unavailable in side conversations. Press Ctrl+C to return to the main thread first.",
+          "to": "旁路对话中不可使用 /delete。请先按 Ctrl+C 返回主会话。"
+        },
+        {
+          "from": "Failed to delete current thread: {err}",
+          "to": "删除当前会话失败：{err}"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/plugins.rs",
+      "replacements": [
+        {
+          "from": "Plugins are disabled.",
+          "to": "插件功能已禁用。"
+        },
+        {
+          "from": "Enable the plugins feature to use /plugins.",
+          "to": "启用插件功能后才能使用 /plugins。"
+        },
+        {
+          "from": "Add marketplace",
+          "to": "添加市场"
+        },
+        {
+          "from": "owner/repo, git URL, or local marketplace path",
+          "to": "owner/repo、Git URL 或本地市场路径"
+        },
+        {
+          "from": "Examples: owner/repo, git URL, ./marketplace",
+          "to": "示例：owner/repo、Git URL、./marketplace"
+        },
+        {
+          "from": "Installed {plugin_display_name} plugin.",
+          "to": "已安装 {plugin_display_name} 插件。"
+        },
+        {
+          "from": "No additional app authentication is required.",
+          "to": "无需额外应用认证。"
+        },
+        {
+          "from": "{} app(s) still need authentication: {app_names}",
+          "to": "仍有 {} 个应用需要认证：{app_names}"
+        },
+        {
+          "from": "Marketplace {} is already added.",
+          "to": "市场 {} 已添加。"
+        },
+        {
+          "from": "Added marketplace {}.",
+          "to": "已添加市场 {}。"
+        },
+        {
+          "from": "Marketplace root: {}",
+          "to": "市场根目录：{}"
+        },
+        {
+          "from": "Removed marketplace {marketplace_display_name}.",
+          "to": "已移除市场 {marketplace_display_name}。"
+        },
+        {
+          "from": "Marketplace root: {}",
+          "to": "市场根目录：{}"
+        },
+        {
+          "from": "Removed marketplace config for {}.",
+          "to": "已移除 {} 的市场配置。"
+        },
+        {
+          "from": "No configured Git marketplaces to upgrade.",
+          "to": "没有可升级的已配置 Git 市场。"
+        },
+        {
+          "from": "Only configured Git marketplaces can be upgraded.",
+          "to": "只能升级已配置的 Git 市场。"
+        },
+        {
+          "from": "Marketplace {} is already up to date.",
+          "to": "市场 {} 已是最新。"
+        },
+        {
+          "from": "Checked {selected_count} marketplaces; all are already up to date.",
+          "to": "已检查 {selected_count} 个市场；全部已是最新。"
+        },
+        {
+          "from": "Checked: {}",
+          "to": "已检查：{}"
+        },
+        {
+          "from": "marketplace",
+          "to": "市场"
+        },
+        {
+          "from": "marketplaces",
+          "to": "市场"
+        },
+        {
+          "from": "Upgraded {upgraded_count} {noun}.",
+          "to": "已升级 {upgraded_count} 个{noun}。"
+        },
+        {
+          "from": "Updated roots: {}",
+          "to": "已更新根目录：{}"
+        },
+        {
+          "from": "Failed to upgrade {error_count} {noun}: {}",
+          "to": "升级 {error_count} 个{noun}失败：{}"
+        },
+        {
+          "from": "Failed to update plugin config for {plugin_id}: {err}",
+          "to": "更新插件 {plugin_id} 配置失败：{err}"
+        },
+        {
+          "from": "Uninstalled {plugin_display_name} plugin.",
+          "to": "已卸载 {plugin_display_name} 插件。"
+        },
+        {
+          "from": "Bundled apps remain installed.",
+          "to": "捆绑应用仍保持安装。"
+        },
+        {
+          "from": "Already installed in this session.",
+          "to": "本会话中已安装。"
+        },
+        {
+          "from": "Install the required Apps in ChatGPT to continue:",
+          "to": "请在 ChatGPT 中安装所需应用后继续："
+        },
+        {
+          "from": "Plugins",
+          "to": "插件"
+        },
+        {
+          "from": "{} plugin installed.",
+          "to": "已安装 {} 插件。"
+        },
+        {
+          "from": "App setup {current}/{total}: {}",
+          "to": "应用设置 {current}/{total}：{}"
+        },
+        {
+          "from": "Manage on ChatGPT",
+          "to": "在 ChatGPT 中管理"
+        },
+        {
+          "from": "Install on ChatGPT",
+          "to": "在 ChatGPT 中安装"
+        },
+        {
+          "from": "Open the ChatGPT app management page",
+          "to": "打开 ChatGPT 应用管理页"
+        },
+        {
+          "from": "Open the app page in your browser.",
+          "to": "在浏览器中打开应用页面。"
+        },
+        {
+          "from": "ChatGPT apps link unavailable",
+          "to": "ChatGPT 应用链接不可用"
+        },
+        {
+          "from": "This app did not provide an install/manage URL.",
+          "to": "此应用未提供安装/管理 URL。"
+        },
+        {
+          "from": "Continue",
+          "to": "继续"
+        },
+        {
+          "from": "This app is already installed.",
+          "to": "此应用已安装。"
+        },
+        {
+          "from": "Advance to the next app.",
+          "to": "进入下一个应用。"
+        },
+        {
+          "from": "I've installed it",
+          "to": "我已安装"
+        },
+        {
+          "from": "Trust your confirmation and continue to the next app.",
+          "to": "信任你的确认并继续下一个应用。"
+        },
+        {
+          "from": "Continue without waiting for refresh to complete.",
+          "to": "不等待刷新完成，直接继续。"
+        },
+        {
+          "from": "Skip remaining app setup",
+          "to": "跳过剩余应用设置"
+        },
+        {
+          "from": "Stop this follow-up flow for this plugin.",
+          "to": "停止此插件的后续设置流程。"
+        },
+        {
+          "from": "Abandon remaining required app setup.",
+          "to": "放弃剩余必需应用设置。"
+        },
+        {
+          "from": "Skipped remaining app setup for {} plugin.",
+          "to": "已跳过 {} 插件的剩余应用设置。"
+        },
+        {
+          "from": "The plugin may not be usable until required apps are installed.",
+          "to": "安装必需应用前，此插件可能无法使用。"
+        },
+        {
+          "from": "Completed app setup flow for {} plugin.",
+          "to": "已完成 {} 插件的应用设置流程。"
+        },
+        {
+          "from": "You can now continue managing plugins from /plugins.",
+          "to": "现在可以继续在 /plugins 中管理插件。"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/plugin_catalog.rs",
+      "replacements": [
+        {
+          "from": "Workspace",
+          "to": "工作区"
+        },
+        {
+          "from": "Shared with me",
+          "to": "与我共享"
+        },
+        {
+          "from": "Shared with me (link)",
+          "to": "与我共享（链接）"
+        },
+        {
+          "from": "Local",
+          "to": "本地"
+        },
+        {
+          "from": "No workspace plugins available",
+          "to": "没有可用的工作区插件"
+        },
+        {
+          "from": "No workspace directory plugins are available.",
+          "to": "没有可用的工作区目录插件。"
+        },
+        {
+          "from": "No shared plugins available",
+          "to": "没有可用的共享插件"
+        },
+        {
+          "from": "No plugins have been shared with you.",
+          "to": "还没有与你共享的插件。"
+        },
+        {
+          "from": "Plugins",
+          "to": "插件"
+        },
+        {
+          "from": "Loading available plugins...",
+          "to": "正在加载可用插件..."
+        },
+        {
+          "from": "This updates when the marketplace list is ready.",
+          "to": "市场列表就绪后会自动更新。"
+        },
+        {
+          "from": "Loading plugins...",
+          "to": "正在加载插件..."
+        },
+        {
+          "from": "Adding marketplace...",
+          "to": "正在添加市场..."
+        },
+        {
+          "from": "This updates when marketplace installation completes.",
+          "to": "市场安装完成后会自动更新。"
+        },
+        {
+          "from": "Remove {marketplace_display_name} marketplace?",
+          "to": "移除 {marketplace_display_name} 市场？"
+        },
+        {
+          "from": "This removes the configured marketplace from Codex.",
+          "to": "这会从 Codex 中移除已配置的市场。"
+        },
+        {
+          "from": "Remove marketplace",
+          "to": "移除市场"
+        },
+        {
+          "from": "Remove this marketplace from the available plugin list.",
+          "to": "从可用插件列表中移除此市场。"
+        },
+        {
+          "from": "Back to plugins",
+          "to": "返回插件"
+        },
+        {
+          "from": "Keep this marketplace installed.",
+          "to": "保留此市场。"
+        },
+        {
+          "from": "Removing {marketplace_display_name}...",
+          "to": "正在移除 {marketplace_display_name}..."
+        },
+        {
+          "from": "Removing marketplace...",
+          "to": "正在移除市场..."
+        },
+        {
+          "from": "This updates when marketplace removal completes.",
+          "to": "市场移除完成后会自动更新。"
+        },
+        {
+          "from": "Upgrading {name} marketplace...",
+          "to": "正在升级 {name} 市场..."
+        },
+        {
+          "from": "Upgrading marketplaces...",
+          "to": "正在升级市场..."
+        },
+        {
+          "from": "This updates when marketplace upgrade completes.",
+          "to": "市场升级完成后会自动更新。"
+        },
+        {
+          "from": "Loading details for {plugin_display_name}...",
+          "to": "正在加载 {plugin_display_name} 的详情..."
+        },
+        {
+          "from": "Loading plugin details...",
+          "to": "正在加载插件详情..."
+        },
+        {
+          "from": "This updates when plugin details load.",
+          "to": "插件详情加载后会自动更新。"
+        },
+        {
+          "from": "Installing {plugin_display_name}...",
+          "to": "正在安装 {plugin_display_name}..."
+        },
+        {
+          "from": "Installing plugin...",
+          "to": "正在安装插件..."
+        },
+        {
+          "from": "This updates when plugin installation completes.",
+          "to": "插件安装完成后会自动更新。"
+        },
+        {
+          "from": "Uninstalling {plugin_display_name}...",
+          "to": "正在卸载 {plugin_display_name}..."
+        },
+        {
+          "from": "Uninstalling plugin...",
+          "to": "正在卸载插件..."
+        },
+        {
+          "from": "This updates when the plugin removal completes.",
+          "to": "插件移除完成后会自动更新。"
+        },
+        {
+          "from": "Failed to load plugins.",
+          "to": "加载插件失败。"
+        },
+        {
+          "from": "Plugin marketplace unavailable",
+          "to": "插件市场不可用"
+        },
+        {
+          "from": "Failed to add marketplace.",
+          "to": "添加市场失败。"
+        },
+        {
+          "from": "Marketplace add failed",
+          "to": "市场添加失败"
+        },
+        {
+          "from": "Failed to add marketplace from the provided source.",
+          "to": "无法从提供的来源添加市场。"
+        },
+        {
+          "from": "Try again",
+          "to": "重试"
+        },
+        {
+          "from": "Enter a marketplace source.",
+          "to": "输入市场来源。"
+        },
+        {
+          "from": "Return to the plugin list.",
+          "to": "返回插件列表。"
+        },
+        {
+          "from": "Failed to remove marketplace.",
+          "to": "移除市场失败。"
+        },
+        {
+          "from": "Marketplace removal failed",
+          "to": "市场移除失败"
+        },
+        {
+          "from": "Failed to remove the selected marketplace.",
+          "to": "移除所选市场失败。"
+        },
+        {
+          "from": "Review the confirmation prompt again.",
+          "to": "重新查看确认提示。"
+        },
+        {
+          "from": "Failed to load plugin details.",
+          "to": "加载插件详情失败。"
+        },
+        {
+          "from": "Plugin detail unavailable",
+          "to": "插件详情不可用"
+        },
+        {
+          "from": "No marketplace plugins available",
+          "to": "没有可用的市场插件"
+        },
+        {
+          "from": "No plugins are available in the discovered marketplaces.",
+          "to": "已发现的市场中没有可用插件。"
+        },
+        {
+          "from": "All Plugins",
+          "to": "全部插件"
+        },
+        {
+          "from": "Browse plugins from available marketplaces.",
+          "to": "浏览可用市场中的插件。"
+        },
+        {
+          "from": "Installed {installed} of {total} available plugins.",
+          "to": "已安装 {installed}/{total} 个可用插件。"
+        },
+        {
+          "from": "Installed ({installed})",
+          "to": "已安装（{installed}）"
+        },
+        {
+          "from": "Installed plugins.",
+          "to": "已安装插件。"
+        },
+        {
+          "from": "Showing {installed} installed plugins.",
+          "to": "正在显示 {installed} 个已安装插件。"
+        },
+        {
+          "from": "No installed plugins",
+          "to": "没有已安装插件"
+        },
+        {
+          "from": "No installed plugins.",
+          "to": "没有已安装插件。"
+        },
+        {
+          "from": "Loading OpenAI Curated plugins...",
+          "to": "正在加载 OpenAI 精选插件..."
+        },
+        {
+          "from": "This section updates when app-server returns it.",
+          "to": "app-server 返回后此区域会自动更新。"
+        },
+        {
+          "from": "OpenAI Curated unavailable",
+          "to": "OpenAI 精选不可用"
+        },
+        {
+          "from": "No OpenAI Curated plugins available",
+          "to": "没有可用的 OpenAI 精选插件"
+        },
+        {
+          "from": "OpenAI Curated marketplace.",
+          "to": "OpenAI 精选市场。"
+        },
+        {
+          "from": "Installed {curated_installed} of {curated_total} OpenAI Curated plugins.",
+          "to": "已安装 {curated_installed}/{curated_total} 个 OpenAI 精选插件。"
+        },
+        {
+          "from": "{label} installed successfully.",
+          "to": "{label} 已成功安装。"
+        },
+        {
+          "from": "Select the plugins you want to use and press Enter to install or view details.",
+          "to": "选择要使用的插件，按 Enter 安装或查看详情。"
+        },
+        {
+          "from": "{label}.",
+          "to": "{label}。"
+        },
+        {
+          "from": "Installed {marketplace_installed} of {marketplace_total} {label} plugins.",
+          "to": "已安装 {marketplace_installed}/{marketplace_total} 个 {label} 插件。"
+        },
+        {
+          "from": "No plugins available in this marketplace",
+          "to": "此市场中没有可用插件"
+        },
+        {
+          "from": "No plugins available in this marketplace.",
+          "to": "此市场中没有可用插件。"
+        },
+        {
+          "from": "Type to search plugins",
+          "to": "输入以搜索插件"
+        },
+        {
+          "from": "Add Marketplace",
+          "to": "添加市场"
+        },
+        {
+          "from": "Add a marketplace from a Git repo or local root.",
+          "to": "从 Git 仓库或本地根目录添加市场。"
+        },
+        {
+          "from": "Enter a source to make its plugins available in this menu.",
+          "to": "输入来源，让其中的插件出现在此菜单中。"
+        },
+        {
+          "from": "Add marketplace",
+          "to": "添加市场"
+        },
+        {
+          "from": "Enter owner/repo, a Git URL, or a local marketplace path.",
+          "to": "输入 owner/repo、Git URL 或本地市场路径。"
+        },
+        {
+          "from": "Press Enter to enter a marketplace source.",
+          "to": "按 Enter 输入市场来源。"
+        },
+        {
+          "from": "Data shared with this app is subject to the app's ",
+          "to": "与此应用共享的数据受该应用的 "
+        },
+        {
+          "from": "terms of service",
+          "to": "服务条款"
+        },
+        {
+          "from": " and ",
+          "to": " 和 "
+        },
+        {
+          "from": "privacy policy",
+          "to": "隐私政策"
+        },
+        {
+          "from": "Learn more",
+          "to": "了解更多"
+        },
+        {
+          "from": "Uninstall plugin",
+          "to": "卸载插件"
+        },
+        {
+          "from": "Remove this plugin now.",
+          "to": "立即移除此插件。"
+        },
+        {
+          "from": "This remote plugin did not provide an uninstall identity.",
+          "to": "此远程插件未提供卸载身份。"
+        },
+        {
+          "from": "Install plugin",
+          "to": "安装插件"
+        },
+        {
+          "from": "This plugin is disabled by your workspace admin.",
+          "to": "此插件已被工作区管理员禁用。"
+        },
+        {
+          "from": "This plugin is not installable from this marketplace.",
+          "to": "无法从此市场安装该插件。"
+        },
+        {
+          "from": "Install this plugin now.",
+          "to": "立即安装此插件。"
+        },
+        {
+          "from": "This plugin did not provide an install location.",
+          "to": "此插件未提供安装位置。"
+        },
+        {
+          "from": "Skills",
+          "to": "技能"
+        },
+        {
+          "from": "Apps",
+          "to": "应用"
+        },
+        {
+          "from": "Hooks",
+          "to": "钩子"
+        },
+        {
+          "from": "MCP Servers",
+          "to": "MCP 服务器"
+        },
+        {
+          "from": "{selected_status_label}   Space to {toggle_action}; Enter view details.",
+          "to": "{selected_status_label}   空格键{toggle_action}；Enter 查看详情。"
+        },
+        {
+          "from": "{selected_status_label}   Space to {toggle_action}.",
+          "to": "{selected_status_label}   空格键{toggle_action}。"
+        },
+        {
+          "from": "{selected_status_label}   Press Enter to view plugin details.",
+          "to": "{selected_status_label}   按 Enter 查看插件详情。"
+        },
+        {
+          "from": "{selected_status_label}   Plugin details are unavailable.",
+          "to": "{selected_status_label}   插件详情不可用。"
+        },
+        {
+          "from": "{selected_status_label}   Press Enter to install or view plugin details.",
+          "to": "{selected_status_label}   按 Enter 安装或查看插件详情。"
+        },
+        {
+          "from": "{selected_status_label}   Remote plugin details are not available yet.",
+          "to": "{selected_status_label}   远程插件详情尚不可用。"
+        },
+        {
+          "from": "plugin details are unavailable",
+          "to": "插件详情不可用"
+        },
+        {
+          "from": "ctrl + u upgrade · ctrl + r remove · space toggle · ←/→ tabs · enter details · esc close",
+          "to": "ctrl + u 升级 · ctrl + r 移除 · 空格切换 · ←/→ 标签 · enter 详情 · esc 关闭"
+        },
+        {
+          "from": "ctrl + r remove · space toggle · ←/→ tabs · enter details · esc close",
+          "to": "ctrl + r 移除 · 空格切换 · ←/→ 标签 · enter 详情 · esc 关闭"
+        },
+        {
+          "from": "ctrl + u upgrade · space toggle · ←/→ tabs · enter details · esc close",
+          "to": "ctrl + u 升级 · 空格切换 · ←/→ 标签 · enter 详情 · esc 关闭"
+        },
+        {
+          "from": "space enable/disable · ←/→ select marketplace · enter view details · esc close",
+          "to": "空格启用/禁用 · ←/→ 选择市场 · enter 查看详情 · esc 关闭"
+        },
+        {
+          "from": "Press esc to close.",
+          "to": "按 esc 关闭。"
+        },
+        {
+          "from": "Disabled by admin",
+          "to": "已被管理员禁用"
+        },
+        {
+          "from": "Installed",
+          "to": "已安装"
+        },
+        {
+          "from": "Disabled",
+          "to": "已禁用"
+        },
+        {
+          "from": "Not installable",
+          "to": "不可安装"
+        },
+        {
+          "from": "Can be installed",
+          "to": "可安装"
+        },
+        {
+          "from": "Available by default",
+          "to": "默认可用"
+        },
+        {
+          "from": "Source",
+          "to": "来源"
+        },
+        {
+          "from": "Auth",
+          "to": "认证"
+        },
+        {
+          "from": "Version",
+          "to": "版本"
+        },
+        {
+          "from": "Sharing",
+          "to": "共享"
+        },
+        {
+          "from": "Auth on install",
+          "to": "安装时认证"
+        },
+        {
+          "from": "Auth on use",
+          "to": "使用时认证"
+        },
+        {
+          "from": "Listed",
+          "to": "已列出"
+        },
+        {
+          "from": "Workspace link",
+          "to": "工作区链接"
+        },
+        {
+          "from": "Private",
+          "to": "私有"
+        },
+        {
+          "from": "creator {name} ({account_id})",
+          "to": "创建者 {name}（{account_id}）"
+        },
+        {
+          "from": "creator {name}",
+          "to": "创建者 {name}"
+        },
+        {
+          "from": "creator account {account_id}",
+          "to": "创建者账号 {account_id}"
+        },
+        {
+          "from": "No explicit principals",
+          "to": "没有显式主体"
+        },
+        {
+          "from": "1 principal: {}",
+          "to": "1 个主体：{}"
+        },
+        {
+          "from": "{count} principals",
+          "to": "{count} 个主体"
+        },
+        {
+          "from": "Loading {label} plugins...",
+          "to": "正在加载 {label} 插件..."
+        },
+        {
+          "from": "{label} unavailable",
+          "to": "{label} 不可用"
+        },
+        {
+          "from": "Loading {label} plugins.",
+          "to": "正在加载 {label} 插件。"
+        },
+        {
+          "from": "Local plugin functionality is already available.",
+          "to": "本地插件功能已可用。"
+        },
+        {
+          "from": "This section loaded successfully.",
+          "to": "此区域已成功加载。"
+        },
+        {
+          "from": "{} unavailable.",
+          "to": "{} 不可用。"
+        },
+        {
+          "from": "Local plugin functionality is still available.",
+          "to": "本地插件功能仍可用。"
+        },
+        {
+          "from": "Available",
+          "to": "可用"
+        },
+        {
+          "from": "No plugin skills.",
+          "to": "没有插件技能。"
+        },
+        {
+          "from": "No plugin apps.",
+          "to": "没有插件应用。"
+        },
+        {
+          "from": "No plugin hooks.",
+          "to": "没有插件 hooks。"
+        },
+        {
+          "from": "No plugin MCP servers.",
+          "to": "没有插件 MCP 服务器。"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/keymap_setup/actions.rs",
+      "replacements": [
+        {
+          "from": "Global",
+          "to": "全局"
+        },
+        {
+          "from": "Chat",
+          "to": "对话"
+        },
+        {
+          "from": "Composer",
+          "to": "输入框"
+        },
+        {
+          "from": "Editor",
+          "to": "编辑器"
+        },
+        {
+          "from": "Vim normal",
+          "to": "Vim 普通"
+        },
+        {
+          "from": "Vim operator",
+          "to": "Vim 操作符"
+        },
+        {
+          "from": "Vim text object",
+          "to": "Vim 文本对象"
+        },
+        {
+          "from": "Pager",
+          "to": "分页器"
+        },
+        {
+          "from": "List",
+          "to": "列表"
+        },
+        {
+          "from": "Approval",
+          "to": "授权"
+        },
+        {
+          "from": "Open the transcript overlay.",
+          "to": "打开转录浮层。"
+        },
+        {
+          "from": "Open the current draft in an external editor.",
+          "to": "在外部编辑器中打开当前草稿。"
+        },
+        {
+          "from": "Copy the last agent response to the clipboard.",
+          "to": "将上一条代理回复复制到剪贴板。"
+        },
+        {
+          "from": "Clear the terminal UI.",
+          "to": "清空终端界面。"
+        },
+        {
+          "from": "Turn Vim composer mode on or off.",
+          "to": "打开或关闭 Vim 输入模式。"
+        },
+        {
+          "from": "Turn Fast mode on or off.",
+          "to": "打开或关闭快速模式。"
+        },
+        {
+          "from": "Toggle raw scrollback mode.",
+          "to": "切换原始滚动回看模式。"
+        },
+        {
+          "from": "Interrupt the active turn.",
+          "to": "中断当前回合。"
+        },
+        {
+          "from": "Decrease reasoning effort.",
+          "to": "降低推理强度。"
+        },
+        {
+          "from": "Increase reasoning effort.",
+          "to": "提高推理强度。"
+        },
+        {
+          "from": "Edit the most recently queued message.",
+          "to": "编辑最近排队的消息。"
+        },
+        {
+          "from": "Submit the current composer draft.",
+          "to": "提交当前输入草稿。"
+        },
+        {
+          "from": "Queue the draft while a task is running.",
+          "to": "任务运行时将草稿加入队列。"
+        },
+        {
+          "from": "Show or hide the composer shortcut overlay.",
+          "to": "显示或隐藏输入框快捷键浮层。"
+        },
+        {
+          "from": "Open history search or move to the previous match.",
+          "to": "打开历史搜索，或跳到上一个匹配项。"
+        },
+        {
+          "from": "Move to the next history search match.",
+          "to": "跳到下一个历史搜索匹配项。"
+        },
+        {
+          "from": "Insert a newline in the editor.",
+          "to": "在编辑器中插入换行。"
+        },
+        {
+          "from": "Move the cursor left.",
+          "to": "将光标左移。"
+        },
+        {
+          "from": "Move the cursor right.",
+          "to": "将光标右移。"
+        },
+        {
+          "from": "Move the cursor up.",
+          "to": "将光标上移。"
+        },
+        {
+          "from": "Move the cursor down.",
+          "to": "将光标下移。"
+        },
+        {
+          "from": "Move to the beginning of the previous word.",
+          "to": "移动到前一个词的开头。"
+        },
+        {
+          "from": "Move to the end of the next word.",
+          "to": "移动到下一个词的末尾。"
+        },
+        {
+          "from": "Move to the beginning of the line.",
+          "to": "移动到行首。"
+        },
+        {
+          "from": "Move to the end of the line.",
+          "to": "移动到行尾。"
+        },
+        {
+          "from": "Delete one grapheme to the left.",
+          "to": "删除左侧一个字素。"
+        },
+        {
+          "from": "Delete one grapheme to the right.",
+          "to": "删除右侧一个字素。"
+        },
+        {
+          "from": "Delete the previous word.",
+          "to": "删除前一个词。"
+        },
+        {
+          "from": "Delete the next word.",
+          "to": "删除后一个词。"
+        },
+        {
+          "from": "Delete from cursor to line start.",
+          "to": "删除从光标到行首的内容。"
+        },
+        {
+          "from": "Delete the current line.",
+          "to": "删除当前行。"
+        },
+        {
+          "from": "Delete from cursor to line end.",
+          "to": "删除从光标到行尾的内容。"
+        },
+        {
+          "from": "Paste the kill buffer.",
+          "to": "粘贴剪切缓冲区。"
+        },
+        {
+          "from": "Enter insert mode at the cursor.",
+          "to": "在光标处进入插入模式。"
+        },
+        {
+          "from": "Enter insert mode after the cursor.",
+          "to": "在光标后进入插入模式。"
+        },
+        {
+          "from": "Enter insert mode at end of line.",
+          "to": "在行尾进入插入模式。"
+        },
+        {
+          "from": "Enter insert mode at the first non-blank character.",
+          "to": "在第一个非空白字符处进入插入模式。"
+        },
+        {
+          "from": "Open a new line below and enter insert mode.",
+          "to": "在下方新建一行并进入插入模式。"
+        },
+        {
+          "from": "Open a new line above and enter insert mode.",
+          "to": "在上方新建一行并进入插入模式。"
+        },
+        {
+          "from": "Move left in Vim normal mode.",
+          "to": "在 Vim 普通模式中左移。"
+        },
+        {
+          "from": "Move right in Vim normal mode.",
+          "to": "在 Vim 普通模式中右移。"
+        },
+        {
+          "from": "Move up or recall older history in Vim normal mode.",
+          "to": "在 Vim 普通模式中上移，或调出更早的历史。"
+        },
+        {
+          "from": "Move down or recall newer history in Vim normal mode.",
+          "to": "在 Vim 普通模式中下移，或调出更新的历史。"
+        },
+        {
+          "from": "Move to the start of the next word.",
+          "to": "移动到下一个词的开头。"
+        },
+        {
+          "from": "Move to the start of the previous word.",
+          "to": "移动到上一个词的开头。"
+        },
+        {
+          "from": "Move to the end of the current or next word.",
+          "to": "移动到当前或下一个词的末尾。"
+        },
+        {
+          "from": "Move to the start of the line.",
+          "to": "移动到行首。"
+        },
+        {
+          "from": "Move to the end of the line.",
+          "to": "移动到行尾。"
+        },
+        {
+          "from": "Delete the character under the cursor.",
+          "to": "删除光标下的字符。"
+        },
+        {
+          "from": "Delete the character under the cursor and enter insert mode.",
+          "to": "删除光标下的字符并进入插入模式。"
+        },
+        {
+          "from": "Delete from cursor to end of line.",
+          "to": "删除从光标到行尾的内容。"
+        },
+        {
+          "from": "Change from cursor to end of line and enter insert mode.",
+          "to": "修改从光标到行尾的内容并进入插入模式。"
+        },
+        {
+          "from": "Yank the entire line.",
+          "to": "复制整行。"
+        },
+        {
+          "from": "Paste after the cursor.",
+          "to": "在光标后粘贴。"
+        },
+        {
+          "from": "Begin a delete operator and wait for a motion.",
+          "to": "开始删除操作符并等待移动命令。"
+        },
+        {
+          "from": "Begin a yank operator and wait for a motion.",
+          "to": "开始复制操作符并等待移动命令。"
+        },
+        {
+          "from": "Begin a change operator and wait for a text object.",
+          "to": "开始修改操作符并等待文本对象。"
+        },
+        {
+          "from": "Cancel a pending Vim operator.",
+          "to": "取消待处理的 Vim 操作符。"
+        },
+        {
+          "from": "Repeat delete operator to delete the whole line.",
+          "to": "重复删除操作符以删除整行。"
+        },
+        {
+          "from": "Repeat yank operator to yank the whole line.",
+          "to": "重复复制操作符以复制整行。"
+        },
+        {
+          "from": "Operator motion left.",
+          "to": "操作符向左移动。"
+        },
+        {
+          "from": "Operator motion right.",
+          "to": "操作符向右移动。"
+        },
+        {
+          "from": "Operator motion up.",
+          "to": "操作符向上移动。"
+        },
+        {
+          "from": "Operator motion down.",
+          "to": "操作符向下移动。"
+        },
+        {
+          "from": "Operator motion to start of next word.",
+          "to": "操作符移动到下一个词的开头。"
+        },
+        {
+          "from": "Operator motion to start of previous word.",
+          "to": "操作符移动到上一个词的开头。"
+        },
+        {
+          "from": "Operator motion to end of word.",
+          "to": "操作符移动到词尾。"
+        },
+        {
+          "from": "Operator motion to line start.",
+          "to": "操作符移动到行首。"
+        },
+        {
+          "from": "Operator motion to line end.",
+          "to": "操作符移动到行尾。"
+        },
+        {
+          "from": "Select an inner text object.",
+          "to": "选择内部文本对象。"
+        },
+        {
+          "from": "Select an around text object.",
+          "to": "选择周围文本对象。"
+        },
+        {
+          "from": "Cancel the pending operator.",
+          "to": "取消待处理的操作符。"
+        },
+        {
+          "from": "Target the current word.",
+          "to": "选中当前词。"
+        },
+        {
+          "from": "Target the current WORD.",
+          "to": "选中当前大词。"
+        },
+        {
+          "from": "Target enclosing parentheses.",
+          "to": "选中包围的圆括号。"
+        },
+        {
+          "from": "Target enclosing brackets.",
+          "to": "选中包围的方括号。"
+        },
+        {
+          "from": "Target enclosing braces.",
+          "to": "选中包围的花括号。"
+        },
+        {
+          "from": "Target enclosing double quotes.",
+          "to": "选中包围的双引号。"
+        },
+        {
+          "from": "Target enclosing single quotes.",
+          "to": "选中包围的单引号。"
+        },
+        {
+          "from": "Target enclosing backticks.",
+          "to": "选中包围的反引号。"
+        },
+        {
+          "from": "Cancel the pending text object.",
+          "to": "取消待处理的文本对象。"
+        },
+        {
+          "from": "Scroll up by one row.",
+          "to": "向上滚动一行。"
+        },
+        {
+          "from": "Scroll down by one row.",
+          "to": "向下滚动一行。"
+        },
+        {
+          "from": "Scroll up by one page.",
+          "to": "向上滚动一页。"
+        },
+        {
+          "from": "Scroll down by one page.",
+          "to": "向下滚动一页。"
+        },
+        {
+          "from": "Scroll up by half a page.",
+          "to": "向上滚动半页。"
+        },
+        {
+          "from": "Scroll down by half a page.",
+          "to": "向下滚动半页。"
+        },
+        {
+          "from": "Jump to the beginning.",
+          "to": "跳到开头。"
+        },
+        {
+          "from": "Jump to the end.",
+          "to": "跳到末尾。"
+        },
+        {
+          "from": "Close the pager overlay.",
+          "to": "关闭分页浮层。"
+        },
+        {
+          "from": "Close the transcript overlay.",
+          "to": "关闭转录浮层。"
+        },
+        {
+          "from": "Move list selection up.",
+          "to": "将列表选择上移。"
+        },
+        {
+          "from": "Move list selection down.",
+          "to": "将列表选择下移。"
+        },
+        {
+          "from": "Move horizontally left in list pickers.",
+          "to": "在列表选择器中向左移动。"
+        },
+        {
+          "from": "Move horizontally right in list pickers.",
+          "to": "在列表选择器中向右移动。"
+        },
+        {
+          "from": "Move list selection up by one page.",
+          "to": "将列表选择上移一页。"
+        },
+        {
+          "from": "Move list selection down by one page.",
+          "to": "将列表选择下移一页。"
+        },
+        {
+          "from": "Jump to the first list item.",
+          "to": "跳到第一个列表项。"
+        },
+        {
+          "from": "Jump to the last list item.",
+          "to": "跳到最后一个列表项。"
+        },
+        {
+          "from": "Accept the current list selection.",
+          "to": "接受当前列表选择。"
+        },
+        {
+          "from": "Cancel and close selection views.",
+          "to": "取消并关闭选择视图。"
+        },
+        {
+          "from": "Open approval details fullscreen.",
+          "to": "全屏打开授权详情。"
+        },
+        {
+          "from": "Open the approval source thread when available.",
+          "to": "可用时打开授权来源线程。"
+        },
+        {
+          "from": "Approve the primary option.",
+          "to": "批准主选项。"
+        },
+        {
+          "from": "Approve for the session when available.",
+          "to": "可用时在本会话内批准。"
+        },
+        {
+          "from": "Approve with an exec-policy prefix when available.",
+          "to": "可用时按执行策略前缀批准。"
+        },
+        {
+          "from": "Choose the explicit deny option when available.",
+          "to": "可用时选择明确拒绝选项。"
+        },
+        {
+          "from": "Decline and provide corrective guidance.",
+          "to": "拒绝并提供修正说明。"
+        },
+        {
+          "from": "Cancel an elicitation request.",
+          "to": "取消一个询问请求。"
+        },
+        {
+          "from": "unbound",
+          "to": "未绑定"
+        },
+        {
+          "from": "Custom global",
+          "to": "全局自定义"
+        },
+        {
+          "from": "Custom",
+          "to": "自定义"
+        },
+        {
+          "from": "Default",
+          "to": "默认"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/keymap_setup/picker.rs",
+      "replacements": [
+        {
+          "from": "App",
+          "to": "应用"
+        },
+        {
+          "from": "Global and chat-level shortcuts.",
+          "to": "全局和对话级快捷键。"
+        },
+        {
+          "from": "Composer",
+          "to": "输入框"
+        },
+        {
+          "from": "Composer submission and queue shortcuts.",
+          "to": "输入提交和队列快捷键。"
+        },
+        {
+          "from": "Editor",
+          "to": "编辑器"
+        },
+        {
+          "from": "Inline editor movement and editing shortcuts.",
+          "to": "行内编辑器移动和编辑快捷键。"
+        },
+        {
+          "from": "Vim normal-mode and operator shortcuts.",
+          "to": "Vim 普通模式和操作符快捷键。"
+        },
+        {
+          "from": "Navigation",
+          "to": "导航"
+        },
+        {
+          "from": "Pager and selection-list navigation shortcuts.",
+          "to": "分页器和选择列表导航快捷键。"
+        },
+        {
+          "from": "Approval",
+          "to": "授权"
+        },
+        {
+          "from": "Approval prompt shortcuts.",
+          "to": "授权提示快捷键。"
+        },
+        {
+          "from": "All",
+          "to": "全部"
+        },
+        {
+          "from": "All configurable shortcuts.",
+          "to": "全部可配置快捷键。"
+        },
+        {
+          "from": "{total} actions, {custom_count} customized, {unbound_count} unbound.",
+          "to": "{total} 个动作，{custom_count} 个已自定义，{unbound_count} 个未绑定。"
+        },
+        {
+          "from": "No shortcuts available",
+          "to": "没有可用快捷键"
+        },
+        {
+          "from": "No configurable shortcuts are available.",
+          "to": "没有可配置快捷键。"
+        },
+        {
+          "from": "Common",
+          "to": "常用"
+        },
+        {
+          "from": "Frequently customized shortcuts.",
+          "to": "经常自定义的快捷键。"
+        },
+        {
+          "from": "No common shortcuts",
+          "to": "没有常用快捷键"
+        },
+        {
+          "from": "No common shortcut actions are available.",
+          "to": "没有常用快捷键动作。"
+        },
+        {
+          "from": "Customized ({custom_count})",
+          "to": "已自定义（{custom_count}）"
+        },
+        {
+          "from": "Root-level shortcut overrides.",
+          "to": "根级快捷键覆盖。"
+        },
+        {
+          "from": "No customized shortcuts",
+          "to": "没有自定义快捷键"
+        },
+        {
+          "from": "No root-level keymap overrides have been configured.",
+          "to": "尚未配置根级键位映射覆盖。"
+        },
+        {
+          "from": "Unbound ({unbound_count})",
+          "to": "未绑定（{unbound_count}）"
+        },
+        {
+          "from": "Actions without an active shortcut.",
+          "to": "没有活动快捷键的动作。"
+        },
+        {
+          "from": "No unbound shortcuts",
+          "to": "没有未绑定快捷键"
+        },
+        {
+          "from": "Every configurable action currently has a shortcut.",
+          "to": "当前每个可配置动作都有快捷键。"
+        },
+        {
+          "from": "No shortcuts in this group",
+          "to": "此分组没有快捷键"
+        },
+        {
+          "from": "No configurable actions are available in this group.",
+          "to": "此分组中没有可配置动作。"
+        },
+        {
+          "from": "Type to search shortcuts",
+          "to": "输入以搜索快捷键"
+        },
+        {
+          "from": "Debug",
+          "to": "调试"
+        },
+        {
+          "from": "Inspect keypresses from your terminal.",
+          "to": "检查终端发送的按键。"
+        },
+        {
+          "from": "See the key Codex detects and any shortcuts assigned to it.",
+          "to": "查看 Codex 检测到的按键以及绑定到它的快捷键。"
+        },
+        {
+          "from": "Inspect keypresses",
+          "to": "检查按键"
+        },
+        {
+          "from": "Press Enter to start. Then press any key to inspect it; Ctrl+C exits.",
+          "to": "按 Enter 开始，然后按任意键进行检查；Ctrl+C 退出。"
+        },
+        {
+          "from": "Open a live inspector that shows the detected key, config key, and matching actions.",
+          "to": "打开实时检查器，显示检测到的按键、配置键和匹配动作。"
+        },
+        {
+          "from": "Keymap",
+          "to": "键位映射"
+        },
+        {
+          "from": "1 action.",
+          "to": "1 个动作。"
+        },
+        {
+          "from": "{count} actions.",
+          "to": "{count} 个动作。"
+        },
+        {
+          "from": " group · ",
+          "to": " 分组 · "
+        },
+        {
+          "from": " edit shortcut · ",
+          "to": " 编辑快捷键 · "
+        },
+        {
+          "from": " custom · ",
+          "to": " 自定义 · "
+        },
+        {
+          "from": " unbound · ",
+          "to": " 未绑定 · "
+        },
+        {
+          "from": " close",
+          "to": " 关闭"
+        },
+        {
+          "from": " start inspector · ",
+          "to": " 开始检查 · "
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/keymap_setup/debug.rs",
+      "replacements": [
+        {
+          "from": "Tip: Codex can only inspect keys your terminal sends.",
+          "to": "提示：Codex 只能检查终端实际发送的按键。"
+        },
+        {
+          "from": "Still waiting? If nothing changes when you press a key, your terminal is not sending that key to Codex. Only received keys can be assigned as shortcuts.",
+          "to": "还在等待？如果按键后没有变化，说明终端没有把该按键发送给 Codex。只有收到的按键才能分配为快捷键。"
+        },
+        {
+          "from": "Keypress Inspector",
+          "to": "按键检查器"
+        },
+        {
+          "from": "Press any key to see what Codex receives. Esc is inspected; Ctrl+C closes.",
+          "to": "按任意键查看 Codex 收到的内容。Esc 会被检查；Ctrl+C 关闭。"
+        },
+        {
+          "from": "Waiting for a keypress...",
+          "to": "正在等待按键..."
+        },
+        {
+          "from": "Detected: ",
+          "to": "检测到："
+        },
+        {
+          "from": "Config key: ",
+          "to": "配置键："
+        },
+        {
+          "from": "unsupported - {error}",
+          "to": "不支持 - {error}"
+        },
+        {
+          "from": "Raw event: ",
+          "to": "原始事件："
+        },
+        {
+          "from": "Assigned actions:",
+          "to": "已分配动作："
+        },
+        {
+          "from": "none",
+          "to": "无"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/bottom_pane/skills_toggle_view.rs",
+      "replacements": [
+        {
+          "from": "Type to search skills",
+          "to": "输入以搜索技能"
+        },
+        {
+          "from": "Enable/Disable Skills",
+          "to": "启用/禁用技能"
+        },
+        {
+          "from": "Turn skills on or off. Your changes are saved automatically.",
+          "to": "打开或关闭技能。更改会自动保存。"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/bottom_pane/multi_select_picker.rs",
+      "replacements": [
+        {
+          "from": "Type to search",
+          "to": "输入以搜索"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/app/background_requests.rs",
+      "replacements": [
+        {
+          "from": "Sign in with ChatGPT auth; API key auth cannot load remote plugin catalogs.",
+          "to": "请使用 ChatGPT 登录；API key 身份验证无法加载远程插件目录。"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/chatwidget/slash_dispatch.rs",
+      "replacements": [
+        {
+          "from": "Side starting...",
+          "to": "侧边会话启动中..."
+        },
+        {
+          "from": "Press Ctrl+C to return to the main thread first.",
+          "to": "请先按 Ctrl+C 返回主线程。"
+        },
+        {
+          "from": "Example: /goal improve benchmark coverage",
+          "to": "示例：/goal 提升基准测试覆盖率"
+        },
+        {
+          "from": "Usage: /raw [on|off]",
+          "to": "用法：/raw [on|off]"
+        },
+        {
+          "from": "Sign in with ChatGPT to use /usage.",
+          "to": "请使用 ChatGPT 登录后再使用 /usage。"
+        },
+        {
+          "from": "Collaboration modes are disabled.",
+          "to": "协作模式已禁用。"
+        },
+        {
+          "from": "Enable collaboration modes to use /plan.",
+          "to": "启用协作模式后可使用 /plan。"
+        },
+        {
+          "from": "Plan mode unavailable right now.",
+          "to": "当前无法使用计划模式。"
+        },
+        {
+          "from": "Archive this session?",
+          "to": "要归档此会话吗？"
+        },
+        {
+          "from": "Are you sure? This will archive the current session and exit Codex",
+          "to": "确定吗？这会归档当前会话并退出 Codex"
+        },
+        {
+          "from": "No, don't archive",
+          "to": "不，保留当前会话"
+        },
+        {
+          "from": "Return to the current session",
+          "to": "返回当前会话"
+        },
+        {
+          "from": "Yes, archive and exit",
+          "to": "是，归档并退出"
+        },
+        {
+          "from": "Archive this session now",
+          "to": "立即归档此会话"
+        },
+        {
+          "from": "Delete this session?",
+          "to": "要删除此会话吗？"
+        },
+        {
+          "from": "Cannot be undone. Subagent threads will also be deleted.",
+          "to": "此操作无法撤销。子代理线程也会被删除。"
+        },
+        {
+          "from": "No, keep this session",
+          "to": "不，保留此会话"
+        },
+        {
+          "from": "Yes, delete and exit",
+          "to": "是，删除并退出"
+        },
+        {
+          "from": "Permanently delete this session now",
+          "to": "立即永久删除此会话"
+        },
+        {
+          "from": "Session is still starting; try /app again in a moment.",
+          "to": "会话仍在启动；请稍后再试 /app。"
+        },
+        {
+          "from": "Internal error: missing the 'auto' approval preset.",
+          "to": "内部错误：缺少 'auto' 批准预设。"
+        },
+        {
+          "from": "Usage: /sandbox-add-read-dir <absolute-directory-path>",
+          "to": "用法：/sandbox-add-read-dir <absolute-directory-path>"
+        },
+        {
+          "from": "`/diff` — _not inside a git repository_",
+          "to": "`/diff` - _当前不在 git 仓库中_"
+        },
+        {
+          "from": "Failed to compute diff: {e}",
+          "to": "计算 diff 失败：{e}"
+        },
+        {
+          "from": "Failed to compute diff: workspace command runner unavailable",
+          "to": "计算 diff 失败：工作区命令运行器不可用"
+        },
+        {
+          "from": "Memory maintenance",
+          "to": "记忆维护"
+        },
+        {
+          "from": "Current rollout path: {}",
+          "to": "当前 rollout 路径：{}"
+        },
+        {
+          "from": "Rollout path is not available yet.",
+          "to": "rollout 路径尚不可用。"
+        },
+        {
+          "from": "Usage: /usage [daily|weekly|cumulative]",
+          "to": "用法：/usage [daily|weekly|cumulative]"
+        },
+        {
+          "from": "Usage: /mcp [verbose]",
+          "to": "用法：/mcp [verbose]"
+        },
+        {
+          "from": "Invalid `tui.keymap` configuration: {err}",
+          "to": "`tui.keymap` 配置无效：{err}"
+        },
+        {
+          "from": "Usage: /keymap [debug]",
+          "to": "用法：/keymap [debug]"
+        },
+        {
+          "from": "Thread name cannot be empty.",
+          "to": "线程名称不能为空。"
+        },
+        {
+          "from": "Working",
+          "to": "工作中"
+        },
+        {
+          "from": "The session must start before you can change a goal.",
+          "to": "会话启动后才能更改目标。"
+        },
+        {
+          "from": "The session must start before you can set a goal.",
+          "to": "会话启动后才能设置目标。"
+        },
+        {
+          "from": "Unrecognized command '/{name}'. Type \\\"/\\\" for a list of supported commands.",
+          "to": "未识别的命令 '/{name}'。输入 “/” 查看支持的命令列表。"
+        },
+        {
+          "from": "'/{}' is unavailable in side conversations. {SIDE_SLASH_COMMAND_UNAVAILABLE_HINT}",
+          "to": "'/{}' 在侧边会话中不可用。{SIDE_SLASH_COMMAND_UNAVAILABLE_HINT}"
+        },
+        {
+          "from": "'/{}' is disabled while a task is in progress.",
+          "to": "'/{}' 在任务进行中已禁用。"
+        },
+        {
+          "from": "'/{command}' is unavailable before the session starts.",
+          "to": "'/{command}' 在会话启动前不可用。"
+        },
+        {
+          "from": "'/{command}' is unavailable while code review is running.",
+          "to": "'/{command}' 在代码审查运行时不可用。"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/src/bottom_pane/chat_composer.rs",
+      "replacements": [
+        {
+          "from": "Unrecognized command '/{name}'. Type \\\"/\\\" for a list of supported commands.",
+          "to": "未识别的命令 '/{name}'。输入 “/” 查看支持的命令列表。"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/mcp-server/src/exec_approval.rs",
+      "replacements": [
+        {
+          "from": "Allow Codex to run `{escaped_command}` in `{cwd}`?",
+          "to": "是否允许 Codex 在 `{cwd}` 中运行 `{escaped_command}`？"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/tui/tooltips.txt",
+      "replacements": [
+        {
+          "from": "Use /compact when the conversation gets long to summarize history and free up context.",
+          "to": "对话变长时使用 /compact，总结历史并释放上下文。"
+        },
+        {
+          "from": "Start a fresh idea with /new; the previous session stays in history.",
+          "to": "用 /new 开始新想法；上一会话会保留在历史中。"
+        },
+        {
+          "from": "Use /feedback to send logs to the maintainers when something looks off.",
+          "to": "发现异常时使用 /feedback 向维护者发送日志。"
+        },
+        {
+          "from": "Switch models or reasoning effort quickly with /model.",
+          "to": "使用 /model 快速切换模型或推理强度。"
+        },
+        {
+          "from": "Use /permissions to control when Codex asks for confirmation.",
+          "to": "使用 /permissions 控制 Codex 何时需要确认。"
+        },
+        {
+          "from": "Run /review to get a code review of your current changes.",
+          "to": "运行 /review，审查当前代码改动。"
+        },
+        {
+          "from": "Use /skills to list available skills or ask Codex to use one.",
+          "to": "使用 /skills 列出可用技能，或要求 Codex 使用某个技能。"
+        },
+        {
+          "from": "Use /status to see the current model, approvals, and token usage.",
+          "to": "使用 /status 查看当前模型、批准设置和 token 用量。"
+        },
+        {
+          "from": "Use /statusline to configure which items appear in the status line.",
+          "to": "使用 /statusline 配置状态栏显示的项目。"
+        },
+        {
+          "from": "Use /fork to branch the current chat into a new thread.",
+          "to": "使用 /fork 将当前聊天分支为新线程。"
+        },
+        {
+          "from": "Use /side to start a side conversation in a temporary fork without polluting the main thread.",
+          "to": "使用 /side 在临时分支中开启旁路对话，不影响主线程。"
+        },
+        {
+          "from": "Use /init to create an AGENTS.md with project-specific guidance.",
+          "to": "使用 /init 创建包含项目专属指引的 AGENTS.md。"
+        },
+        {
+          "from": "Use /mcp to list configured MCP tools.",
+          "to": "使用 /mcp 列出已配置的 MCP 工具。"
+        },
+        {
+          "from": "Run `codex app` to open Codex Desktop (it installs on macOS if needed).",
+          "to": "运行 `codex app` 打开 Codex Desktop（必要时会在 macOS 上安装）。"
+        },
+        {
+          "from": "Use /personality to customize how Codex communicates.",
+          "to": "使用 /personality 自定义 Codex 的沟通方式。"
+        },
+        {
+          "from": "Use /rename to rename your threads for easier thread resuming.",
+          "to": "使用 /rename 重命名线程，方便以后恢复。"
+        },
+        {
+          "from": "Use the OpenAI docs MCP for API questions; enable it with `codex mcp add openaiDeveloperDocs --url https://developers.openai.com/mcp`.",
+          "to": "API 问题可使用 OpenAI docs MCP；通过 `codex mcp add openaiDeveloperDocs --url https://developers.openai.com/mcp` 启用。"
+        },
+        {
+          "from": "Join the OpenAI community Discord: http://discord.gg/openai",
+          "to": "加入 OpenAI 社区 Discord：http://discord.gg/openai"
+        },
+        {
+          "from": "Visit the Codex community forum: https://community.openai.com/c/codex/37",
+          "to": "访问 Codex 社区论坛：https://community.openai.com/c/codex/37"
+        },
+        {
+          "from": "You can run any shell command from Codex using `!` (e.g. `!ls`)",
+          "to": "可在 Codex 中使用 `!` 运行任意 shell 命令（例如 `!ls`）"
+        },
+        {
+          "from": "Type / to open the command popup; Tab autocompletes slash commands.",
+          "to": "输入 / 打开命令弹窗；Tab 可补全斜杠命令。"
+        },
+        {
+          "from": "When the composer is empty, press Esc to step back and edit your last message; Enter confirms.",
+          "to": "输入框为空时，按 Esc 返回并编辑上一条消息；Enter 确认。"
+        },
+        {
+          "from": "Press Tab to queue a message when a task is running; otherwise it sends immediately (except `!`).",
+          "to": "任务运行时按 Tab 可排队发送消息；否则会立即发送（`!` 除外）。"
+        },
+        {
+          "from": "[tui.keymap] in ~/.codex/config.toml lets you rebind supported shortcuts.",
+          "to": "`~/.codex/config.toml` 中的 [tui.keymap] 可重新绑定支持的快捷键。"
+        },
+        {
+          "from": "See the Codex keymap documentation for supported actions and examples.",
+          "to": "查看 Codex 键位文档了解支持的动作和示例。"
+        },
+        {
+          "from": "Paste an image with Ctrl+V to attach it to your next message.",
+          "to": "按 Ctrl+V 粘贴图片，将其附加到下一条消息。"
+        },
+        {
+          "from": "You can resume a previous conversation by running `codex resume`",
+          "to": "可运行 `codex resume` 恢复之前的对话。"
+        },
+        {
+          "from": "Use /copy or press Ctrl+O to copy the latest agent response as Markdown.",
+          "to": "使用 /copy 或按 Ctrl+O 将最新代理回复复制为 Markdown。"
+        }
+      ]
+    },
+    {
+      "path": "codex-rs/models-manager/models.json",
+      "replacements": [
+        {
+          "from": "Frontier model for complex coding, research, and real-world work.",
+          "to": "面向复杂编码、研究和真实工作的前沿模型。"
+        },
+        {
+          "from": "Fast responses with lighter reasoning",
+          "to": "响应更快，推理较轻"
+        },
+        {
+          "from": "Balances speed and reasoning depth for everyday tasks",
+          "to": "在日常任务中平衡速度和推理深度"
+        },
+        {
+          "from": "Greater reasoning depth for complex problems",
+          "to": "为复杂问题提供更深推理"
+        },
+        {
+          "from": "Extra high reasoning depth for complex problems",
+          "to": "为复杂问题提供极高推理深度"
+        },
+        {
+          "from": "GPT-5.5 is now available in Codex. It's our strongest agentic coding model yet, built to reason through large codebases, check assumptions with tools, and keep going until the work is done.\\n\\nLearn more: https://openai.com/index/introducing-gpt-5-5/\\n\\n",
+          "to": "GPT-5.5 现已在 Codex 中可用。这是目前最强的代理式编码模型，适合理解大型代码库、用工具核查假设，并持续推进直到任务完成。\\n\\n了解更多：https://openai.com/index/introducing-gpt-5-5/\\n\\n"
+        },
+        {
+          "from": "Fast",
+          "to": "快速"
+        },
+        {
+          "from": "1.5x speed, increased usage",
+          "to": "1.5 倍速度，增加用量"
+        },
+        {
+          "from": "Strong model for everyday coding.",
+          "to": "适合日常编码的强模型。"
+        },
+        {
+          "from": "Small, fast, and cost-efficient model for simpler coding tasks.",
+          "to": "小型、快速、成本高效，适合较简单的编码任务。"
+        },
+        {
+          "from": "Coding-optimized model.",
+          "to": "针对编码优化的模型。"
+        },
+        {
+          "from": "Optimized for professional work and long-running agents.",
+          "to": "针对专业工作和长时间运行的代理任务优化。"
+        },
+        {
+          "from": "Balances speed with some reasoning; useful for straightforward queries and short explanations",
+          "to": "在速度和一定推理之间取得平衡，适合直接查询和简短解释"
+        },
+        {
+          "from": "Provides a solid balance of reasoning depth and latency for general-purpose tasks",
+          "to": "为通用任务提供推理深度和延迟之间的稳健平衡"
+        },
+        {
+          "from": "Maximizes reasoning depth for complex or ambiguous problems",
+          "to": "为复杂或模糊问题最大化推理深度"
+        },
+        {
+          "from": "Extra high reasoning for complex problems",
+          "to": "为复杂问题提供极高推理"
+        },
+        {
+          "from": "Automatic approval review model for Codex.",
+          "to": "Codex 自动批准审查模型。"
+        }
+      ]
+    }
+  ]
+}

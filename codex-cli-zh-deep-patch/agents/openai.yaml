@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex CLI 深度汉化"
+  short_description: "补丁式汉化 Codex CLI/TUI 提示与授权界面"
+  default_prompt: "Use $codex-cli-zh-deep-patch to localize Codex CLI/TUI hard-coded prompts into Chinese."

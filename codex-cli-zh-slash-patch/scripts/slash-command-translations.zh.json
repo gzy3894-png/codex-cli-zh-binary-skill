@@ -1,0 +1,206 @@
+[
+  {
+    "from": "send logs to maintainers",
+    "to": "向维护者发送日志"
+  },
+  {
+    "from": "start a new chat during a conversation",
+    "to": "在当前对话中开始新聊天"
+  },
+  {
+    "from": "create an AGENTS.md file with instructions for Codex",
+    "to": "创建 AGENTS.md，为 Codex 写入项目指令"
+  },
+  {
+    "from": "summarize conversation to prevent hitting the context limit",
+    "to": "压缩/总结对话，避免触及上下文上限"
+  },
+  {
+    "from": "review my current changes and find issues",
+    "to": "审查当前改动并找出问题"
+  },
+  {
+    "from": "rename the current thread",
+    "to": "重命名当前会话"
+  },
+  {
+    "from": "resume a saved chat",
+    "to": "恢复已保存的聊天"
+  },
+  {
+    "from": "archive this session and exit",
+    "to": "归档本会话并退出"
+  },
+  {
+    "from": "permanently delete this session and exit",
+    "to": "永久删除本会话并退出"
+  },
+  {
+    "from": "clear the terminal and start a new chat",
+    "to": "清空终端并开始新聊天"
+  },
+  {
+    "from": "fork the current chat",
+    "to": "从当前聊天创建分支"
+  },
+  {
+    "from": "continue this session in Codex Desktop",
+    "to": "在 Codex Desktop 中继续此会话"
+  },
+  {
+    "from": "exit Codex",
+    "to": "退出 Codex"
+  },
+  {
+    "from": "copy last response as markdown",
+    "to": "将上一条回复复制为 Markdown"
+  },
+  {
+    "from": "toggle raw scrollback mode for copy-friendly terminal selection",
+    "to": "切换原始回滚模式，便于终端选择复制"
+  },
+  {
+    "from": "show git diff (including untracked files)",
+    "to": "显示 git diff，包括未跟踪文件"
+  },
+  {
+    "from": "mention a file",
+    "to": "引用一个文件"
+  },
+  {
+    "from": "use skills to improve how Codex performs specific tasks",
+    "to": "使用技能增强 Codex 执行特定任务的能力"
+  },
+  {
+    "from": "import setup, this project, and recent chats from Claude Code",
+    "to": "从 Claude Code 导入设置、项目和最近聊天"
+  },
+  {
+    "from": "view and manage lifecycle hooks",
+    "to": "查看和管理生命周期 hooks"
+  },
+  {
+    "from": "show current session configuration and token usage",
+    "to": "显示当前会话配置和 token 用量"
+  },
+  {
+    "from": "view account usage or use a usage limit reset",
+    "to": "查看账号用量或使用额度重置"
+  },
+  {
+    "from": "show config layers and requirement sources for debugging",
+    "to": "显示配置层和需求来源，便于调试"
+  },
+  {
+    "from": "configure which items appear in the terminal title",
+    "to": "配置终端标题中显示的项目"
+  },
+  {
+    "from": "configure which items appear in the status line",
+    "to": "配置底部状态栏中显示的项目"
+  },
+  {
+    "from": "choose a syntax highlighting theme",
+    "to": "选择语法高亮主题"
+  },
+  {
+    "from": "choose or hide the terminal pet",
+    "to": "选择或隐藏终端宠物"
+  },
+  {
+    "from": "list background terminals",
+    "to": "列出后台终端"
+  },
+  {
+    "from": "stop all background terminals",
+    "to": "停止所有后台终端"
+  },
+  {
+    "from": "DO NOT USE",
+    "to": "不要使用"
+  },
+  {
+    "from": "choose what model and reasoning effort to use",
+    "to": "选择要使用的模型和推理等级"
+  },
+  {
+    "from": "include current selection, open files, and other context from your IDE",
+    "to": "包含 IDE 当前选区、打开文件和其他上下文"
+  },
+  {
+    "from": "choose a communication style for Codex",
+    "to": "选择 Codex 的沟通风格"
+  },
+  {
+    "from": "switch to Plan mode",
+    "to": "切换到计划模式"
+  },
+  {
+    "from": "set or view the goal for a long-running task",
+    "to": "设置或查看长时间任务的目标"
+  },
+  {
+    "from": "switch the active agent thread",
+    "to": "切换当前活动的代理线程"
+  },
+  {
+    "from": "start a side conversation in an ephemeral fork",
+    "to": "在临时分支中开始旁路对话"
+  },
+  {
+    "from": "choose what Codex is allowed to do",
+    "to": "选择 Codex 被允许执行的操作"
+  },
+  {
+    "from": "remap TUI shortcuts",
+    "to": "重映射 TUI 快捷键"
+  },
+  {
+    "from": "toggle Vim mode for the composer",
+    "to": "切换输入框 Vim 模式"
+  },
+  {
+    "from": "set up elevated agent sandbox",
+    "to": "设置提升权限的代理沙盒"
+  },
+  {
+    "from": "let sandbox read a directory: /sandbox-add-read-dir <absolute_path>",
+    "to": "允许沙盒读取目录：/sandbox-add-read-dir <绝对路径>"
+  },
+  {
+    "from": "toggle experimental features",
+    "to": "切换实验性功能"
+  },
+  {
+    "from": "approve one retry of a recent auto-review denial",
+    "to": "批准最近一次自动审查拒绝后的重试"
+  },
+  {
+    "from": "configure memory use and generation",
+    "to": "配置记忆使用和生成"
+  },
+  {
+    "from": "list configured MCP tools; use /mcp verbose for details",
+    "to": "列出已配置的 MCP 工具；使用 /mcp verbose 查看详情"
+  },
+  {
+    "from": "manage apps",
+    "to": "管理应用"
+  },
+  {
+    "from": "browse plugins",
+    "to": "浏览插件"
+  },
+  {
+    "from": "log out of Codex",
+    "to": "退出 Codex 登录"
+  },
+  {
+    "from": "print the rollout file path",
+    "to": "打印 rollout 文件路径"
+  },
+  {
+    "from": "test approval request",
+    "to": "测试审批请求"
+  }
+]

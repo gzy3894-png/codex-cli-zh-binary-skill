@@ -2,7 +2,37 @@
 
 这是一个 Codex CLI 汉化项目 / 中文汉化 Skill，面向 Windows 上通过 npm 安装的 OpenAI Codex CLI。它用预编译的中文 `codex.exe` 接管当前 npm wrapper，适合想把本机 `codex` 命令切到 Codex 中文版、但不想重新编译源码的场景。
 
-如果你在找 `codex汉化项目`、`codex 汉化项目`、`Codex CLI 中文汉化`、`Codex 中文版` 或 Windows 下的一键中文化方案，这个仓库提供的是“不编译源码，只替换当前 npm wrapper 指向的二进制”的路径。
+如果你在找 `codex汉化项目`、`codex 汉化项目`、`Codex CLI 汉化项目`、`Codex CLI 中文汉化`、`Codex 中文版`、`Codex 汉化版`、`OpenAI Codex 中文版`、`codex.exe 中文版`、`codex 源码汉化`、`Codex 编译汉化`、`Termux Codex 中文版`、`Android Codex 汉化` 或 Windows 下的一键中文化方案，这个仓库提供的是“不编译源码，只替换当前 npm wrapper 指向的二进制”的路径。
+
+当前 `main` 分支发布的是二进制替换技能；`compile-skill` 分支发布源码编译技能，面向需要自己从 OpenAI Codex 官方源码打补丁并编译的用户。
+
+## 编译技能分支
+
+源码编译技能在 `compile-skill` 分支：
+
+```powershell
+git clone -b compile-skill https://github.com/gzy3894-png/codex-cli-zh-binary-skill.git
+Copy-Item -Recurse -Force .\codex-cli-zh-binary-skill\codex-cli-zh "$env:USERPROFILE\.codex\skills\codex-cli-zh"
+Copy-Item -Recurse -Force .\codex-cli-zh-binary-skill\codex-android-musl-zh "$env:USERPROFILE\.codex\skills\codex-android-musl-zh"
+```
+
+它包含：
+
+- `codex-cli-zh`：源码级汉化、Windows x64 构建、macOS 本机构建、覆盖扫描和 Windows npm wrapper 安装。
+- `codex-android-musl-zh`：从 Windows 交叉编译 `aarch64-unknown-linux-musl` 中文 Codex CLI。
+- `codex-cli-zh-slash-patch` / `codex-cli-zh-deep-patch`：拆分版 slash 命令和深层 TUI 文案补丁技能。
+
+已验证支持：
+
+- Windows x64：Codex CLI `0.142.2`、`0.142.4`
+- Windows x64 当前发布基线：Codex CLI `0.142.4`
+- ARM64 musl：Codex CLI `0.142.4`，目标 `aarch64-unknown-linux-musl`
+
+macOS 支持：
+
+- `compile-skill` 分支包含 `codex-cli-zh/scripts/build-codex-cli-zh-macos.sh`。
+- 支持 macOS 本机 patch + Cargo build，可传 `--repo-ref rust-v0.142.4` 或 `--target aarch64-apple-darwin`。
+- 当前维护主机是 Windows，无法在本次发布中宣称 macOS 产物已真机运行验证；后续有 macOS 机器后应补充实际哈希和 `codex --version` 验证记录。
 
 它的改动范围刻意保持很小：不改用户配置、不碰 CC Switch、不处理 Codex Desktop，只定位当前终端实际会执行的 npm wrapper，并让新开的 Codex CLI 启动中文二进制。
 
