@@ -6,12 +6,26 @@
 - 适用：Android/Termux ARM64 或兼容的 ARM64 Linux musl 环境
 - 说明：这不是 Android NDK/Bionic 目标；Code Mode 运行时在该 musl 构建中被禁用
 
-## Termux 裸环境安装
+## Termux 裸环境一键安装
 
-如果是刚装好的 Termux，不能直接运行 `curl | sh`，因为裸环境里可能还没有 `curl`。先用 Termux 自带的 `pkg` 装下载器和证书：
+如果是刚装好的 Termux，不能直接运行 `curl | sh`，因为裸环境里可能还没有 `curl`。下面这一行会先用 Termux 自带的 `pkg` 安装下载器和证书，然后脚本会继续安装 Codex 运行和常见工作环境依赖：
 
 ```sh
 pkg update -y && pkg install -y ca-certificates curl && curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
+```
+
+默认 `full` 依赖包括：
+
+- Codex 下载/运行：`ca-certificates`、`curl`、`wget`、`tar`、`gzip`、`unzip`、`xz-utils`
+- 代码工作流：`git`、`openssh`、`ripgrep`、`fd`、`jq`
+- 常用语言环境：`python`、`python-pip`、`nodejs`、`npm`
+- Shell/文本/补丁工具：`bash`、`coreutils`、`findutils`、`sed`、`grep`、`gawk`、`diffutils`、`patch`
+- 常见本地编译依赖：`make`、`clang`、`binutils`、`lld`、`pkg-config`、`cmake`、`ninja`、`openssl`、`libffi`、`perl`、`procps`、`termux-tools`
+
+如果只想装 Codex 运行所需的轻量依赖，可以用：
+
+```sh
+pkg update -y && pkg install -y ca-certificates curl && curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | CODEX_ZH_DEPS_PROFILE=minimal sh
 ```
 
 ## 已有 curl 或 wget 的环境
@@ -32,7 +46,7 @@ wget -O- https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill
 
 脚本会：
 
-- 安装常用依赖：`curl`、`tar`、`git`、`openssh`、`ripgrep`、`jq` 等
+- 安装 Codex 运行和常见工作环境依赖，默认包含 Python/Node.js/native build 工具
 - 下载本目录的 `codex-0.142.4-zh-aarch64-unknown-linux-musl.tar.gz`
 - 校验压缩包和二进制 SHA256
 - 安装到 `$PREFIX/bin/codex-zh`，并把 `codex` 指向它
@@ -43,6 +57,7 @@ wget -O- https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill
 ```sh
 CODEX_ZH_SKIP_DEPS=1 sh install.sh
 CODEX_ZH_SKIP_RUN=1 sh install.sh
+CODEX_ZH_DEPS_PROFILE=minimal sh install.sh
 CODEX_ZH_INSTALL_NAME=codex-zh sh install.sh
 CODEX_ZH_INSTALL_DIR="$HOME/.local/bin" sh install.sh
 ```

@@ -10,7 +10,7 @@
 
 `android-arm64-musl-installer` 分支发布 Android/Termux ARM64 一键安装包，包含 Codex CLI `0.142.4` 中文版 `aarch64-unknown-linux-musl` 压缩包和自动安装脚本。
 
-刚装好的 Termux / Termux 裸环境推荐先安装下载器和证书：
+刚装好的 Termux / Termux 裸环境用这一条。它会先安装下载器和证书，然后脚本继续安装 Codex 运行依赖和常见工作环境依赖：
 
 ```sh
 pkg update -y && pkg install -y ca-certificates curl && curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
@@ -26,6 +26,20 @@ curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-ski
 
 ```sh
 wget -O- https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
+```
+
+默认会安装这些 Termux 工作环境依赖：
+
+- Codex 下载/运行：`ca-certificates`、`curl`、`wget`、`tar`、`gzip`、`unzip`、`xz-utils`
+- 代码工作流：`git`、`openssh`、`ripgrep`、`fd`、`jq`
+- 常用语言环境：`python`、`python-pip`、`nodejs`、`npm`
+- Shell/文本/补丁工具：`bash`、`coreutils`、`findutils`、`sed`、`grep`、`gawk`、`diffutils`、`patch`
+- 常见本地编译依赖：`make`、`clang`、`binutils`、`lld`、`pkg-config`、`cmake`、`ninja`、`openssl`、`libffi`、`perl`、`procps`、`termux-tools`
+
+如果只想安装轻量运行依赖：
+
+```sh
+pkg update -y && pkg install -y ca-certificates curl && curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | CODEX_ZH_DEPS_PROFILE=minimal sh
 ```
 
 没有 `pkg`、`curl`、`wget` 的纯 Android shell 不能远程一键安装；需要先手动提供下载器或本地复制安装文件。脚本会自动安装终端依赖、下载汉化版 ARM64 musl 二进制、校验 SHA256，并把 `codex` 命令指向 `codex-zh`。

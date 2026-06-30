@@ -12,6 +12,7 @@ BIN_SHA256="40626C9FF0A63A04DD6BC5D2120CD418E07C5306202BD955F34EFE761B05E423"
 INSTALL_NAME="${CODEX_ZH_INSTALL_NAME:-codex}"
 SKIP_DEPS="${CODEX_ZH_SKIP_DEPS:-0}"
 SKIP_RUN="${CODEX_ZH_SKIP_RUN:-0}"
+DEPS_PROFILE="${CODEX_ZH_DEPS_PROFILE:-full}"
 
 info() {
   printf '%s\n' "$*"
@@ -53,15 +54,25 @@ install_deps() {
   fi
 
   if have pkg && [ -n "${PREFIX:-}" ]; then
-    info "installing Termux dependencies..."
+    info "installing Termux dependencies ($DEPS_PROFILE profile)..."
     pkg update -y
-    pkg install -y ca-certificates curl tar gzip git openssh ripgrep jq
-    pkg install -y fd >/dev/null 2>&1 || true
+    if [ "$DEPS_PROFILE" = "minimal" ]; then
+      pkg install -y ca-certificates curl wget tar gzip git openssh ripgrep jq
+      pkg install -y fd >/dev/null 2>&1 || true
+    else
+      pkg install -y \
+        ca-certificates curl wget tar gzip unzip xz-utils \
+        git openssh ripgrep fd jq \
+        python python-pip nodejs npm \
+        coreutils findutils sed grep gawk diffutils patch \
+        bash make clang binutils lld pkg-config cmake ninja \
+        openssl libffi perl procps termux-tools
+    fi
     return
   fi
 
   if have apt-get; then
-    info "installing Debian/Ubuntu dependencies..."
+    info "installing Debian/Ubuntu dependencies ($DEPS_PROFILE profile)..."
     if [ "$(id -u)" = "0" ]; then
       APT="apt-get"
     elif have sudo; then
@@ -71,16 +82,46 @@ install_deps() {
       return
     fi
     $APT update
-    $APT install -y ca-certificates curl tar gzip git openssh-client ripgrep jq
+    if [ "$DEPS_PROFILE" = "minimal" ]; then
+      $APT install -y ca-certificates curl wget tar gzip git openssh-client ripgrep jq fd-find
+    else
+      $APT install -y \
+        ca-certificates curl wget tar gzip unzip xz-utils \
+        git openssh-client ripgrep fd-find jq \
+        python3 python3-pip nodejs npm \
+        coreutils findutils sed grep gawk diffutils patch \
+        bash make gcc g++ pkg-config cmake ninja-build \
+        openssl libssl-dev libffi-dev perl procps
+    fi
     return
   fi
 
   if have apk; then
-    info "installing Alpine dependencies..."
+    info "installing Alpine dependencies ($DEPS_PROFILE profile)..."
     if [ "$(id -u)" = "0" ]; then
-      apk add --no-cache ca-certificates curl tar gzip git openssh-client ripgrep fd jq
+      if [ "$DEPS_PROFILE" = "minimal" ]; then
+        apk add --no-cache ca-certificates curl wget tar gzip git openssh-client ripgrep fd jq
+      else
+        apk add --no-cache \
+          ca-certificates curl wget tar gzip unzip xz \
+          git openssh-client ripgrep fd jq \
+          python3 py3-pip nodejs npm \
+          coreutils findutils sed grep gawk diffutils patch \
+          bash make gcc g++ musl-dev pkgconf cmake ninja \
+          openssl openssl-dev libffi-dev perl procps
+      fi
     elif have sudo; then
-      sudo apk add --no-cache ca-certificates curl tar gzip git openssh-client ripgrep fd jq
+      if [ "$DEPS_PROFILE" = "minimal" ]; then
+        sudo apk add --no-cache ca-certificates curl wget tar gzip git openssh-client ripgrep fd jq
+      else
+        sudo apk add --no-cache \
+          ca-certificates curl wget tar gzip unzip xz \
+          git openssh-client ripgrep fd jq \
+          python3 py3-pip nodejs npm \
+          coreutils findutils sed grep gawk diffutils patch \
+          bash make gcc g++ musl-dev pkgconf cmake ninja \
+          openssl openssl-dev libffi-dev perl procps
+      fi
     else
       warn "apk found but sudo/root unavailable; skipping dependency install"
     fi
