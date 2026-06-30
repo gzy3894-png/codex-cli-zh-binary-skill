@@ -16,7 +16,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2.0
 
 $DefaultDownloadUrl = "https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/latest/download/codex-cli-zh-windows-x64.exe"
-$DefaultReleaseSha256 = "EFAF3565534AE16BA48350193F43EE37517F5A9C8E8D8E819B6090977FBCE083"
+$DefaultReleaseSha256 = "0DD8649E0C19FA57590D2F7B674FFDFE278744E2DCCC4036C28DB168B2E073A5"
 
 function Write-Step {
     param([string]$Message)

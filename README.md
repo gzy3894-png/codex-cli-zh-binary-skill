@@ -6,10 +6,11 @@
 
 它的改动范围刻意保持很小：不改用户配置、不碰 CC Switch、不处理 Codex Desktop，只定位当前终端实际会执行的 npm wrapper，并让新开的 Codex CLI 启动中文二进制。
 
-当前预编译二进制基于 Codex CLI `0.142.2`。本地验证过的 Windows x64 产物信息：
+当前预编译二进制基于 Codex CLI `0.142.4`。本地验证过的 Windows x64 产物信息：
 
-- 版本：`codex-cli 0.142.2`
-- SHA256：`EFAF3565534AE16BA48350193F43EE37517F5A9C8E8D8E819B6090977FBCE083`
+- 版本：`codex-cli 0.142.4`
+- SHA256：`0DD8649E0C19FA57590D2F7B674FFDFE278744E2DCCC4036C28DB168B2E073A5`
+- 汉化覆盖：授权/审批、登录/API key、信任目录、MCP、`/` 命令弹窗和次级页面等高频 TUI 文案。
 
 仓库里只放技能和安装脚本，不把 300MB 级别的 exe 写进 Git 历史。预编译二进制会作为 GitHub Release 资产发布，文件名固定为 `codex-cli-zh-windows-x64.exe`。
 
@@ -85,7 +86,7 @@ codex --version
 应该看到中文二进制对应的版本，例如：
 
 ```text
-codex-cli 0.142.2
+codex-cli 0.142.4
 ```
 
 再检查 wrapper 是否有技能标记：
