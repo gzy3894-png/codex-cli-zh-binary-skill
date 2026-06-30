@@ -1,0 +1,67 @@
+Codex CLI 中文版 Android/Termux ARM64 安装命令
+================================================
+
+仓库分支:
+https://github.com/gzy3894-png/codex-cli-zh-binary-skill/tree/android-arm64-musl-installer/android-arm64-musl
+
+安装脚本:
+https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh
+
+
+1. Termux 裸环境完整安装
+-----------------------
+
+刚装好的 Termux 推荐复制下面两行执行。第一行安装下载器和证书，
+第二行执行安装脚本；安装脚本默认会继续安装 Python/Node.js/Git/SSH/
+ripgrep/fd/jq/clang/make/cmake/ninja 等工作环境依赖。
+
+pkg update -y && pkg install -y ca-certificates curl
+curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
+
+
+2. 已经有 curl 的环境
+--------------------
+
+curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
+
+
+3. 只有 wget 的环境
+------------------
+
+wget -O- https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
+
+
+4. 轻量依赖模式
+---------------
+
+只安装 Codex 运行所需的轻量依赖，不安装完整 Python/Node/native build 工作环境:
+
+pkg update -y && pkg install -y ca-certificates curl
+curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | CODEX_ZH_DEPS_PROFILE=minimal sh
+
+
+5. 默认 full 依赖清单
+--------------------
+
+ca-certificates curl wget tar gzip unzip xz-utils
+git openssh ripgrep fd jq
+python python-pip nodejs npm
+coreutils findutils sed grep gawk diffutils patch
+bash make clang binutils lld pkg-config cmake ninja
+openssl libffi perl procps termux-tools
+
+
+6. 安装结果
+-----------
+
+默认安装到:
+$PREFIX/bin/codex-zh
+
+并把命令:
+codex
+
+指向:
+codex-zh
+
+安装后检查:
+codex --version
