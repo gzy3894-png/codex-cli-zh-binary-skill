@@ -8,10 +8,11 @@
 
 ## Termux 裸环境一键安装
 
-如果是刚装好的 Termux，不能直接运行 `curl | sh`，因为裸环境里可能还没有 `curl`。下面这一行会先用 Termux 自带的 `pkg` 安装下载器和证书，然后脚本会继续安装 Codex 运行和常见工作环境依赖：
+如果是刚装好的 Termux，不能直接运行 `curl | sh`，因为裸环境里可能还没有 `curl`。先安装下载器和证书，然后脚本会继续安装 Codex 运行和常见工作环境依赖。命令里的 dpkg 参数会自动保留已有配置文件，避免 `bash.bashrc` 这类英文提问卡住：
 
 ```sh
-pkg update -y && pkg install -y ca-certificates curl && curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
+DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl
+curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
 ```
 
 默认 `full` 依赖包括：
@@ -25,7 +26,15 @@ pkg update -y && pkg install -y ca-certificates curl && curl -fsSL https://raw.g
 如果只想装 Codex 运行所需的轻量依赖，可以用：
 
 ```sh
-pkg update -y && pkg install -y ca-certificates curl && curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | CODEX_ZH_DEPS_PROFILE=minimal sh
+DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl
+curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | CODEX_ZH_DEPS_PROFILE=minimal sh
+```
+
+如果上次已经卡在 `bash.bashrc (Y/I/N/O/D/Z)` 并失败，先修复 dpkg 状态：
+
+```sh
+DEBIAN_FRONTEND=noninteractive dpkg --force-confdef --force-confold --configure -a
+DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -f install -y
 ```
 
 ## 已有 curl 或 wget 的环境
@@ -58,6 +67,7 @@ wget -O- https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill
 CODEX_ZH_SKIP_DEPS=1 sh install.sh
 CODEX_ZH_SKIP_RUN=1 sh install.sh
 CODEX_ZH_DEPS_PROFILE=minimal sh install.sh
+CODEX_ZH_CACHE_DIR="$HOME/.cache/codex-zh" sh install.sh
 CODEX_ZH_INSTALL_NAME=codex-zh sh install.sh
 CODEX_ZH_INSTALL_DIR="$HOME/.local/bin" sh install.sh
 ```

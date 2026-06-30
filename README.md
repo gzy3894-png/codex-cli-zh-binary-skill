@@ -10,10 +10,11 @@
 
 `android-arm64-musl-installer` 分支发布 Android/Termux ARM64 一键安装包，包含 Codex CLI `0.142.4` 中文版 `aarch64-unknown-linux-musl` 压缩包和自动安装脚本。
 
-刚装好的 Termux / Termux 裸环境用这一条。它会先安装下载器和证书，然后脚本继续安装 Codex 运行依赖和常见工作环境依赖：
+刚装好的 Termux / Termux 裸环境用下面两行。它会先安装下载器和证书，然后脚本继续安装 Codex 运行依赖和常见工作环境依赖；dpkg 配置文件冲突会自动保留当前版本，不再弹 `bash.bashrc` 之类的英文提问：
 
 ```sh
-pkg update -y && pkg install -y ca-certificates curl && curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
+DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl
+curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
 ```
 
 如果环境已经有 `curl`，可以直接执行：
@@ -39,7 +40,15 @@ wget -O- https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill
 如果只想安装轻量运行依赖：
 
 ```sh
-pkg update -y && pkg install -y ca-certificates curl && curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | CODEX_ZH_DEPS_PROFILE=minimal sh
+DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl
+curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | CODEX_ZH_DEPS_PROFILE=minimal sh
+```
+
+如果上次已经卡在 `bash.bashrc (Y/I/N/O/D/Z)` 并失败，先执行：
+
+```sh
+DEBIAN_FRONTEND=noninteractive dpkg --force-confdef --force-confold --configure -a
+DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -f install -y
 ```
 
 没有 `pkg`、`curl`、`wget` 的纯 Android shell 不能远程一键安装；需要先手动提供下载器或本地复制安装文件。脚本会自动安装终端依赖、下载汉化版 ARM64 musl 二进制、校验 SHA256，并把 `codex` 命令指向 `codex-zh`。

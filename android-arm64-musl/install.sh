@@ -19,11 +19,11 @@ info() {
 }
 
 warn() {
-  printf 'warning: %s\n' "$*" >&2
+  printf '警告: %s\n' "$*" >&2
 }
 
 die() {
-  printf 'error: %s\n' "$*" >&2
+  printf '错误: %s\n' "$*" >&2
   exit 1
 }
 
@@ -44,23 +44,53 @@ sha256_file() {
     openssl dgst -sha256 "$1" | awk '{print $2}' | upper
     return
   fi
-  die "missing sha256sum or openssl"
+  die "缺少 sha256sum 或 openssl"
+}
+
+setup_noninteractive_apt() {
+  : "${DEBIAN_FRONTEND:=noninteractive}"
+  : "${APT_LISTCHANGES_FRONTEND:=none}"
+  : "${UCF_FORCE_CONFOLD:=1}"
+  export DEBIAN_FRONTEND APT_LISTCHANGES_FRONTEND UCF_FORCE_CONFOLD
+}
+
+apt_get_noninteractive() {
+  $APT \
+    -o Dpkg::Options::=--force-confdef \
+    -o Dpkg::Options::=--force-confold \
+    "$@"
+}
+
+dpkg_configure_noninteractive() {
+  if ! have dpkg; then
+    return
+  fi
+
+  if [ "${1:-}" = "sudo" ]; then
+    sudo dpkg --force-confdef --force-confold --configure -a || true
+  else
+    dpkg --force-confdef --force-confold --configure -a || true
+  fi
 }
 
 install_deps() {
   if [ "$SKIP_DEPS" = "1" ]; then
-    info "skip dependency install because CODEX_ZH_SKIP_DEPS=1"
+    info "跳过依赖安装，因为 CODEX_ZH_SKIP_DEPS=1"
     return
   fi
 
+  setup_noninteractive_apt
+
   if have pkg && [ -n "${PREFIX:-}" ]; then
-    info "installing Termux dependencies ($DEPS_PROFILE profile)..."
-    pkg update -y
+    APT="apt-get"
+    info "安装 Termux 依赖（$DEPS_PROFILE 模式，自动保留已有配置文件）..."
+    dpkg_configure_noninteractive
+    apt_get_noninteractive update
     if [ "$DEPS_PROFILE" = "minimal" ]; then
-      pkg install -y ca-certificates curl wget tar gzip git openssh ripgrep jq
-      pkg install -y fd >/dev/null 2>&1 || true
+      apt_get_noninteractive install -y ca-certificates curl wget tar gzip git openssh ripgrep jq
+      apt_get_noninteractive install -y fd >/dev/null 2>&1 || true
     else
-      pkg install -y \
+      apt_get_noninteractive install -y \
         ca-certificates curl wget tar gzip unzip xz-utils \
         git openssh ripgrep fd jq \
         python python-pip nodejs npm \
@@ -72,20 +102,22 @@ install_deps() {
   fi
 
   if have apt-get; then
-    info "installing Debian/Ubuntu dependencies ($DEPS_PROFILE profile)..."
+    info "安装 Debian/Ubuntu 依赖（$DEPS_PROFILE 模式，自动保留已有配置文件）..."
     if [ "$(id -u)" = "0" ]; then
       APT="apt-get"
+      dpkg_configure_noninteractive
     elif have sudo; then
       APT="sudo apt-get"
+      dpkg_configure_noninteractive sudo
     else
-      warn "apt-get found but sudo/root unavailable; skipping dependency install"
+      warn "找到 apt-get，但没有 sudo/root 权限；跳过依赖安装"
       return
     fi
-    $APT update
+    apt_get_noninteractive update
     if [ "$DEPS_PROFILE" = "minimal" ]; then
-      $APT install -y ca-certificates curl wget tar gzip git openssh-client ripgrep jq fd-find
+      apt_get_noninteractive install -y ca-certificates curl wget tar gzip git openssh-client ripgrep jq fd-find
     else
-      $APT install -y \
+      apt_get_noninteractive install -y \
         ca-certificates curl wget tar gzip unzip xz-utils \
         git openssh-client ripgrep fd-find jq \
         python3 python3-pip nodejs npm \
@@ -97,7 +129,7 @@ install_deps() {
   fi
 
   if have apk; then
-    info "installing Alpine dependencies ($DEPS_PROFILE profile)..."
+    info "安装 Alpine 依赖（$DEPS_PROFILE 模式）..."
     if [ "$(id -u)" = "0" ]; then
       if [ "$DEPS_PROFILE" = "minimal" ]; then
         apk add --no-cache ca-certificates curl wget tar gzip git openssh-client ripgrep fd jq
@@ -123,12 +155,12 @@ install_deps() {
           openssl openssl-dev libffi-dev perl procps
       fi
     else
-      warn "apk found but sudo/root unavailable; skipping dependency install"
+      warn "找到 apk，但没有 sudo/root 权限；跳过依赖安装"
     fi
     return
   fi
 
-  warn "no supported package manager found; continuing without dependency install"
+  warn "未找到支持的包管理器；不安装依赖，继续执行"
 }
 
 choose_install_dir() {
@@ -154,12 +186,24 @@ download() {
     wget -O "$dest" "$url"
     return
   fi
-  die "missing curl or wget"
+  die "缺少 curl 或 wget"
+}
+
+choose_cache_dir() {
+  if [ -n "${CODEX_ZH_CACHE_DIR:-}" ]; then
+    printf '%s\n' "$CODEX_ZH_CACHE_DIR"
+    return
+  fi
+  if [ -n "${PREFIX:-}" ]; then
+    printf '%s\n' "$PREFIX/var/cache/codex-zh"
+    return
+  fi
+  printf '%s\n' "$HOME/.cache/codex-zh"
 }
 
 case "$(uname -m 2>/dev/null || true)" in
   aarch64|arm64) ;;
-  *) warn "this package is built for Android/Linux ARM64; current arch is $(uname -m 2>/dev/null || echo unknown)" ;;
+  *) warn "这个包是 Android/Linux ARM64 构建；当前架构是 $(uname -m 2>/dev/null || echo unknown)" ;;
 esac
 
 install_deps
@@ -177,20 +221,40 @@ tmp="$tmp_parent/codex-zh-install.$$"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 mkdir -p "$tmp"
 
-archive_path="$tmp/$ARCHIVE"
 archive_url="$BASE_URL/$ARCHIVE"
-info "downloading $archive_url"
-download "$archive_url" "$archive_path"
+cache_dir="$(choose_cache_dir)"
+mkdir -p "$cache_dir"
+archive_path="$cache_dir/$ARCHIVE"
+
+if [ -f "$archive_path" ]; then
+  cached_sha="$(sha256_file "$archive_path" 2>/dev/null || true)"
+  if [ "$cached_sha" = "$ARCHIVE_SHA256" ]; then
+    info "使用已缓存压缩包: $archive_path"
+  else
+    warn "缓存压缩包校验失败，将重新下载: $archive_path"
+    rm -f "$archive_path"
+  fi
+fi
+
+if [ ! -f "$archive_path" ]; then
+  download_path="$tmp/$ARCHIVE.part"
+  info "下载 $archive_url"
+  download "$archive_url" "$download_path"
+
+  actual_download_sha="$(sha256_file "$download_path")"
+  [ "$actual_download_sha" = "$ARCHIVE_SHA256" ] || die "压缩包 sha256 不匹配: $actual_download_sha"
+  mv "$download_path" "$archive_path"
+fi
 
 actual_archive_sha="$(sha256_file "$archive_path")"
-[ "$actual_archive_sha" = "$ARCHIVE_SHA256" ] || die "archive sha256 mismatch: $actual_archive_sha"
+[ "$actual_archive_sha" = "$ARCHIVE_SHA256" ] || die "压缩包 sha256 不匹配: $actual_archive_sha"
 
 tar -xzf "$archive_path" -C "$tmp"
 src="$tmp/codex-${VERSION}-zh-${TARGET}"
-[ -f "$src" ] || die "archive did not contain codex binary"
+[ -f "$src" ] || die "压缩包里没有 codex 二进制"
 
 actual_bin_sha="$(sha256_file "$src")"
-[ "$actual_bin_sha" = "$BIN_SHA256" ] || die "binary sha256 mismatch: $actual_bin_sha"
+[ "$actual_bin_sha" = "$BIN_SHA256" ] || die "二进制 sha256 不匹配: $actual_bin_sha"
 
 install_dir="$(choose_install_dir)"
 mkdir -p "$install_dir"
@@ -205,7 +269,7 @@ if [ "$INSTALL_NAME" != "codex-zh" ]; then
     current_link="$(readlink "$target_path" 2>/dev/null || true)"
     if [ "$current_link" != "$real_path" ]; then
       backup="$target_path.bak.$(date +%Y%m%d%H%M%S)"
-      info "backing up existing $target_path to $backup"
+      info "备份已有命令 $target_path 到 $backup"
       mv "$target_path" "$backup"
     fi
   fi
@@ -213,16 +277,16 @@ if [ "$INSTALL_NAME" != "codex-zh" ]; then
 fi
 
 installed_sha="$(sha256_file "$real_path")"
-[ "$installed_sha" = "$BIN_SHA256" ] || die "installed binary sha256 mismatch: $installed_sha"
+[ "$installed_sha" = "$BIN_SHA256" ] || die "已安装二进制 sha256 不匹配: $installed_sha"
 
-info "installed: $real_path"
+info "已安装: $real_path"
 if [ "$INSTALL_NAME" != "codex-zh" ]; then
-  info "command: $target_path"
+  info "命令: $target_path"
 fi
 
 if [ "$SKIP_RUN" = "1" ]; then
-  info "skip runtime check because CODEX_ZH_SKIP_RUN=1"
-  info "done"
+  info "跳过运行检查，因为 CODEX_ZH_SKIP_RUN=1"
+  info "完成"
   exit 0
 fi
 
@@ -230,10 +294,10 @@ version_check_file="$tmp/version.out"
 if "$target_path" --version >"$version_check_file" 2>&1; then
   version_output="$(cat "$version_check_file")"
   info "$version_output"
-  info "done"
+  info "完成"
 else
   status=$?
-  warn "installed, but runtime check failed with exit code $status"
+  warn "已安装，但运行检查失败，退出码 $status"
   cat "$version_check_file" >&2 || true
   exit "$status"
 fi
