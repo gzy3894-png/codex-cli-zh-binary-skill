@@ -6,6 +6,16 @@
 
 当前 `main` 分支发布的是二进制替换技能；`compile-skill` 分支发布源码编译技能，面向需要自己从 OpenAI Codex 官方源码打补丁并编译的用户。
 
+## Android ARM64 一键安装分支
+
+`android-arm64-musl-installer` 分支发布 Android/Termux ARM64 一键安装包，包含 Codex CLI `0.142.4` 中文版 `aarch64-unknown-linux-musl` 压缩包和自动安装脚本：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
+```
+
+脚本会自动安装终端依赖、下载汉化版 ARM64 musl 二进制、校验 SHA256，并把 `codex` 命令指向 `codex-zh`。
+
 ## 编译技能分支
 
 源码编译技能在 `compile-skill` 分支：
