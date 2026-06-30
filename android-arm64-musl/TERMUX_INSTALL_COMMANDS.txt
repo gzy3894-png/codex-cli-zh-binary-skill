@@ -4,40 +4,48 @@ Codex CLI 中文版 Android/Termux ARM64 安装命令
 仓库分支:
 https://github.com/gzy3894-png/codex-cli-zh-binary-skill/tree/android-arm64-musl-installer/android-arm64-musl
 
-安装脚本:
+推荐安装脚本:
+https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-alpine-proot.sh
+
+备用原生 Termux 安装脚本:
 https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh
 
 
-1. Termux 裸环境完整安装
------------------------
+1. 推荐：裸 Termux 一键安装 Alpine proot + Codex
+------------------------------------------------
 
-刚装好的 Termux 推荐复制下面两行执行。第一行安装下载器和证书，
-第二行执行安装脚本；安装脚本默认会继续安装 Python/Node.js/Git/SSH/
-ripgrep/fd/jq/clang/make/cmake/ninja 等工作环境依赖。
+刚装好的 Termux 复制下面一整条执行。它会安装下载器、proot 和 jq，
+然后下载 Alpine rootfs，安装 Codex 中文版，并在开局询问第三方 API
+Base URL 和 API Key，自动补齐 /v1，获取模型列表并让你选择默认模型。
 
-DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl
-curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
+DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl && curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-alpine-proot.sh | sh
 
 
 2. 已经有 curl 的环境
 --------------------
 
-curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-alpine-proot.sh | sh
 
 
-3. 只有 wget 的环境
-------------------
+3. 只安装，不配置 API
+--------------------
 
-wget -O- https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-alpine-proot.sh | CODEX_ZH_SKIP_API_SETUP=1 sh
 
 
-4. 轻量依赖模式
----------------
+4. 安装结果
+-----------
 
-只安装 Codex 运行所需的轻量依赖，不安装完整 Python/Node/native build 工作环境:
+默认 rootfs:
+$PREFIX/var/lib/codex-zh/codex-alpine/rootfs
 
-DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl
-curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | CODEX_ZH_DEPS_PROFILE=minimal sh
+默认命令:
+$PREFIX/bin/codex
+$PREFIX/bin/codex-alpine
+
+安装后运行:
+codex --version
+codex
 
 
 5. 如果上次卡在 bash.bashrc 提问
@@ -50,55 +58,41 @@ DEBIAN_FRONTEND=noninteractive dpkg --force-confdef --force-confold --configure 
 DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -f install -y
 
 
-6. 默认 full 依赖清单
---------------------
+6. 如果 proot-distro 安装 Debian/Ubuntu 报 SSL EOF
+--------------------------------------------------
 
-ca-certificates curl wget tar gzip unzip xz-utils
-git openssh ripgrep fd jq
-python python-pip nodejs npm
-coreutils findutils sed grep gawk diffutils patch
-bash make clang binutils lld pkg-config cmake ninja
-openssl libffi perl procps termux-tools
+不用走 proot-distro 的 OCI registry 路线。推荐脚本直接下载 Alpine
+minirootfs tarball 并本地解压，能绕过 registry 认证阶段的
+SSL: UNEXPECTED_EOF_WHILE_READING。
 
 
-7. 安装结果
------------
+7. 如果 Alpine apk update 报 I/O error
+--------------------------------------
 
-默认二进制安装到:
-$PREFIX/bin/codex-zh-bin
+推荐脚本默认使用 HTTP TUNA:
+http://mirrors.tuna.tsinghua.edu.cn/alpine/v3.24/main
+http://mirrors.tuna.tsinghua.edu.cn/alpine/v3.24/community
 
-包装命令安装到:
-$PREFIX/bin/codex-zh
-
-并把命令 codex 指向 codex-zh。
-
-包装命令会自动修正 HOME、CODEX_HOME、TMPDIR 和 PATH，避免 root/su
-shell 下 Codex 把状态库写到 /.codex。
-
-安装后检查:
-codex --version
+失败时自动切 BFSU:
+http://mirrors.bfsu.edu.cn/alpine/v3.24/main
+http://mirrors.bfsu.edu.cn/alpine/v3.24/community
 
 
-8. su/root shell 里 codex 找不到
--------------------------------
+8. 如果 Codex 结束时报 Stop hook code 127
+-----------------------------------------
 
-如果提示:
-/system/bin/sh: codex: inaccessible or not found
+推荐脚本默认生成:
 
-先执行:
-export PATH="/data/data/com.termux/files/usr/bin:$PATH"
+[features]
+hooks = false
 
-再执行:
-codex --version
-codex
+这会禁用从旧环境迁移过来的停止 hook，避免找不到本机命令时报错。
 
-如果之前已经出现:
-Location: /.codex/state_5.sqlite
 
-重新运行安装脚本即可。新版包装命令会把 HOME 固定回:
-/data/data/com.termux/files/home
+9. 备用：原生 Termux 安装
+-------------------------
 
-注意:
-Termux 禁止 root/su shell 运行 apt/pkg。新版安装脚本在 root/su 下会跳过
-依赖安装，只修复/安装 codex 包装命令。要补装 Python/Node/Git 等依赖，
-请先执行 exit 回普通 Termux 用户，再运行完整安装命令。
+如果你确认原生 Termux 上流式响应稳定，可以使用旧安装路线:
+
+DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl
+curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh

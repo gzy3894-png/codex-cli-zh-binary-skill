@@ -10,38 +10,31 @@
 
 `android-arm64-musl-installer` 分支发布 Android/Termux ARM64 一键安装包，包含 Codex CLI `0.142.4` 中文版 `aarch64-unknown-linux-musl` 压缩包和自动安装脚本。
 
-刚装好的 Termux / Termux 裸环境用下面两行。它会先安装下载器和证书，然后脚本继续安装 Codex 运行依赖和常见工作环境依赖；dpkg 配置文件冲突会自动保留当前版本，不再弹 `bash.bashrc` 之类的英文提问：
+推荐使用 Alpine proot 路线。这个路线会在 Termux 里自动下载 Alpine rootfs、安装 Codex 中文版、交互式配置第三方 Responses API、获取模型列表并让你选择默认/启用模型。它绕过了原生 Termux 下可能出现的流式断连、GitHub/OCI TLS EOF、`apk` CDN I/O error 等问题。
+
+刚装好的 Termux / Termux 裸环境执行这一条：
+
+```sh
+DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl && curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-alpine-proot.sh | sh
+```
+
+如果环境已经有 `curl`：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-alpine-proot.sh | sh
+```
+
+脚本会在开局要求输入第三方 API Base URL 和 API Key。Base URL 会自动补齐 `/v1`；随后脚本会请求 `/models`，列出模型并让你选择默认模型和启用模型。安装完成后直接运行：
+
+```sh
+codex
+```
+
+原生 Termux 安装脚本仍保留为备选。如果你明确想安装到 Termux 原生环境，而不是 Alpine proot：
 
 ```sh
 DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl
 curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
-```
-
-如果环境已经有 `curl`，可以直接执行：
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
-```
-
-如果只有 `wget`，可以执行：
-
-```sh
-wget -O- https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
-```
-
-默认会安装这些 Termux 工作环境依赖：
-
-- Codex 下载/运行：`ca-certificates`、`curl`、`wget`、`tar`、`gzip`、`unzip`、`xz-utils`
-- 代码工作流：`git`、`openssh`、`ripgrep`、`fd`、`jq`
-- 常用语言环境：`python`、`python-pip`、`nodejs`、`npm`
-- Shell/文本/补丁工具：`bash`、`coreutils`、`findutils`、`sed`、`grep`、`gawk`、`diffutils`、`patch`
-- 常见本地编译依赖：`make`、`clang`、`binutils`、`lld`、`pkg-config`、`cmake`、`ninja`、`openssl`、`libffi`、`perl`、`procps`、`termux-tools`
-
-如果只想安装轻量运行依赖：
-
-```sh
-DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl
-curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | CODEX_ZH_DEPS_PROFILE=minimal sh
 ```
 
 如果上次已经卡在 `bash.bashrc (Y/I/N/O/D/Z)` 并失败，先执行：
@@ -51,7 +44,7 @@ DEBIAN_FRONTEND=noninteractive dpkg --force-confdef --force-confold --configure 
 DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -f install -y
 ```
 
-没有 `pkg`、`curl`、`wget` 的纯 Android shell 不能远程一键安装；需要先手动提供下载器或本地复制安装文件。脚本会自动安装终端依赖、下载汉化版 ARM64 musl 二进制、校验 SHA256，并把 `codex` 命令指向 `codex-zh`。
+没有 `pkg`、`curl`、`wget` 的纯 Android shell 不能远程一键安装；需要先手动提供下载器或本地复制安装文件。脚本会自动安装终端依赖、下载汉化版 ARM64 musl 二进制、校验 SHA256，并把 `codex` 命令指向 Alpine proot 里的 Codex。
 
 如果在 `su` 或 Android root shell 里提示 `codex: inaccessible or not found`，先运行：
 
