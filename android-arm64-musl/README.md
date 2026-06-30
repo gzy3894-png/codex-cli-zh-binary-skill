@@ -3,11 +3,60 @@
 这个目录发布 Codex CLI `0.142.4` 中文版的 ARM64 musl 构建：
 
 - 目标：`aarch64-unknown-linux-musl`
-- 推荐环境：Android Termux + Alpine proot
+- 推荐环境：ReTerminal Alpine 模式，或 Android Termux + Alpine proot
 - 备用环境：原生 Termux ARM64 或兼容 ARM64 Linux musl 环境
 - 说明：这不是 Android NDK/Bionic 目标；Code Mode 运行时在该 musl 构建中被禁用
 
-## 推荐：裸 Termux 一键安装
+## 推荐终端：ReTerminal
+
+Android 端推荐使用 ReTerminal，官方仓库：
+
+```text
+https://github.com/RohitKushvaha01/ReTerminal
+```
+
+建议安装官方 Actions 中包含中文资源的 `1.3.0` 构建，然后进入 ReTerminal 的 Alpine 模式。
+
+## 推荐：ReTerminal Alpine 一键安装
+
+如果你已经在 ReTerminal 的 Alpine 模式里，直接执行：
+
+```sh
+wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | sh
+```
+
+如果 Alpine 里已有 `curl`：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | sh
+```
+
+这个脚本不会创建 proot，也不依赖 Termux。它会：
+
+- 使用 Alpine 的 `apk` 安装依赖
+- 默认使用 full 依赖模式，包含 Python、Node/npm、编译工具链、diff/patch、OpenSSL/libffi 等常用 Codex 工作依赖
+- 下载并校验 Codex CLI `0.142.4` 中文 ARM64 musl 二进制
+- 开局询问第三方 API Base URL 和 API Key
+- 自动补齐 API Base URL 的 `/v1` 后缀
+- 请求 `/models`，让用户选择默认模型和启用模型
+- 生成 `~/.codex/config.toml`，默认使用 `wire_api = "responses"`
+- 设置 `[features] hooks = false`，避免旧 hook 导致 `Stop hook exited with code 127`
+- 安装 `codex` 命令到 `~/.local/bin`
+
+安装完成后运行：
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+codex
+```
+
+如果网络很差，只想先装能跑 Codex 的最小依赖：
+
+```sh
+wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_DEPS_PROFILE=minimal sh
+```
+
+## 备用：裸 Termux 一键安装
 
 推荐使用 `install-alpine-proot.sh`。它会：
 

@@ -2,6 +2,8 @@
 
 这是一个 Codex CLI 汉化项目 / 中文汉化 Skill，面向 Windows 上通过 npm 安装的 OpenAI Codex CLI。它用预编译的中文 `codex.exe` 接管当前 npm wrapper，适合想把本机 `codex` 命令切到 Codex 中文版、但不想重新编译源码的场景。
 
+Android 手机端推荐终端：ReTerminal，官方仓库为 <https://github.com/RohitKushvaha01/ReTerminal>。推荐安装官方 Actions 中包含中文资源的 `1.3.0` 构建，然后切到 Alpine 模式运行本仓库的 ReTerminal Alpine 一键脚本。
+
 如果你在找 `codex汉化项目`、`codex 汉化项目`、`Codex CLI 汉化项目`、`Codex CLI 中文汉化`、`Codex 中文版`、`Codex 汉化版`、`OpenAI Codex 中文版`、`codex.exe 中文版`、`codex 源码汉化`、`Codex 编译汉化`、`Termux Codex 中文版`、`Android Codex 汉化` 或 Windows 下的一键中文化方案，这个仓库提供的是“不编译源码，只替换当前 npm wrapper 指向的二进制”的路径。
 
 当前 `main` 分支发布的是二进制替换技能；`compile-skill` 分支发布源码编译技能，面向需要自己从 OpenAI Codex 官方源码打补丁并编译的用户。
@@ -11,6 +13,24 @@
 `android-arm64-musl-installer` 分支发布 Android/Termux ARM64 一键安装包，包含 Codex CLI `0.142.4` 中文版 `aarch64-unknown-linux-musl` 压缩包和自动安装脚本。
 
 推荐使用 Alpine proot 路线。这个路线会在 Termux 里自动下载 Alpine rootfs、安装 Codex 中文版、交互式配置第三方 Responses API、获取模型列表并让你选择默认/启用模型。它绕过了原生 Termux 下可能出现的流式断连、GitHub/OCI TLS EOF、`apk` CDN I/O error 等问题。
+
+如果你使用的是 ReTerminal，并且已经进入它自带的 Alpine 模式，直接执行这一条：
+
+```sh
+wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | sh
+```
+
+如果 Alpine 里已有 `curl`，也可以：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | sh
+```
+
+默认会安装较完整的 Codex 工作依赖，包括 Python、Node/npm、编译工具链、diff/patch、OpenSSL/libffi 等。网络很差时可以先用最小依赖模式：
+
+```sh
+wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_DEPS_PROFILE=minimal sh
+```
 
 刚装好的 Termux / Termux 裸环境执行这一条：
 
