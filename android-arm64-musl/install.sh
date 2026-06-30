@@ -123,7 +123,16 @@ esac
 
 install_deps
 
-tmp="${TMPDIR:-/tmp}/codex-zh-install.$$"
+tmp_parent="${TMPDIR:-}"
+if [ -z "$tmp_parent" ]; then
+  if [ -n "${PREFIX:-}" ]; then
+    tmp_parent="$PREFIX/tmp"
+  else
+    tmp_parent="$HOME/.cache/tmp"
+  fi
+fi
+mkdir -p "$tmp_parent"
+tmp="$tmp_parent/codex-zh-install.$$"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 mkdir -p "$tmp"
 
@@ -176,15 +185,14 @@ if [ "$SKIP_RUN" = "1" ]; then
   exit 0
 fi
 
-if "$target_path" --version >/tmp/codex-zh-version.$$ 2>&1; then
-  version_output="$(cat /tmp/codex-zh-version.$$)"
-  rm -f /tmp/codex-zh-version.$$
+version_check_file="$tmp/version.out"
+if "$target_path" --version >"$version_check_file" 2>&1; then
+  version_output="$(cat "$version_check_file")"
   info "$version_output"
   info "done"
 else
   status=$?
   warn "installed, but runtime check failed with exit code $status"
-  cat /tmp/codex-zh-version.$$ >&2 || true
-  rm -f /tmp/codex-zh-version.$$
+  cat "$version_check_file" >&2 || true
   exit "$status"
 fi

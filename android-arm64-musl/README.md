@@ -6,13 +6,29 @@
 - 适用：Android/Termux ARM64 或兼容的 ARM64 Linux musl 环境
 - 说明：这不是 Android NDK/Bionic 目标；Code Mode 运行时在该 musl 构建中被禁用
 
-## 一键安装
+## Termux 裸环境安装
 
-在 Android 终端或 Termux 里运行：
+如果是刚装好的 Termux，不能直接运行 `curl | sh`，因为裸环境里可能还没有 `curl`。先用 Termux 自带的 `pkg` 装下载器和证书：
+
+```sh
+pkg update -y && pkg install -y ca-certificates curl && curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
+```
+
+## 已有 curl 或 wget 的环境
+
+如果当前环境已经有 `curl`：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
 ```
+
+如果只有 `wget`：
+
+```sh
+wget -O- https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
+```
+
+真正没有 `pkg`、`curl`、`wget` 的 Android shell 不能远程一键安装；需要先手动提供下载器，或把 `install.sh` 和压缩包复制到设备上再本地执行。
 
 脚本会：
 

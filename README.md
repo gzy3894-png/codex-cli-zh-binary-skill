@@ -8,13 +8,27 @@
 
 ## Android ARM64 一键安装分支
 
-`android-arm64-musl-installer` 分支发布 Android/Termux ARM64 一键安装包，包含 Codex CLI `0.142.4` 中文版 `aarch64-unknown-linux-musl` 压缩包和自动安装脚本：
+`android-arm64-musl-installer` 分支发布 Android/Termux ARM64 一键安装包，包含 Codex CLI `0.142.4` 中文版 `aarch64-unknown-linux-musl` 压缩包和自动安装脚本。
+
+刚装好的 Termux / Termux 裸环境推荐先安装下载器和证书：
+
+```sh
+pkg update -y && pkg install -y ca-certificates curl && curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
+```
+
+如果环境已经有 `curl`，可以直接执行：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
 ```
 
-脚本会自动安装终端依赖、下载汉化版 ARM64 musl 二进制、校验 SHA256，并把 `codex` 命令指向 `codex-zh`。
+如果只有 `wget`，可以执行：
+
+```sh
+wget -O- https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
+```
+
+没有 `pkg`、`curl`、`wget` 的纯 Android shell 不能远程一键安装；需要先手动提供下载器或本地复制安装文件。脚本会自动安装终端依赖、下载汉化版 ARM64 musl 二进制、校验 SHA256，并把 `codex` 命令指向 `codex-zh`。
 
 ## 编译技能分支
 
