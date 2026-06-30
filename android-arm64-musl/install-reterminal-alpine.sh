@@ -130,8 +130,62 @@ install_deps() {
         make gcc g++ musl-dev pkgconf cmake ninja \
         openssl openssl-dev libffi-dev perl
     fi
+    apk add --no-cache dialog >/dev/null 2>&1 || warn "dialog 可选依赖安装失败；模型选择会退回编号输入。"
+    apk add --no-cache bubblewrap >/dev/null 2>&1 || warn "bubblewrap 可选依赖安装失败；Codex 可能仍提示 bubblewrap 警告。"
   else
     die "apk 需要 root 权限。ReTerminal Alpine 通常默认是 root；如果不是，请切到 root shell，或设置 CODEX_ZH_SKIP_DEPS=1 自行安装依赖。"
+  fi
+}
+
+choose_install_dir() {
+  if [ -n "${CODEX_ZH_INSTALL_DIR:-}" ]; then
+    printf '%s\n' "$CODEX_ZH_INSTALL_DIR"
+    return
+  fi
+  if [ "$(id -u)" = "0" ]; then
+    mkdir -p /usr/local/bin 2>/dev/null || true
+    if [ -w /usr/local/bin ]; then
+      printf '%s\n' "/usr/local/bin"
+      return
+    fi
+  fi
+  printf '%s\n' "$HOME/.local/bin"
+}
+
+persist_path() {
+  dir="$1"
+  case ":${PATH:-}:" in
+    *":$dir:"*) ;;
+    *) export PATH="$dir:${PATH:-}" ;;
+  esac
+
+  mkdir -p "$HOME"
+  for profile_file in "$HOME/.profile" "$HOME/.ashrc" "$HOME/.shrc"; do
+    if [ ! -f "$profile_file" ] || ! grep -F "$dir" "$profile_file" >/dev/null 2>&1; then
+      {
+        printf '\n# codex-zh\n'
+        printf 'export PATH="%s:$PATH"\n' "$dir"
+      } >> "$profile_file"
+    fi
+  done
+
+  if [ "$(id -u)" = "0" ] && [ -d /etc/profile.d ]; then
+    cat > /etc/profile.d/codex-zh.sh <<EOF
+case ":\${PATH:-}:" in
+  *":$dir:"*) ;;
+  *) export PATH="$dir:\${PATH:-}" ;;
+esac
+EOF
+    chmod 644 /etc/profile.d/codex-zh.sh
+  fi
+}
+
+ensure_bubblewrap_alias() {
+  if have bubblewrap; then
+    return
+  fi
+  if have bwrap && [ -w "$install_dir" ]; then
+    ln -sf "$(command -v bwrap)" "$install_dir/bubblewrap" 2>/dev/null || true
   fi
 }
 
@@ -230,7 +284,7 @@ choose_model() {
   list_file="$1"
   count="$(wc -l < "$list_file" | tr -d ' ')"
   [ "$count" -gt 0 ] || return 1
-  info "可用模型："
+  printf '%s\n' "可用模型：" >&2
   nl -w2 -s'. ' "$list_file" >&2
   choice="$(tty_read "请选择默认模型编号" "1")"
   case "$choice" in
@@ -242,13 +296,51 @@ choose_model() {
   sed -n "${choice}p" "$list_file"
 }
 
-select_enabled_models() {
+dialog_select_enabled_models() {
   list_file="$1"
-  default_model="$2"
+  out_file="$2"
+  have dialog || return 1
+  [ -r /dev/tty ] || return 1
   count="$(wc -l < "$list_file" | tr -d ' ')"
-  picks="$(tty_read "启用哪些模型编号，逗号分隔；直接回车只启用默认模型" "")"
+  [ "$count" -gt 0 ] || return 1
+  height=22
+  [ "$count" -lt 14 ] && height=$((count + 8))
+  cmd='dialog --clear --output-fd 1 --separate-output --checklist "空格选择/取消，回车确认。请选择要启用的模型：" '"$height"' 76 '"$count"
+  while IFS= read -r model_name; do
+    q="$(shell_quote "$model_name")"
+    cmd="$cmd $q $q on"
+  done < "$list_file"
+  if eval "$cmd" >"$out_file" 2>/dev/tty </dev/tty; then
+    [ -s "$out_file" ] || return 1
+    return 0
+  fi
+  return 1
+}
+
+dialog_choose_default_model() {
+  list_file="$1"
+  have dialog || return 1
+  [ -r /dev/tty ] || return 1
+  count="$(wc -l < "$list_file" | tr -d ' ')"
+  [ "$count" -gt 0 ] || return 1
+  height=22
+  [ "$count" -lt 14 ] && height=$((count + 8))
+  cmd='dialog --clear --output-fd 1 --menu "请选择默认模型：" '"$height"' 76 '"$count"
+  while IFS= read -r model_name; do
+    q="$(shell_quote "$model_name")"
+    cmd="$cmd $q $q"
+  done < "$list_file"
+  eval "$cmd" 2>/dev/tty </dev/tty
+}
+
+select_enabled_models_text() {
+  list_file="$1"
+  count="$(wc -l < "$list_file" | tr -d ' ')"
+  printf '%s\n' "可用模型：" >&2
+  nl -w2 -s'. ' "$list_file" >&2
+  picks="$(tty_read "启用哪些模型编号，逗号分隔；直接回车启用全部模型" "")"
   if [ -z "$picks" ]; then
-    printf '%s\n' "$default_model"
+    cat "$list_file"
     return
   fi
   printf '%s' "$picks" | tr ',' '\n' | while IFS= read -r n; do
@@ -258,6 +350,27 @@ select_enabled_models() {
     [ "$n" -le "$count" ] 2>/dev/null || continue
     sed -n "${n}p" "$list_file"
   done | awk 'NF && !seen[$0]++'
+}
+
+select_models() {
+  list_file="$1"
+  enabled_file="$2"
+  default_file="$3"
+
+  if dialog_select_enabled_models "$list_file" "$enabled_file"; then
+    :
+  else
+    warn "无法使用终端复选框，退回编号多选模式。"
+    select_enabled_models_text "$list_file" > "$enabled_file"
+  fi
+
+  [ -s "$enabled_file" ] || die "没有选择任何模型，已停止。"
+
+  if default_model="$(dialog_choose_default_model "$enabled_file")" && [ -n "$default_model" ]; then
+    printf '%s\n' "$default_model" > "$default_file"
+  else
+    choose_model "$enabled_file" > "$default_file"
+  fi
 }
 
 write_codex_config() {
@@ -339,7 +452,7 @@ mkdir -p "$HOME"
 install_deps
 
 cache_dir="${CODEX_ZH_CACHE_DIR:-$HOME/.cache/codex-zh}"
-install_dir="${CODEX_ZH_INSTALL_DIR:-$HOME/.local/bin}"
+install_dir="$(choose_install_dir)"
 tmp="${TMPDIR:-/tmp}/codex-zh-reterminal-alpine.$$"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 mkdir -p "$cache_dir" "$install_dir" "$tmp"
@@ -372,21 +485,12 @@ cp "$src" "$binary_path"
 chmod 755 "$binary_path"
 create_launcher "$launcher_path" "$binary_path"
 
-case ":${PATH:-}:" in
-  *":$install_dir:"*) ;;
-  *) warn "当前 PATH 不包含 $install_dir；本次会写入 shell 启动文件，当前会话也可以先运行: export PATH=\"$install_dir:\$PATH\"" ;;
-esac
-
-profile_file="$HOME/.profile"
-if [ ! -f "$profile_file" ] || ! grep -F "$install_dir" "$profile_file" >/dev/null 2>&1; then
-  {
-    printf '\n# codex-zh\n'
-    printf 'export PATH="%s:$PATH"\n' "$install_dir"
-  } >> "$profile_file"
-fi
+persist_path "$install_dir"
+ensure_bubblewrap_alias
 
 models_file="$tmp/models.txt"
 enabled_file="$tmp/enabled-models.txt"
+default_file="$tmp/default-model.txt"
 : > "$enabled_file"
 
 setup_mode="official"
@@ -424,8 +528,8 @@ if [ "$setup_mode" = "third_party" ]; then
   fi
 
   if [ -s "$models_file" ]; then
-    default_model="$(choose_model "$models_file")"
-    select_enabled_models "$models_file" "$default_model" > "$enabled_file"
+    select_models "$models_file" "$enabled_file" "$default_file"
+    default_model="$(sed -n '1p' "$default_file")"
   else
     if [ "$ALLOW_MANUAL_MODEL" = "1" ]; then
       default_model="$(tty_read "请输入默认模型名" "gpt-5.4-mini")"
@@ -448,11 +552,16 @@ fi
 
 info "已安装二进制: $binary_path"
 info "已安装命令: $launcher_path"
+if have bwrap; then
+  info "bubblewrap 已安装: $(command -v bwrap)"
+elif have bubblewrap; then
+  info "bubblewrap 已安装: $(command -v bubblewrap)"
+else
+  warn "未找到 bubblewrap；如果 Codex 继续出现 bubblewrap 黄字，说明当前 Alpine 源没有成功安装 bubblewrap 或 Android/proot 环境不支持。Codex 会继续使用 bundled bubblewrap。"
+fi
 
 if [ "$SKIP_RUN" != "1" ]; then
   "$launcher_path" --version
 fi
 
-info "完成。当前会话如提示 codex not found，先运行："
-info "export PATH=\"$install_dir:\$PATH\""
-info "然后运行：$INSTALL_NAME"
+info "完成。现在可以直接运行：$INSTALL_NAME"

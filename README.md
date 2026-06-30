@@ -20,7 +20,7 @@ Android 手机端推荐终端：ReTerminal，官方仓库为 <https://github.com
 wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | sh
 ```
 
-安装器开局会让你选择初始化方式：`1` 为官方 Codex 初始化，不写第三方配置；`2` 为第三方 Responses API，会输入 Base URL / API Key，自动请求 `/models` 并让你从返回的模型列表里选择。
+安装器开局会让你选择初始化方式：`1` 为官方 Codex 初始化，不写第三方配置；`2` 为第三方 Responses API，会输入 Base URL / API Key，自动请求 `/models`，然后用终端复选框多选要启用的模型，再选择默认模型。
 
 如果 Alpine 里已有 `curl`，也可以：
 
@@ -28,7 +28,7 @@ wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skil
 curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | sh
 ```
 
-默认会安装较完整的 Codex 工作依赖，包括 Python、Node/npm、编译工具链、diff/patch、OpenSSL/libffi 等。网络很差时可以先用最小依赖模式：
+默认会安装较完整的 Codex 工作依赖，包括 Python、Node/npm、编译工具链、diff/patch、OpenSSL/libffi 等，并尽量安装 `dialog` 和 `bubblewrap`。`codex` 命令默认安装到 `/usr/local/bin`，同时写入 profile 兜底，重进终端也不需要手动 `export PATH`。网络很差时可以先用最小依赖模式：
 
 ```sh
 wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_DEPS_PROFILE=minimal sh

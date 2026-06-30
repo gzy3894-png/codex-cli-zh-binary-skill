@@ -29,7 +29,7 @@ wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skil
 
 ```text
 1. 官方 Codex 初始化：不写第三方配置，首次运行 codex 时由官方流程提示登录或 API Key
-2. 第三方 Responses API：输入 Base URL 和 API Key，自动请求 `/models`，从返回的模型列表里选择并生成配置
+2. 第三方 Responses API：输入 Base URL 和 API Key，自动请求 `/models`，用终端复选框多选启用模型，再选择默认模型并生成配置
 ```
 
 如果 Alpine 里已有 `curl`：
@@ -43,6 +43,7 @@ curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-ski
 - 使用 Alpine 的 `apk` 安装依赖
 - `apk update` 默认依次尝试 TUNA、BFSU、官方源，并备份原 `/etc/apk/repositories`
 - 默认使用 full 依赖模式，包含 Python、Node/npm、编译工具链、diff/patch、OpenSSL/libffi 等常用 Codex 工作依赖
+- 尽量安装 `dialog` 和 `bubblewrap`；模型选择优先使用 `dialog` 复选框，Alpine 只提供 `bwrap` 时会自动建立 `bubblewrap` 兼容入口
 - 下载 Codex 压缩包时使用 `.part` 断点续传、HTTP/1.1、多次重试和 SHA256 校验
 - 下载并校验 Codex CLI `0.142.4` 中文 ARM64 musl 二进制
 - 开局询问第三方 API Base URL 和 API Key
@@ -50,7 +51,7 @@ curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-ski
 - 请求 `/models`，让用户选择默认模型和启用模型
 - 生成 `~/.codex/config.toml`，默认使用 `wire_api = "responses"`
 - 设置 `[features] hooks = false`，避免旧 hook 导致 `Stop hook exited with code 127`
-- 安装 `codex` 命令到 `~/.local/bin`
+- 默认安装 `codex` 命令到 `/usr/local/bin`，同时写入 profile 兜底，重进终端也不需要手动 `export PATH`
 
 API Key 默认明文输入，避免部分 Android 终端在隐藏输入时看起来像卡住。需要隐藏输入时：
 
