@@ -25,6 +25,13 @@ https://github.com/RohitKushvaha01/ReTerminal
 wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | sh
 ```
 
+安装器开局会让你选择：
+
+```text
+1. 官方 Codex 初始化：不写第三方配置，首次运行 codex 时由官方流程提示登录或 API Key
+2. 第三方 Responses API：输入 Base URL 和 API Key，自动请求 `/models`，从返回的模型列表里选择并生成配置
+```
+
 如果 Alpine 里已有 `curl`：
 
 ```sh
@@ -44,6 +51,24 @@ curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-ski
 - 生成 `~/.codex/config.toml`，默认使用 `wire_api = "responses"`
 - 设置 `[features] hooks = false`，避免旧 hook 导致 `Stop hook exited with code 127`
 - 安装 `codex` 命令到 `~/.local/bin`
+
+API Key 默认明文输入，避免部分 Android 终端在隐藏输入时看起来像卡住。需要隐藏输入时：
+
+```sh
+wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_HIDE_API_KEY=1 sh
+```
+
+完全非交互配置第三方 API：
+
+```sh
+wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_SETUP_MODE=third_party CODEX_ZH_API_BASE=https://api.example.com/v1 CODEX_ZH_API_KEY=你的key sh
+```
+
+第三方 API 模式默认必须成功拉取 `/models`。只有确实遇到非标准模型接口时，才建议显式允许手动兜底：
+
+```sh
+wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_SETUP_MODE=third_party CODEX_ZH_ALLOW_MANUAL_MODEL=1 sh
+```
 
 安装完成后运行：
 

@@ -17,6 +17,8 @@ SKIP_DEPS="${CODEX_ZH_SKIP_DEPS:-0}"
 SKIP_RUN="${CODEX_ZH_SKIP_RUN:-0}"
 DEPS_PROFILE="${CODEX_ZH_DEPS_PROFILE:-full}"
 MIRROR_PROFILE="${CODEX_ZH_MIRROR_PROFILE:-auto}"
+SETUP_MODE="${CODEX_ZH_SETUP_MODE:-}"
+ALLOW_MANUAL_MODEL="${CODEX_ZH_ALLOW_MANUAL_MODEL:-0}"
 
 info() { printf '%s\n' "$*"; }
 warn() { printf '警告: %s\n' "$*" >&2; }
@@ -155,20 +157,43 @@ tty_read() {
   printf '%s' "$ans"
 }
 
-tty_read_secret() {
+tty_read_api_key() {
   prompt="$1"
-  if [ -r /dev/tty ]; then
-    printf '%s: ' "$prompt" > /dev/tty
+  if [ "${CODEX_ZH_HIDE_API_KEY:-0}" = "1" ] && [ -r /dev/tty ]; then
+    printf '%s（输入时不显示，粘贴后按回车）: ' "$prompt" > /dev/tty
     old_stty="$(stty -g < /dev/tty 2>/dev/null || true)"
     stty -echo < /dev/tty 2>/dev/null || true
     IFS= read -r ans < /dev/tty || ans=""
     [ -z "$old_stty" ] || stty "$old_stty" < /dev/tty 2>/dev/null || true
     printf '\n' > /dev/tty
   else
-    printf '%s: ' "$prompt"
-    IFS= read -r ans || ans=""
+    ans="$(tty_read "$prompt（默认明文显示；如需隐藏可设置 CODEX_ZH_HIDE_API_KEY=1）" "")"
   fi
   printf '%s' "$ans"
+}
+
+choose_setup_mode() {
+  case "$SETUP_MODE" in
+    official|third_party)
+      printf '%s\n' "$SETUP_MODE"
+      return
+      ;;
+    "") ;;
+    *)
+      warn "未知 CODEX_ZH_SETUP_MODE=$SETUP_MODE，将显示选择菜单"
+      ;;
+  esac
+
+  {
+    printf '%s\n' "请选择 Codex 初始化方式："
+    printf '%s\n' "1. 官方 Codex 初始化：不写第三方配置，首次运行 codex 时由官方流程提示登录或 API Key"
+    printf '%s\n' "2. 第三方 Responses API：输入 Base URL 和 API Key，自动拉取模型并生成配置"
+  } >&2
+  choice="$(tty_read "请输入选项编号" "1")"
+  case "$choice" in
+    2) printf '%s\n' "third_party" ;;
+    *) printf '%s\n' "official" ;;
+  esac
 }
 
 normalize_api_base() {
@@ -185,6 +210,20 @@ parse_models() {
   else
     sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$json_file" | sed '/^$/d'
   fi
+}
+
+fetch_models() {
+  api_base="$1"
+  api_key="$2"
+  out_json="$3"
+  err_file="$4"
+
+  curl -fsS --http1.1 \
+    -H "Authorization: Bearer $api_key" \
+    -H "Accept: application/json" \
+    "$api_base/models" \
+    -o "$out_json" \
+    2>"$err_file"
 }
 
 choose_model() {
@@ -350,20 +389,37 @@ models_file="$tmp/models.txt"
 enabled_file="$tmp/enabled-models.txt"
 : > "$enabled_file"
 
-if [ "$SKIP_API_SETUP" != "1" ]; then
+setup_mode="official"
+if [ "$SKIP_API_SETUP" = "1" ]; then
+  warn "跳过 API 配置，因为 CODEX_ZH_SKIP_API_SETUP=1"
+else
+  setup_mode="$(choose_setup_mode)"
+fi
+
+if [ "$setup_mode" = "third_party" ]; then
   info "配置第三方 Responses API"
-  raw_base="$(tty_read "请输入 API Base URL，例如 https://api.example.com 或 https://api.example.com/v1" "")"
-  api_key="$(tty_read_secret "请输入 API Key")"
+  raw_base="${CODEX_ZH_API_BASE:-}"
+  api_key="${CODEX_ZH_API_KEY:-}"
+  [ -n "$raw_base" ] || raw_base="$(tty_read "请输入 API Base URL，例如 https://api.example.com 或 https://api.example.com/v1" "")"
+  [ -n "$api_key" ] || api_key="$(tty_read_api_key "请输入 API Key")"
   [ -n "$raw_base" ] || die "API Base URL 不能为空"
   [ -n "$api_key" ] || die "API Key 不能为空"
   api_base="$(normalize_api_base "$raw_base")"
   info "规范化后的 API Base URL: $api_base"
 
   models_json="$tmp/models.json"
-  if curl -fsS --http1.1 -H "Authorization: Bearer $api_key" "$api_base/models" -o "$models_json"; then
+  models_err="$tmp/models.err"
+  if fetch_models "$api_base" "$api_key" "$models_json" "$models_err"; then
     parse_models "$models_json" > "$models_file"
   else
-    warn "获取模型列表失败，改为手动输入默认模型"
+    warn "获取模型列表失败：$api_base/models"
+    if [ -s "$models_err" ]; then
+      sed -n '1,20p' "$models_err" >&2 || true
+    fi
+    if [ "$ALLOW_MANUAL_MODEL" != "1" ]; then
+      die "第三方 API 模式必须成功获取模型列表。请检查 Base URL、API Key、代理/网络；或显式设置 CODEX_ZH_ALLOW_MANUAL_MODEL=1 才允许手动输入模型名。"
+    fi
+    warn "允许手动模型兜底，因为 CODEX_ZH_ALLOW_MANUAL_MODEL=1"
     : > "$models_file"
   fi
 
@@ -371,12 +427,23 @@ if [ "$SKIP_API_SETUP" != "1" ]; then
     default_model="$(choose_model "$models_file")"
     select_enabled_models "$models_file" "$default_model" > "$enabled_file"
   else
-    default_model="$(tty_read "请输入默认模型名" "gpt-5.4-mini")"
-    printf '%s\n' "$default_model" > "$enabled_file"
+    if [ "$ALLOW_MANUAL_MODEL" = "1" ]; then
+      default_model="$(tty_read "请输入默认模型名" "gpt-5.4-mini")"
+      printf '%s\n' "$default_model" > "$enabled_file"
+    else
+      if [ -s "$models_json" ]; then
+        warn "接口返回了内容，但没有解析到 data[].id。返回片段："
+        sed -n '1,20p' "$models_json" >&2 || true
+      fi
+      die "未从 /models 响应中解析到任何模型，已停止。"
+    fi
   fi
   write_codex_config "$api_base" "$api_key" "$default_model" "$enabled_file"
 else
-  warn "跳过 API 配置，因为 CODEX_ZH_SKIP_API_SETUP=1"
+  info "使用官方 Codex 初始化模式：不写第三方 provider/auth 配置。"
+  if [ -s "${CODEX_HOME:-$HOME/.codex}/config.toml" ]; then
+    warn "检测到已有 ${CODEX_HOME:-$HOME/.codex}/config.toml；脚本不会擅自覆盖或删除。若要完全走官方初始化，请先自行备份/移走旧配置。"
+  fi
 fi
 
 info "已安装二进制: $binary_path"

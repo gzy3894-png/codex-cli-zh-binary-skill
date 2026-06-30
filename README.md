@@ -20,6 +20,8 @@ Android 手机端推荐终端：ReTerminal，官方仓库为 <https://github.com
 wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | sh
 ```
 
+安装器开局会让你选择初始化方式：`1` 为官方 Codex 初始化，不写第三方配置；`2` 为第三方 Responses API，会输入 Base URL / API Key，自动请求 `/models` 并让你从返回的模型列表里选择。
+
 如果 Alpine 里已有 `curl`，也可以：
 
 ```sh
@@ -33,6 +35,18 @@ wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skil
 ```
 
 脚本会对 Codex 压缩包使用 `.part` 断点续传、HTTP/1.1、多次重试和 SHA256 校验；`apk update` 默认依次尝试 TUNA、BFSU、官方源。全程不会出现 apt/dpkg 那种 Y/N 配置文件提示，只有 API 信息和模型选择是交互输入。
+
+完全非交互配置第三方 API：
+
+```sh
+wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_SETUP_MODE=third_party CODEX_ZH_API_BASE=https://api.example.com/v1 CODEX_ZH_API_KEY=你的key sh
+```
+
+第三方 API 模式默认必须成功拉取 `/models`。只有确实遇到非标准模型接口时，才建议显式允许手动兜底：
+
+```sh
+wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_SETUP_MODE=third_party CODEX_ZH_ALLOW_MANUAL_MODEL=1 sh
+```
 
 刚装好的 Termux / Termux 裸环境执行这一条：
 
