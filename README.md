@@ -32,6 +32,8 @@ curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-ski
 wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_DEPS_PROFILE=minimal sh
 ```
 
+脚本会对 Codex 压缩包使用 `.part` 断点续传、HTTP/1.1、多次重试和 SHA256 校验；`apk update` 默认依次尝试 TUNA、BFSU、官方源。全程不会出现 apt/dpkg 那种 Y/N 配置文件提示，只有 API 信息和模型选择是交互输入。
+
 刚装好的 Termux / Termux 裸环境执行这一条：
 
 ```sh

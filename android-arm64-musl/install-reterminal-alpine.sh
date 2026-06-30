@@ -16,6 +16,7 @@ SKIP_API_SETUP="${CODEX_ZH_SKIP_API_SETUP:-0}"
 SKIP_DEPS="${CODEX_ZH_SKIP_DEPS:-0}"
 SKIP_RUN="${CODEX_ZH_SKIP_RUN:-0}"
 DEPS_PROFILE="${CODEX_ZH_DEPS_PROFILE:-full}"
+MIRROR_PROFILE="${CODEX_ZH_MIRROR_PROFILE:-auto}"
 
 info() { printf '%s\n' "$*"; }
 warn() { printf '警告: %s\n' "$*" >&2; }
@@ -42,13 +43,68 @@ sha256_file() {
 download() {
   url="$1"
   dest="$2"
+  part="$dest.part"
   if have curl; then
-    curl -fL --http1.1 --retry 5 --retry-delay 2 --connect-timeout 20 -o "$dest" "$url"
+    curl -fL --http1.1 \
+      --retry 8 --retry-delay 2 --retry-all-errors \
+      --connect-timeout 20 --speed-time 30 --speed-limit 1024 \
+      -C - -o "$part" "$url"
+    mv "$part" "$dest"
   elif have wget; then
-    wget -O "$dest" "$url"
+    wget -c -O "$part" --tries=8 --timeout=30 "$url"
+    mv "$part" "$dest"
   else
     die "缺少 curl 或 wget"
   fi
+}
+
+write_apk_repositories() {
+  mirror="$1"
+  case "$mirror" in
+    tuna)
+      cat > /etc/apk/repositories <<'EOF'
+http://mirrors.tuna.tsinghua.edu.cn/alpine/v3.24/main
+http://mirrors.tuna.tsinghua.edu.cn/alpine/v3.24/community
+EOF
+      ;;
+    bfsu)
+      cat > /etc/apk/repositories <<'EOF'
+http://mirrors.bfsu.edu.cn/alpine/v3.24/main
+http://mirrors.bfsu.edu.cn/alpine/v3.24/community
+EOF
+      ;;
+    official)
+      cat > /etc/apk/repositories <<'EOF'
+https://dl-cdn.alpinelinux.org/alpine/v3.24/main
+https://dl-cdn.alpinelinux.org/alpine/v3.24/community
+EOF
+      ;;
+  esac
+}
+
+apk_update_with_fallback() {
+  if [ "$MIRROR_PROFILE" = "keep" ]; then
+    apk update
+    return
+  fi
+
+  if [ -w /etc/apk/repositories ]; then
+    cp /etc/apk/repositories "/etc/apk/repositories.codex-zh.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
+  fi
+
+  for mirror in tuna bfsu official; do
+    if [ "$MIRROR_PROFILE" != "auto" ] && [ "$MIRROR_PROFILE" != "$mirror" ]; then
+      continue
+    fi
+    info "尝试 Alpine 镜像: $mirror"
+    write_apk_repositories "$mirror"
+    if apk update; then
+      return
+    fi
+    warn "$mirror 镜像 apk update 失败，继续尝试下一个"
+  done
+
+  die "apk update 失败。可以稍后重试，或设置 CODEX_ZH_MIRROR_PROFILE=keep 使用当前 /etc/apk/repositories。"
 }
 
 install_deps() {
@@ -60,7 +116,7 @@ install_deps() {
 
   info "安装 Alpine 依赖（$DEPS_PROFILE 模式）..."
   if [ "$(id -u)" = "0" ]; then
-    apk update
+    apk_update_with_fallback
     if [ "$DEPS_PROFILE" = "minimal" ]; then
       apk add --no-cache ca-certificates curl wget tar gzip jq git openssh-client ripgrep fd bash coreutils findutils sed grep gawk procps
     else
@@ -72,21 +128,8 @@ install_deps() {
         make gcc g++ musl-dev pkgconf cmake ninja \
         openssl openssl-dev libffi-dev perl
     fi
-  elif have sudo; then
-    sudo apk update
-    if [ "$DEPS_PROFILE" = "minimal" ]; then
-      sudo apk add --no-cache ca-certificates curl wget tar gzip jq git openssh-client ripgrep fd bash coreutils findutils sed grep gawk procps
-    else
-      sudo apk add --no-cache \
-        ca-certificates curl wget tar gzip unzip xz jq \
-        git openssh-client ripgrep fd bash \
-        coreutils findutils sed grep gawk diffutils patch procps \
-        python3 py3-pip nodejs npm \
-        make gcc g++ musl-dev pkgconf cmake ninja \
-        openssl openssl-dev libffi-dev perl
-    fi
   else
-    die "apk 需要 root 或 sudo 权限。ReTerminal Alpine 通常默认是 root，请确认当前用户。"
+    die "apk 需要 root 权限。ReTerminal Alpine 通常默认是 root；如果不是，请切到 root shell，或设置 CODEX_ZH_SKIP_DEPS=1 自行安装依赖。"
   fi
 }
 
@@ -269,9 +312,12 @@ if [ -f "$archive_path" ] && [ "$(sha256_file "$archive_path")" != "$ARCHIVE_SHA
 fi
 if [ ! -f "$archive_path" ]; then
   info "下载 Codex 中文版: $BASE_URL/$ARCHIVE"
-  download "$BASE_URL/$ARCHIVE" "$tmp/$ARCHIVE"
-  [ "$(sha256_file "$tmp/$ARCHIVE")" = "$ARCHIVE_SHA256" ] || die "压缩包 sha256 不匹配"
-  mv "$tmp/$ARCHIVE" "$archive_path"
+  download "$BASE_URL/$ARCHIVE" "$archive_path"
+  if [ "$(sha256_file "$archive_path")" != "$ARCHIVE_SHA256" ]; then
+    bad_sha="$(sha256_file "$archive_path" 2>/dev/null || true)"
+    rm -f "$archive_path" "$archive_path.part"
+    die "压缩包 sha256 不匹配: $bad_sha。已删除损坏文件，请重新运行脚本。"
+  fi
 else
   info "使用已缓存压缩包: $archive_path"
 fi

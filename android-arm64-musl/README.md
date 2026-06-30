@@ -34,7 +34,9 @@ curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-ski
 这个脚本不会创建 proot，也不依赖 Termux。它会：
 
 - 使用 Alpine 的 `apk` 安装依赖
+- `apk update` 默认依次尝试 TUNA、BFSU、官方源，并备份原 `/etc/apk/repositories`
 - 默认使用 full 依赖模式，包含 Python、Node/npm、编译工具链、diff/patch、OpenSSL/libffi 等常用 Codex 工作依赖
+- 下载 Codex 压缩包时使用 `.part` 断点续传、HTTP/1.1、多次重试和 SHA256 校验
 - 下载并校验 Codex CLI `0.142.4` 中文 ARM64 musl 二进制
 - 开局询问第三方 API Base URL 和 API Key
 - 自动补齐 API Base URL 的 `/v1` 后缀
@@ -54,6 +56,12 @@ codex
 
 ```sh
 wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_DEPS_PROFILE=minimal sh
+```
+
+如果不想让脚本改 Alpine 镜像源：
+
+```sh
+wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_MIRROR_PROFILE=keep sh
 ```
 
 ## 备用：裸 Termux 一键安装
