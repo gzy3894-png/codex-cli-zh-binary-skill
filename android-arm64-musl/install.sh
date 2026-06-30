@@ -82,6 +82,11 @@ install_deps() {
   setup_noninteractive_apt
 
   if have pkg && [ -n "${PREFIX:-}" ]; then
+    if [ "$(id -u)" = "0" ]; then
+      warn "检测到 Termux 的 root/su shell；Termux 禁止 root 运行 apt/pkg，跳过依赖安装。需要补依赖时请先 exit 回普通 Termux 用户再运行安装命令。"
+      return
+    fi
+
     APT="apt-get"
     info "安装 Termux 依赖（$DEPS_PROFILE 模式，自动保留已有配置文件）..."
     dpkg_configure_noninteractive
@@ -217,8 +222,23 @@ create_codex_wrapper() {
   binary_q="$(shell_quote "$binary")"
   home_q="$(shell_quote "$runtime_home")"
 
+  shell_path="$runtime_prefix/bin/sh"
+  if [ ! -x "$shell_path" ]; then
+    if [ -x /bin/sh ]; then
+      shell_path="/bin/sh"
+    elif [ -x /system/bin/sh ]; then
+      shell_path="/system/bin/sh"
+    else
+      detected_sh="$(command -v sh 2>/dev/null || true)"
+      case "$detected_sh" in
+        /*) shell_path="$detected_sh" ;;
+        *) die "找不到可写入包装命令 shebang 的绝对 sh 路径" ;;
+      esac
+    fi
+  fi
+
   cat > "$dest" <<EOF
-#!/usr/bin/env sh
+#!$shell_path
 prefix_dir=$prefix_q
 binary_path=$binary_q
 default_home=$home_q

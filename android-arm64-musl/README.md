@@ -69,6 +69,8 @@ wget -O- https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill
 export PATH="/data/data/com.termux/files/usr/bin:$PATH"
 ```
 
+如果你是在 `su` 或 Android root shell 里重新跑安装脚本，新版脚本会跳过 Termux 依赖安装，因为 Termux 禁止 root 执行 apt/pkg。要补装依赖，请先 `exit` 回普通 Termux 用户再运行安装命令。
+
 如果之前已经出现 `Location: /.codex/state_5.sqlite`，重新运行安装命令即可。新版 `codex` 包装命令会把状态目录固定回 Termux home。
 
 ## 可选环境变量
