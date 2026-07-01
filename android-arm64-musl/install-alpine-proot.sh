@@ -6,7 +6,9 @@ TARGET="aarch64-unknown-linux-musl"
 BRANCH="${CODEX_ZH_BRANCH:-android-arm64-musl-installer}"
 REPO_RAW="${CODEX_ZH_REPO_RAW:-https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill}"
 BASE_URL="${CODEX_ZH_BASE_URL:-$REPO_RAW/$BRANCH/android-arm64-musl}"
+BINARY_BASE_URL="${CODEX_ZH_BINARY_BASE_URL:-https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/download/codex-for-tui-v1.0.0}"
 CODEX_ARCHIVE="codex-${VERSION}-zh-${TARGET}.tar.gz"
+CODEX_ARCHIVE_URL="$BINARY_BASE_URL/$CODEX_ARCHIVE"
 CODEX_ARCHIVE_SHA256="7BEC4F162DDE06C8B14F2D50309E4999D8239C5AD9E7A138509B0E758007CB29"
 CODEX_BIN_SHA256="40626C9FF0A63A04DD6BC5D2120CD418E07C5306202BD955F34EFE761B05E423"
 
@@ -282,8 +284,8 @@ if [ -f "$codex_archive" ] && [ "$(sha256_file "$codex_archive")" != "$CODEX_ARC
   rm -f "$codex_archive"
 fi
 if [ ! -f "$codex_archive" ]; then
-  info "下载 Codex 中文版: $BASE_URL/$CODEX_ARCHIVE"
-  download "$BASE_URL/$CODEX_ARCHIVE" "$tmp/$CODEX_ARCHIVE"
+  info "下载 Codex 中文版: $CODEX_ARCHIVE_URL"
+  download "$CODEX_ARCHIVE_URL" "$tmp/$CODEX_ARCHIVE"
   [ "$(sha256_file "$tmp/$CODEX_ARCHIVE")" = "$CODEX_ARCHIVE_SHA256" ] || die "Codex 压缩包 sha256 不匹配"
   mv "$tmp/$CODEX_ARCHIVE" "$codex_archive"
 fi

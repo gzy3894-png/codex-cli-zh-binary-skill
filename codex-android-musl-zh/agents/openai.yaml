@@ -1,4 +1,0 @@
-interface:
-  display_name: "Codex Android musl 汉化"
-  short_description: "交叉编译 ARM64 musl 版中文 Codex CLI"
-  default_prompt: "使用 $codex-android-musl-zh 编译 aarch64-unknown-linux-musl 中文 Codex CLI。"

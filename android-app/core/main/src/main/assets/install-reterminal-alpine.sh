@@ -6,7 +6,9 @@ TARGET="aarch64-unknown-linux-musl"
 BRANCH="${CODEX_ZH_BRANCH:-android-arm64-musl-installer}"
 REPO_RAW="${CODEX_ZH_REPO_RAW:-https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill}"
 BASE_URL="${CODEX_ZH_BASE_URL:-$REPO_RAW/$BRANCH/android-arm64-musl}"
+BINARY_BASE_URL="${CODEX_ZH_BINARY_BASE_URL:-https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/download/codex-for-tui-v1.0.0}"
 ARCHIVE="codex-${VERSION}-zh-${TARGET}.tar.gz"
+ARCHIVE_URL="$BINARY_BASE_URL/$ARCHIVE"
 ARCHIVE_SHA256="7BEC4F162DDE06C8B14F2D50309E4999D8239C5AD9E7A138509B0E758007CB29"
 BIN_SHA256="40626C9FF0A63A04DD6BC5D2120CD418E07C5306202BD955F34EFE761B05E423"
 
@@ -112,7 +114,7 @@ Codex for TUI 环境检查
 
 网络：
 - Alpine 镜像通常不一定需要代理。
-- Codex 压缩包来自 GitHub raw，网络不稳时建议开启代理。
+- Codex 压缩包来自 GitHub Release，网络不稳时建议开启代理。
 - 所有下载会尽量使用断点续传和重试。
 EOF
   [ -n "$NOTICE_URL" ] && printf '%s\n' "公告地址：$NOTICE_URL" >&2
@@ -874,8 +876,8 @@ if [ -f "$archive_path" ] && [ "$(sha256_file "$archive_path")" != "$ARCHIVE_SHA
   rm -f "$archive_path"
 fi
 if [ ! -f "$archive_path" ]; then
-  info "下载 Codex 中文版: $BASE_URL/$ARCHIVE"
-  download "$BASE_URL/$ARCHIVE" "$archive_path"
+  info "下载 Codex 中文版: $ARCHIVE_URL"
+  download "$ARCHIVE_URL" "$archive_path"
   if [ "$(sha256_file "$archive_path")" != "$ARCHIVE_SHA256" ]; then
     bad_sha="$(sha256_file "$archive_path" 2>/dev/null || true)"
     rm -f "$archive_path" "$archive_path.part"

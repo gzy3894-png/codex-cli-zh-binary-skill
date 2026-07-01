@@ -84,15 +84,13 @@ codex-local-resume
 - Codex 中文版 ARM64 压缩包。
 - 可选开发依赖。
 
-Alpine 镜像通常不一定需要代理；Codex 压缩包来自 GitHub raw，网络不稳时建议开启代理。下载会尽量使用断点续传、HTTP/1.1、重试和 SHA256 校验。
+Alpine 镜像通常不一定需要代理；Codex 压缩包来自 GitHub Release，网络不稳时建议开启代理。下载会尽量使用断点续传、HTTP/1.1、重试和 SHA256 校验。
 
 ## 仓库结构
 
 - `android-app/`：Codex for TUI Android 应用。
 - `android-arm64-musl/`：Android/Alpine 安装脚本和 Codex 中文版 ARM64 说明。
 - `tests/`：安装和本地配置流程的隔离 smoke test。
-- `codex-cli-zh-binary/`：Windows 版 Codex CLI 中文二进制替换技能。
-- `codex-cli-zh/`、`codex-android-musl-zh/`：源码汉化和构建相关技能。
 
 ## 构建与验证
 

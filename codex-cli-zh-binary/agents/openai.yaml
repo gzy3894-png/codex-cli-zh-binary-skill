@@ -1,4 +1,0 @@
-interface:
-  display_name: "Codex CLI 中文替换"
-  short_description: "无需编译，用中文 codex.exe 切换当前 npm Codex CLI"
-  default_prompt: "使用 $codex-cli-zh-binary 把当前 codex 命令切换到预编译的中文 Codex CLI。"

@@ -62,7 +62,7 @@ test_print_download_plan_blank_notice_returns_zero() {
   )
 
   assert_file_contains "$tmp/stderr" "Codex for TUI 环境检查"
-  assert_file_contains "$tmp/stderr" "Codex 压缩包来自 GitHub raw"
+  assert_file_contains "$tmp/stderr" "Codex 压缩包来自 GitHub Release"
   rm -rf "$tmp"
 }
 

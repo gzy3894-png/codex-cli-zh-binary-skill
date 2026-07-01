@@ -57,7 +57,7 @@ Codex for TUI 首次安装
 
 网络提示：
 - Alpine 镜像通常不一定需要代理。
-- Codex 压缩包来自 GitHub raw，网络不稳时建议开启代理。
+- Codex 压缩包来自 GitHub Release，网络不稳时建议开启代理。
 - 下载失败后可重新打开 App 继续。
 EOF
 

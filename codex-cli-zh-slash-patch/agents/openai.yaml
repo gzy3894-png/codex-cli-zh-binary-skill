@@ -1,4 +1,0 @@
-interface:
-  display_name: "Codex CLI Slash 命令汉化"
-  short_description: "重建并替换 Codex CLI 的 / 命令中文说明"
-  default_prompt: "Use $codex-cli-zh-slash-patch to patch Codex CLI slash command descriptions into Chinese."
