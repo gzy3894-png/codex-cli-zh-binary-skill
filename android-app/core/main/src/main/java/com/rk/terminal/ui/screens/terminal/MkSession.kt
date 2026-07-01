@@ -16,6 +16,26 @@ import com.termux.terminal.TerminalSessionClient
 import java.io.File
 
 object MkSession {
+    private val managedScripts = mapOf(
+        "init-host.sh" to "init-host",
+        "init.sh" to "init",
+        "codex-for-tui-bootstrap.sh" to "codex-for-tui-bootstrap.sh",
+        "install-reterminal-alpine.sh" to "install-reterminal-alpine.sh",
+        "codex-local-resume.sh" to "codex-local-resume.sh",
+    )
+
+    private fun Context.syncManagedScripts() {
+        managedScripts.forEach { (assetName, outputName) ->
+            localBinDir().child(outputName).apply {
+                createFileIfNot()
+                assets.open(assetName).bufferedReader().use { it.readText() }.let {
+                    writeText(it)
+                }
+                setExecutable(true, false)
+            }
+        }
+    }
+
     fun createSession(
         context: Context,
         sessionClient: TerminalSessionClient,
@@ -38,22 +58,8 @@ object MkSession {
 
             val workingDir = pendingCommand?.workingDir ?: alpineHomeDir().path
 
+            syncManagedScripts()
             val initFile: File = localBinDir().child("init-host")
-            if (initFile.exists().not()) {
-                initFile.createFileIfNot()
-                assets.open("init-host.sh").bufferedReader().use { it.readText() }.let {
-                    initFile.writeText(it)
-                }
-            }
-
-            localBinDir().child("init").apply {
-                if (exists().not()) {
-                    createFileIfNot()
-                    assets.open("init.sh").bufferedReader().use { it.readText() }.let {
-                        writeText(it)
-                    }
-                }
-            }
 
             val env = mutableListOf(
                 "PATH=${System.getenv("PATH")}:/sbin:${localBinDir().absolutePath}",

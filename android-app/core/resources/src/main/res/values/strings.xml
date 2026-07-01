@@ -5,7 +5,7 @@
     <string name="use_shizuku_desc">Automatically execute rish command</string>
     <string name="default_working_mode">Default Working mode</string>
     <string name="alpine_desc">Alpine Linux</string>
-    <string name="android_desc">ReTerminal Android shell</string>
+    <string name="android_desc">Codex for TUI Android shell</string>
     <string name="customizations">Customizations</string>
     <string name="seccomp">SECCOMP</string>
     <string name="seccomp_desc">fix operation not permitted error</string>

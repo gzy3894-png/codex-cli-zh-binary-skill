@@ -24,7 +24,7 @@ fun TerminalTopBar(
         ),
         title = {
             Column {
-                Text(text = "ReTerminal", color = color)
+                Text(text = "Codex for TUI", color = color)
                 sessionBinder?.getService()?.currentSession?.value?.let { (id, mode) ->
                     Text(
                         style = MaterialTheme.typography.bodySmall,

@@ -8,7 +8,7 @@ if [ ! -s /etc/resolv.conf ]; then
 fi
 
 
-export PS1='\[\033[01;32m\]\u@reterm\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+export PS1='\[\033[01;32m\]\u@codex-tui\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
 # shellcheck disable=SC2034
 export PIP_BREAK_SYSTEM_PACKAGES=1
 
@@ -20,8 +20,11 @@ fi
 
 if [ "$#" -eq 0 ]; then
     source /etc/profile
-    export PS1='\[\033[01;32m\]\u@reterm\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+    export PS1='\[\033[01;32m\]\u@codex-tui\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
     cd $HOME
+    if [ -s "$PREFIX/local/bin/codex-for-tui-bootstrap.sh" ]; then
+        sh "$PREFIX/local/bin/codex-for-tui-bootstrap.sh" || true
+    fi
     /bin/ash
 else
     exec "$@"

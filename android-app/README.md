@@ -1,7 +1,7 @@
-# ReTerminal
-**ReTerminal** is a sleek, Material 3-inspired terminal emulator designed as a modern alternative to the legacy [Jackpal Terminal](https://github.com/jackpal/Android-Terminal-Emulator). Built on [Termux's](https://github.com/termux/termux-app) robust TerminalView
+# Codex for TUI
+**Codex for TUI** is a ReTerminal-based Android terminal package customized to bootstrap and run Codex in an Alpine environment.
 
-Download the latest APK from the [Releases Section](https://github.com/RohitKushvaha01/ReTerminal/releases/latest).
+Debug APKs are built by this repository's GitHub Actions workflow.
 
 # Features
 - [x] Basic Terminal
