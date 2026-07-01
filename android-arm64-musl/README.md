@@ -29,7 +29,7 @@ wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skil
 
 ```text
 1. 官方 Codex 初始化：不写第三方配置，首次运行 codex 时由官方流程提示登录或 API Key
-2. 第三方 Responses API：输入 Base URL 和 API Key，自动请求 `/models`，用终端复选框多选启用模型，再选择默认模型并生成配置
+2. 第三方 Responses API：输入 Base URL 和 API Key，自动请求 `/models`，用编号切换式多选启用模型，再选择默认模型并生成官方风格配置
 ```
 
 如果 Alpine 里已有 `curl`：
@@ -43,15 +43,17 @@ curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-ski
 - 使用 Alpine 的 `apk` 安装依赖
 - `apk update` 默认依次尝试 TUNA、BFSU、官方源，并备份原 `/etc/apk/repositories`
 - 默认使用 full 依赖模式，包含 Python、Node/npm、编译工具链、diff/patch、OpenSSL/libffi 等常用 Codex 工作依赖
-- 尽量安装 `dialog` 和 `bubblewrap`；模型选择优先使用 `dialog` 复选框，Alpine 只提供 `bwrap` 时会自动建立 `bubblewrap` 兼容入口
+- 尽量安装 `bubblewrap`；Alpine 只提供 `bwrap` 时会自动建立 `bubblewrap` 兼容入口
 - 下载 Codex 压缩包时使用 `.part` 断点续传、HTTP/1.1、多次重试和 SHA256 校验
 - 下载并校验 Codex CLI `0.142.4` 中文 ARM64 musl 二进制
 - 开局询问第三方 API Base URL 和 API Key
 - 自动补齐 API Base URL 的 `/v1` 后缀
-- 请求 `/models`，让用户选择默认模型和启用模型
-- 生成 `~/.codex/config.toml`，默认使用 `wire_api = "responses"`
+- 请求 `/models`，让用户用纯终端编号多选启用模型，再选择默认模型
+- 按 Codex 官方习惯生成 `~/.codex/config.toml` 和 `~/.codex/auth.json`，默认使用 `wire_api = "responses"`
 - 设置 `[features] hooks = false`，避免旧 hook 导致 `Stop hook exited with code 127`
-- 默认安装 `codex` 命令到 `/usr/local/bin`，同时写入 profile 兜底，重进终端也不需要手动 `export PATH`
+- 安装后询问启动提示词：默认生成标准版 `AGENTS.md`，也可以粘贴自定义版
+- 默认安装 `codex` 命令到 `/usr/local/bin`，并生成 `codex` 的 32 种大小写入口，例如 `Codex`、`CODEX`
+- 同时写入 profile 和 `/etc/profile.d/codex-zh.sh` 兜底，重进终端也不需要手动 `export PATH`
 
 API Key 默认明文输入，避免部分 Android 终端在隐藏输入时看起来像卡住。需要隐藏输入时：
 
@@ -74,7 +76,6 @@ wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skil
 安装完成后运行：
 
 ```sh
-export PATH="$HOME/.local/bin:$PATH"
 codex
 ```
 
@@ -152,7 +153,7 @@ Base URL 会自动规范化：
 - `https://api.example.com/` -> `https://api.example.com/v1`
 - `https://api.example.com/v1` -> 保持不变
 
-生成的配置使用环境变量读取密钥，不把 key 写进 `config.toml`：
+生成的配置不把 key 写进 `config.toml`；密钥写入 Codex 官方习惯读取的 `auth.json`：
 
 ```toml
 model_provider = "custom"
@@ -167,10 +168,16 @@ hooks = false
 name = "custom"
 base_url = "https://api.example.com/v1"
 wire_api = "responses"
-env_key = "OPENAI_API_KEY"
+requires_openai_auth = true
 ```
 
-密钥保存在 Alpine rootfs 的 `/root/.codex/env`，权限为 `600`。`codex` 启动器会进入 proot 前自动读取它。
+密钥保存在 Alpine rootfs 的 `/root/.codex/auth.json`，权限为 `600`：
+
+```json
+{
+  "OPENAI_API_KEY": "你的 API Key"
+}
+```
 
 ## 为什么推荐 Alpine proot
 

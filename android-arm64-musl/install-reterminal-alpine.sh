@@ -25,11 +25,20 @@ warn() { printf '警告: %s\n' "$*" >&2; }
 die() { printf '错误: %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 upper() { tr '[:lower:]' '[:upper:]'; }
+lower() { tr '[:upper:]' '[:lower:]'; }
 
 shell_quote() {
   printf "'"
   printf '%s' "$1" | sed "s/'/'\\\\''/g"
   printf "'"
+}
+
+toml_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
 sha256_file() {
@@ -130,7 +139,6 @@ install_deps() {
         make gcc g++ musl-dev pkgconf cmake ninja \
         openssl openssl-dev libffi-dev perl
     fi
-    apk add --no-cache dialog >/dev/null 2>&1 || warn "dialog 可选依赖安装失败；模型选择会退回编号输入。"
     apk add --no-cache bubblewrap >/dev/null 2>&1 || warn "bubblewrap 可选依赖安装失败；Codex 可能仍提示 bubblewrap 警告。"
   else
     die "apk 需要 root 权限。ReTerminal Alpine 通常默认是 root；如果不是，请切到 root shell，或设置 CODEX_ZH_SKIP_DEPS=1 自行安装依赖。"
@@ -227,9 +235,10 @@ tty_read_api_key() {
 }
 
 choose_setup_mode() {
-  case "$SETUP_MODE" in
+  mode_lc="$(printf '%s' "$SETUP_MODE" | lower)"
+  case "$mode_lc" in
     official|third_party)
-      printf '%s\n' "$SETUP_MODE"
+      printf '%s\n' "$mode_lc"
       return
       ;;
     "") ;;
@@ -244,8 +253,9 @@ choose_setup_mode() {
     printf '%s\n' "2. 第三方 Responses API：输入 Base URL 和 API Key，自动拉取模型并生成配置"
   } >&2
   choice="$(tty_read "请输入选项编号" "1")"
-  case "$choice" in
-    2) printf '%s\n' "third_party" ;;
+  choice_lc="$(printf '%s' "$choice" | lower)"
+  case "$choice_lc" in
+    2|third_party|third-party|api|custom|第三方) printf '%s\n' "third_party" ;;
     *) printf '%s\n' "official" ;;
   esac
 }
@@ -296,60 +306,63 @@ choose_model() {
   sed -n "${choice}p" "$list_file"
 }
 
-dialog_select_enabled_models() {
-  list_file="$1"
-  out_file="$2"
-  have dialog || return 1
-  [ -r /dev/tty ] || return 1
-  count="$(wc -l < "$list_file" | tr -d ' ')"
-  [ "$count" -gt 0 ] || return 1
-  height=22
-  [ "$count" -lt 14 ] && height=$((count + 8))
-  cmd='dialog --clear --output-fd 1 --separate-output --checklist "空格选择/取消，回车确认。请选择要启用的模型：" '"$height"' 76 '"$count"
-  while IFS= read -r model_name; do
-    q="$(shell_quote "$model_name")"
-    cmd="$cmd $q $q on"
-  done < "$list_file"
-  if eval "$cmd" >"$out_file" 2>/dev/tty </dev/tty; then
-    [ -s "$out_file" ] || return 1
-    return 0
-  fi
-  return 1
-}
-
-dialog_choose_default_model() {
-  list_file="$1"
-  have dialog || return 1
-  [ -r /dev/tty ] || return 1
-  count="$(wc -l < "$list_file" | tr -d ' ')"
-  [ "$count" -gt 0 ] || return 1
-  height=22
-  [ "$count" -lt 14 ] && height=$((count + 8))
-  cmd='dialog --clear --output-fd 1 --menu "请选择默认模型：" '"$height"' 76 '"$count"
-  while IFS= read -r model_name; do
-    q="$(shell_quote "$model_name")"
-    cmd="$cmd $q $q"
-  done < "$list_file"
-  eval "$cmd" 2>/dev/tty </dev/tty
-}
-
 select_enabled_models_text() {
   list_file="$1"
   count="$(wc -l < "$list_file" | tr -d ' ')"
+  [ "$count" -gt 0 ] || return 1
   printf '%s\n' "可用模型：" >&2
   nl -w2 -s'. ' "$list_file" >&2
-  picks="$(tty_read "启用哪些模型编号，逗号分隔；直接回车启用全部模型" "")"
-  if [ -z "$picks" ]; then
+
+  selected="$tmp/selected-model-indexes.txt"
+  : > "$selected"
+  seq 1 "$count" > "$selected"
+
+  while :; do
+    printf '\n%s\n' "当前已选择：" >&2
+    while IFS= read -r i; do
+      sed -n "${i}p" "$list_file" | sed "s/^/  [$i] /" >&2
+    done < "$selected"
+    printf '%s\n' "输入编号可切换选择，多个编号可用空格/逗号分隔；a=全选，n=清空，d=完成，回车=完成。" >&2
+    picks="$(tty_read "多选操作" "d")"
+    picks_lc="$(printf '%s' "$picks" | lower | tr ',' ' ')"
+    case "$picks_lc" in
+      ""|d|done|ok|y|yes|完成)
+        break
+        ;;
+      a|all|全选)
+        seq 1 "$count" > "$selected"
+        continue
+        ;;
+      n|none|clear|清空)
+        : > "$selected"
+        continue
+        ;;
+    esac
+
+    printf '%s\n' "$picks_lc" | tr ' ' '\n' | while IFS= read -r n; do
+      n="$(printf '%s' "$n" | sed 's/[^0-9]//g')"
+      [ -n "$n" ] || continue
+      [ "$n" -ge 1 ] 2>/dev/null || continue
+      [ "$n" -le "$count" ] 2>/dev/null || continue
+      if grep -x "$n" "$selected" >/dev/null 2>&1; then
+        grep -vx "$n" "$selected" > "$selected.tmp" || true
+        mv "$selected.tmp" "$selected"
+      else
+        printf '%s\n' "$n" >> "$selected"
+        sort -n -u "$selected" -o "$selected"
+      fi
+    done
+  done
+
+  if [ ! -s "$selected" ]; then
+    warn "未选择任何模型，默认启用全部模型。"
     cat "$list_file"
     return
   fi
-  printf '%s' "$picks" | tr ',' '\n' | while IFS= read -r n; do
-    n="$(printf '%s' "$n" | sed 's/[^0-9]//g')"
-    [ -n "$n" ] || continue
-    [ "$n" -ge 1 ] 2>/dev/null || continue
-    [ "$n" -le "$count" ] 2>/dev/null || continue
+
+  while IFS= read -r n; do
     sed -n "${n}p" "$list_file"
-  done | awk 'NF && !seen[$0]++'
+  done < "$selected"
 }
 
 select_models() {
@@ -357,20 +370,11 @@ select_models() {
   enabled_file="$2"
   default_file="$3"
 
-  if dialog_select_enabled_models "$list_file" "$enabled_file"; then
-    :
-  else
-    warn "无法使用终端复选框，退回编号多选模式。"
-    select_enabled_models_text "$list_file" > "$enabled_file"
-  fi
+  select_enabled_models_text "$list_file" > "$enabled_file"
 
   [ -s "$enabled_file" ] || die "没有选择任何模型，已停止。"
 
-  if default_model="$(dialog_choose_default_model "$enabled_file")" && [ -n "$default_model" ]; then
-    printf '%s\n' "$default_model" > "$default_file"
-  else
-    choose_model "$enabled_file" > "$default_file"
-  fi
+  choose_model "$enabled_file" > "$default_file"
 }
 
 write_codex_config() {
@@ -383,43 +387,118 @@ write_codex_config() {
   mkdir -p "$codex_home"
   chmod 700 "$codex_home"
 
-  env_file="$codex_home/env"
+  auth_file="$codex_home/auth.json"
   {
-    printf 'OPENAI_API_KEY='
-    shell_quote "$api_key"
-    printf '\n'
-  } > "$env_file"
-  chmod 600 "$env_file"
+    printf '{\n'
+    printf '  "OPENAI_API_KEY": "%s"\n' "$(json_escape "$api_key")"
+    printf '}\n'
+  } > "$auth_file"
+  chmod 600 "$auth_file"
 
   config_file="$codex_home/config.toml"
+  provider_id_esc="$(toml_escape "$PROVIDER_ID")"
+  default_model_esc="$(toml_escape "$default_model")"
+  api_base_esc="$(toml_escape "$api_base")"
+  home_esc="$(toml_escape "$HOME")"
   {
-    printf 'model_provider = "%s"\n' "$PROVIDER_ID"
-    printf 'model = "%s"\n' "$default_model"
+    printf 'model_provider = "%s"\n' "$provider_id_esc"
+    printf 'model = "%s"\n' "$default_model_esc"
     printf 'model_reasoning_effort = "medium"\n'
     printf 'model_auto_compact_token_limit = 120000\n'
     printf 'disable_response_storage = true\n'
     printf '\n[features]\n'
     printf 'hooks = false\n'
     printf '\n[model_providers.%s]\n' "$PROVIDER_ID"
-    printf 'name = "%s"\n' "$PROVIDER_ID"
-    printf 'base_url = "%s"\n' "$api_base"
+    printf 'name = "%s"\n' "$provider_id_esc"
+    printf 'base_url = "%s"\n' "$api_base_esc"
     printf 'wire_api = "responses"\n'
-    printf 'env_key = "OPENAI_API_KEY"\n'
-    printf '\n[projects."%s"]\n' "$HOME"
+    printf 'requires_openai_auth = true\n'
+    printf '\n[projects."%s"]\n' "$home_esc"
     printf 'trust_level = "trusted"\n'
     printf '\n[tui]\n'
     printf 'status_line = ["model-with-reasoning", "current-dir", "context-remaining"]\n'
     printf 'status_line_use_colors = true\n'
     if [ -s "$enabled_file" ]; then
+      printf '\n[tui.model_availability_nux]\n'
+      while IFS= read -r model_name; do
+        model_name_esc="$(toml_escape "$model_name")"
+        printf '"%s" = 4\n' "$model_name_esc"
+      done < "$enabled_file"
       while IFS= read -r model_name; do
         safe="$(printf '%s' "$model_name" | sed 's/[^A-Za-z0-9_.-]/-/g')"
+        model_name_esc="$(toml_escape "$model_name")"
         printf '\n[profiles.%s]\n' "$safe"
-        printf 'model_provider = "%s"\n' "$PROVIDER_ID"
-        printf 'model = "%s"\n' "$model_name"
+        printf 'model_provider = "%s"\n' "$provider_id_esc"
+        printf 'model = "%s"\n' "$model_name_esc"
       done < "$enabled_file"
     fi
   } > "$config_file"
   chmod 600 "$config_file"
+}
+
+write_standard_agents() {
+  out="$1"
+  cat > "$out" <<'EOF'
+# AGENTS.md
+
+## 身份
+- 你是 Codex，运行在 Android/ReTerminal Alpine 环境中的编程助手。
+- 优先帮助用户把事情做完，回答简洁、可执行。
+
+## 工作方式
+- 修改文件前先理解上下文。
+- 不要擅自删除或覆盖用户文件。
+- 遇到不确定或高风险操作先确认。
+- 优先使用 rg、sed、git 等本地工具验证。
+
+## 输出
+- 先给结论，再给必要步骤。
+- 如果命令失败，说明原因和下一步。
+EOF
+}
+
+setup_agents_md() {
+  codex_home="${CODEX_HOME:-$HOME/.codex}"
+  mkdir -p "$codex_home"
+  chmod 700 "$codex_home"
+
+  info "配置启动提示词 AGENTS.md"
+  printf '%s\n' "请选择启动提示词：" >&2
+  printf '%s\n' "1. 默认 AGENTS.md：生成标准版系统提示词，每次启动自动带上" >&2
+  printf '%s\n' "2. 自定义 AGENTS.md：现在粘贴你的内容" >&2
+  choice="$(tty_read "请输入选项编号" "1")"
+  choice_lc="$(printf '%s' "$choice" | lower)"
+
+  standard_file="$codex_home/AGENTS.standard.md"
+  agents_file="$codex_home/AGENTS.md"
+  home_agents="$HOME/AGENTS.md"
+  write_standard_agents "$standard_file"
+
+  case "$choice_lc" in
+    2|custom|自定义)
+      info "请输入自定义 AGENTS.md 内容。单独输入一行 EOF 结束。"
+      : > "$agents_file"
+      while :; do
+        if [ -r /dev/tty ]; then
+          IFS= read -r line < /dev/tty || break
+        else
+          IFS= read -r line || break
+        fi
+        [ "$line" = "EOF" ] && break
+        printf '%s\n' "$line" >> "$agents_file"
+      done
+      if [ ! -s "$agents_file" ]; then
+        warn "自定义 AGENTS.md 为空，回退到默认版。"
+        cp "$standard_file" "$agents_file"
+      fi
+      ;;
+    *)
+      cp "$standard_file" "$agents_file"
+      ;;
+  esac
+
+  cp "$agents_file" "$home_agents"
+  chmod 600 "$agents_file" "$standard_file" "$home_agents" 2>/dev/null || true
 }
 
 create_launcher() {
@@ -428,17 +507,31 @@ create_launcher() {
   binary_q="$(shell_quote "$binary")"
   cat > "$path" <<EOF
 #!/usr/bin/env sh
-env_file="\${CODEX_HOME:-\$HOME/.codex}/env"
-if [ -r "\$env_file" ]; then
-  . "\$env_file"
-  export OPENAI_API_KEY
-fi
 export HOME="\${HOME:-/root}"
 export CODEX_HOME="\${CODEX_HOME:-\$HOME/.codex}"
 export PATH="\$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:\${PATH:-}"
+if [ ! -s "\$HOME/AGENTS.md" ] && [ -s "\$CODEX_HOME/AGENTS.md" ]; then
+  cp "\$CODEX_HOME/AGENTS.md" "\$HOME/AGENTS.md" 2>/dev/null || true
+fi
 exec $binary_q "\$@"
 EOF
   chmod 755 "$path"
+}
+
+install_case_variants() {
+  dir="$1"
+  target="$2"
+  for c in c C; do
+    for o in o O; do
+      for d in d D; do
+        for e in e E; do
+          for x in x X; do
+            ln -sf "$target" "$dir/$c$o$d$e$x" 2>/dev/null || true
+          done
+        done
+      done
+    done
+  done
 }
 
 case "$(uname -m 2>/dev/null || true)" in
@@ -484,6 +577,7 @@ launcher_path="$install_dir/$INSTALL_NAME"
 cp "$src" "$binary_path"
 chmod 755 "$binary_path"
 create_launcher "$launcher_path" "$binary_path"
+install_case_variants "$install_dir" "$launcher_path"
 
 persist_path "$install_dir"
 ensure_bubblewrap_alias
@@ -550,8 +644,11 @@ else
   fi
 fi
 
+setup_agents_md
+
 info "已安装二进制: $binary_path"
 info "已安装命令: $launcher_path"
+info "已安装大小写兼容入口: codex / Codex / CODEX / 其余大小写组合"
 if have bwrap; then
   info "bubblewrap 已安装: $(command -v bwrap)"
 elif have bubblewrap; then

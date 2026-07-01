@@ -20,7 +20,7 @@ Android 手机端推荐终端：ReTerminal，官方仓库为 <https://github.com
 wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | sh
 ```
 
-安装器开局会让你选择初始化方式：`1` 为官方 Codex 初始化，不写第三方配置；`2` 为第三方 Responses API，会输入 Base URL / API Key，自动请求 `/models`，然后用终端复选框多选要启用的模型，再选择默认模型。
+安装器开局会让你选择初始化方式：`1` 为官方 Codex 初始化，不写第三方配置；`2` 为第三方 Responses API，会输入 Base URL / API Key，自动请求 `/models`，然后用纯终端编号切换式多选启用模型，再选择默认模型。
 
 如果 Alpine 里已有 `curl`，也可以：
 
@@ -28,7 +28,7 @@ wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skil
 curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | sh
 ```
 
-默认会安装较完整的 Codex 工作依赖，包括 Python、Node/npm、编译工具链、diff/patch、OpenSSL/libffi 等，并尽量安装 `dialog` 和 `bubblewrap`。`codex` 命令默认安装到 `/usr/local/bin`，同时写入 profile 兜底，重进终端也不需要手动 `export PATH`。网络很差时可以先用最小依赖模式：
+默认会安装较完整的 Codex 工作依赖，包括 Python、Node/npm、编译工具链、diff/patch、OpenSSL/libffi 等，并尽量安装 `bubblewrap`。`codex` 命令默认安装到 `/usr/local/bin`，同时写入 profile 和 `/etc/profile.d/codex-zh.sh` 兜底，重进终端也不需要手动 `export PATH`；还会生成 `Codex`、`CODEX` 等 32 种大小写入口。网络很差时可以先用最小依赖模式：
 
 ```sh
 wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_DEPS_PROFILE=minimal sh
@@ -60,7 +60,7 @@ DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive 
 curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-alpine-proot.sh | sh
 ```
 
-脚本会在开局要求输入第三方 API Base URL 和 API Key。Base URL 会自动补齐 `/v1`；随后脚本会请求 `/models`，列出模型并让你选择默认模型和启用模型。安装完成后直接运行：
+脚本会在开局要求输入第三方 API Base URL 和 API Key。Base URL 会自动补齐 `/v1`；随后脚本会请求 `/models`，列出模型并让你多选启用模型和选择默认模型；配置按 Codex 官方风格写入 `~/.codex/config.toml` 和 `~/.codex/auth.json`。安装时还会询问是否生成标准版 `AGENTS.md`，或粘贴自定义 `AGENTS.md`。安装完成后直接运行：
 
 ```sh
 codex
