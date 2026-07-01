@@ -94,7 +94,7 @@ class TerminalBackEnd(
     }
 
     override fun onScale(scale: Float): Float {
-        val fontScale = scale.coerceIn(11f, 45f)
+        val fontScale = scale.coerceIn(10f, 45f)
         terminal.setTextSize(fontScale.toInt())
         return fontScale
     }

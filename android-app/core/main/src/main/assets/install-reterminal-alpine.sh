@@ -19,6 +19,11 @@ DEPS_PROFILE="${CODEX_ZH_DEPS_PROFILE:-full}"
 MIRROR_PROFILE="${CODEX_ZH_MIRROR_PROFILE:-auto}"
 SETUP_MODE="${CODEX_ZH_SETUP_MODE:-}"
 ALLOW_MANUAL_MODEL="${CODEX_ZH_ALLOW_MANUAL_MODEL:-0}"
+INSTALLER_VERSION="${CODEX_FOR_TUI_INSTALLER_VERSION:-2026.07.01.2}"
+STATE_ROOT="${CODEX_FOR_TUI_STATE_DIR:-${HOME:-/root}/.codex-for-tui}"
+DOWNLOAD_METHOD_FILE="$STATE_ROOT/download-method"
+DEPS_CONFIRM_FILE="$STATE_ROOT/deps-confirmed"
+NOTICE_URL="${CODEX_FOR_TUI_NOTICE_URL:-$REPO_RAW/$BRANCH/android-arm64-musl/NOTICE.txt}"
 
 info() { printf '%s\n' "$*"; }
 warn() { printf '警告: %s\n' "$*" >&2; }
@@ -51,21 +56,230 @@ sha256_file() {
   fi
 }
 
+tty_available() {
+  [ "${CODEX_ZH_FORCE_STDIN:-0}" = "1" ] && return 1
+  [ -r /dev/tty ] && [ -w /dev/tty ] && { : < /dev/tty; } 2>/dev/null
+}
+
+deps_packages_minimal() {
+  printf '%s\n' "ca-certificates curl wget tar gzip jq git openssh-client ripgrep fd bash coreutils findutils sed grep gawk procps"
+}
+
+deps_packages_full() {
+  printf '%s\n' "ca-certificates curl wget tar gzip unzip xz jq git openssh-client ripgrep fd bash coreutils findutils sed grep gawk diffutils patch procps python3 py3-pip nodejs npm make gcc g++ musl-dev pkgconf cmake ninja openssl openssl-dev libffi-dev perl"
+}
+
+required_commands_for_profile() {
+  if [ "$DEPS_PROFILE" = "minimal" ]; then
+    printf '%s\n' "tar gzip jq git ssh rg fd bash sed grep awk ps"
+  else
+    printf '%s\n' "tar gzip unzip xz jq git ssh rg fd bash sed grep awk ps python3 node npm make gcc g++ cmake ninja openssl perl"
+  fi
+}
+
+missing_commands() {
+  required_commands_for_profile | tr ' ' '\n' | while IFS= read -r cmd; do
+    [ -n "$cmd" ] || continue
+    have "$cmd" || printf '%s\n' "$cmd"
+  done
+}
+
+available_downloaders() {
+  have curl && printf '%s\n' "curl"
+  have wget && printf '%s\n' "wget"
+  have aria2c && printf '%s\n' "aria2c"
+  if have busybox && busybox wget --help >/dev/null 2>&1; then
+    printf '%s\n' "busybox-wget"
+  fi
+}
+
+print_download_plan() {
+  cat >&2 <<EOF
+环境检查：
+- 安装器版本：$INSTALLER_VERSION
+- 公告预留地址：$NOTICE_URL
+- Codex 压缩包：$ARCHIVE，约 70-90 MB，支持断点续传。
+- Minimal 依赖：约 80-150 MB 下载，安装后约 250-500 MB。
+- Full 依赖：约 300-600 MB 下载，安装后可能超过 1 GB。
+- GitHub raw 下载 Codex 二进制时可能需要代理/梯子；Alpine 依赖会自动尝试清华、北外和官方镜像。
+EOF
+}
+
+confirm_deps_install() {
+  [ "$SKIP_DEPS" = "1" ] && return 0
+  have apk || die "当前不是 Alpine 环境：找不到 apk。请切到 Codex for TUI 的 Alpine 模式再运行。"
+
+  mkdir -p "$STATE_ROOT"
+  missing="$(missing_commands | tr '\n' ' ')"
+  if [ -z "$missing" ] && [ -s "$DEPS_CONFIRM_FILE" ]; then
+    return 0
+  fi
+
+  print_download_plan
+  if [ -n "$missing" ]; then
+    printf '%s\n' "检测到缺失命令：$missing" >&2
+  else
+    printf '%s\n' "基础命令看起来已具备；你仍可选择补装/修复依赖。" >&2
+  fi
+
+  while :; do
+    printf '%s\n' "请选择依赖安装方式：" >&2
+    printf '%s\n' "1. 安装 Minimal 依赖（推荐：够 Codex 日常使用，体积较小）" >&2
+    printf '%s\n' "2. 安装 Full 依赖（包含 python/node/gcc/cmake 等，体积较大）" >&2
+    printf '%s\n' "3. 跳过依赖安装，直接继续" >&2
+    printf '%s\n' "4. 退出，稍后再继续" >&2
+    choice="$(tty_read "请输入选项编号" "$( [ "$DEPS_PROFILE" = "minimal" ] && printf 1 || printf 2 )")"
+    case "$choice" in
+      1)
+        DEPS_PROFILE="minimal"
+        printf '%s\n' "$DEPS_PROFILE" > "$DEPS_CONFIRM_FILE" 2>/dev/null || true
+        return 0
+        ;;
+      2)
+        DEPS_PROFILE="full"
+        printf '%s\n' "$DEPS_PROFILE" > "$DEPS_CONFIRM_FILE" 2>/dev/null || true
+        return 0
+        ;;
+      3)
+        SKIP_DEPS=1
+        return 0
+        ;;
+      4)
+        info "已退出。重新打开 App 或再次运行安装脚本会继续。"
+        exit 0
+        ;;
+      *) warn "请输入 1、2、3 或 4。" ;;
+    esac
+  done
+}
+
+install_download_tools_menu() {
+  have apk || die "无法安装下载工具：当前环境缺少 apk。"
+  while :; do
+    printf '%s\n' "请选择要安装的下载工具：" >&2
+    printf '%s\n' "1. curl（推荐，稳定支持断点续传/重试）" >&2
+    printf '%s\n' "2. wget（兼容性好，参数简单）" >&2
+    printf '%s\n' "3. aria2（多连接下载，网络好时更快）" >&2
+    printf '%s\n' "4. curl + wget（推荐兜底组合）" >&2
+    printf '%s\n' "5. curl + wget + aria2" >&2
+    printf '%s\n' "6. 返回下载方式选择" >&2
+    choice="$(tty_read "请输入选项编号" "4")"
+    case "$choice" in
+      1) tools="curl ca-certificates" ;;
+      2) tools="wget ca-certificates" ;;
+      3) tools="aria2 ca-certificates" ;;
+      4) tools="curl wget ca-certificates" ;;
+      5) tools="curl wget aria2 ca-certificates" ;;
+      6) return 1 ;;
+      *) warn "请输入 1-6。"; continue ;;
+    esac
+    printf '%s\n' "将通过 Alpine apk 安装：$tools" >&2
+    printf '%s\n' "下载大小取决于镜像和已有缓存；通常几 MB 到几十 MB。Alpine 镜像一般不需要代理，若镜像连接失败会自动换源。" >&2
+    apk_update_with_fallback >&2
+    apk add --no-cache $tools >&2
+    return 0
+  done
+}
+
+choose_downloader() {
+  mkdir -p "$STATE_ROOT"
+  forced="${CODEX_ZH_DOWNLOADER:-}"
+  if [ -z "$forced" ] && [ -s "$DOWNLOAD_METHOD_FILE" ]; then
+    forced="$(sed -n '1p' "$DOWNLOAD_METHOD_FILE")"
+  fi
+  case "$forced" in
+    curl|wget|aria2c|busybox-wget)
+      if [ "$forced" = "busybox-wget" ]; then
+        have busybox && busybox wget --help >/dev/null 2>&1 && { printf '%s\n' "$forced"; return 0; }
+      elif have "$forced"; then
+        printf '%s\n' "$forced"
+        return 0
+      fi
+      warn "上次/指定下载方式 $forced 当前不可用，将重新选择。"
+      ;;
+  esac
+
+  while :; do
+    available="$(available_downloaders | tr '\n' ' ')"
+    printf '\n%s\n' "请选择 Codex 压缩包下载方式：" >&2
+    [ -n "$available" ] && printf '%s\n' "当前可用下载工具：$available" >&2 || printf '%s\n' "当前没有检测到可用下载工具。" >&2
+    idx=1
+    opts_file="$STATE_ROOT/download-options.$$"
+    : > "$opts_file"
+    if have curl; then
+      printf '%s\n' "curl" >> "$opts_file"
+      printf '%s\n' "$idx. curl：--http1.1 + 断点续传 + 8 次重试 + 低速保护（推荐）" >&2
+      idx=$((idx + 1))
+    fi
+    if have wget; then
+      printf '%s\n' "wget" >> "$opts_file"
+      printf '%s\n' "$idx. wget：-c 断点续传 + 8 次重试 + 30 秒超时" >&2
+      idx=$((idx + 1))
+    fi
+    if have aria2c; then
+      printf '%s\n' "aria2c" >> "$opts_file"
+      printf '%s\n' "$idx. aria2：断点续传 + 4 连接 + 8 次重试" >&2
+      idx=$((idx + 1))
+    fi
+    if have busybox && busybox wget --help >/dev/null 2>&1; then
+      printf '%s\n' "busybox-wget" >> "$opts_file"
+      printf '%s\n' "$idx. busybox wget：最小兜底下载器，能力较弱" >&2
+      idx=$((idx + 1))
+    fi
+    install_choice="$idx"
+    printf '%s\n' "$install_choice. 安装/补装下载工具" >&2
+    exit_choice=$((idx + 1))
+    printf '%s\n' "$exit_choice. 退出，稍后再继续" >&2
+    choice="$(tty_read "请输入选项编号" "1")"
+    case "$choice" in
+      *[!0-9]*|"") choice=1 ;;
+    esac
+    count="$(wc -l < "$opts_file" | tr -d ' ')"
+    if [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$count" ] 2>/dev/null; then
+      method="$(sed -n "${choice}p" "$opts_file")"
+      rm -f "$opts_file"
+      printf '%s\n' "$method" > "$DOWNLOAD_METHOD_FILE" 2>/dev/null || true
+      printf '%s\n' "$method"
+      return 0
+    fi
+    rm -f "$opts_file"
+    if [ "$choice" = "$install_choice" ]; then
+      install_download_tools_menu || true
+      continue
+    fi
+    if [ "$choice" = "$exit_choice" ]; then
+      info "已退出。重新打开 App 或再次运行安装脚本会继续。"
+      exit 0
+    fi
+    warn "请输入列表里的编号。"
+  done
+}
+
 download() {
   url="$1"
   dest="$2"
   part="$dest.part"
-  if have curl; then
+  method="$(choose_downloader)"
+  info "使用下载方式：$method"
+  if [ "$method" = "curl" ]; then
     curl -fL --http1.1 \
       --retry 8 --retry-delay 2 --retry-all-errors \
       --connect-timeout 20 --speed-time 30 --speed-limit 1024 \
       -C - -o "$part" "$url"
     mv "$part" "$dest"
-  elif have wget; then
+  elif [ "$method" = "wget" ]; then
     wget -c -O "$part" --tries=8 --timeout=30 "$url"
     mv "$part" "$dest"
+  elif [ "$method" = "aria2c" ]; then
+    rm -f "$part.aria2"
+    aria2c -c -x 4 -s 4 --retry-wait=2 --max-tries=8 --connect-timeout=20 --timeout=60 \
+      -d "$(dirname "$part")" -o "$(basename "$part")" "$url"
+    mv "$part" "$dest"
+  elif [ "$method" = "busybox-wget" ]; then
+    busybox wget -c -O "$part" "$url"
+    mv "$part" "$dest"
   else
-    die "缺少 curl 或 wget"
+    die "未知下载方式：$method"
   fi
 }
 
@@ -129,15 +343,9 @@ install_deps() {
   if [ "$(id -u)" = "0" ]; then
     apk_update_with_fallback
     if [ "$DEPS_PROFILE" = "minimal" ]; then
-      apk add --no-cache ca-certificates curl wget tar gzip jq git openssh-client ripgrep fd bash coreutils findutils sed grep gawk procps
+      apk add --no-cache $(deps_packages_minimal)
     else
-      apk add --no-cache \
-        ca-certificates curl wget tar gzip unzip xz jq \
-        git openssh-client ripgrep fd bash \
-        coreutils findutils sed grep gawk diffutils patch procps \
-        python3 py3-pip nodejs npm \
-        make gcc g++ musl-dev pkgconf cmake ninja \
-        openssl openssl-dev libffi-dev perl
+      apk add --no-cache $(deps_packages_full)
     fi
     apk add --no-cache bubblewrap >/dev/null 2>&1 || warn "bubblewrap 可选依赖安装失败；Codex 可能仍提示 bubblewrap 警告。"
   else
@@ -630,7 +838,11 @@ esac
 
 [ -n "${HOME:-}" ] && [ "$HOME" != "/" ] || export HOME="/root"
 mkdir -p "$HOME"
+STATE_ROOT="${CODEX_FOR_TUI_STATE_DIR:-$HOME/.codex-for-tui}"
+DOWNLOAD_METHOD_FILE="$STATE_ROOT/download-method"
+DEPS_CONFIRM_FILE="$STATE_ROOT/deps-confirmed"
 
+confirm_deps_install
 install_deps
 
 cache_dir="${CODEX_ZH_CACHE_DIR:-$HOME/.cache/codex-zh}"
