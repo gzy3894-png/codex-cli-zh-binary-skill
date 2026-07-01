@@ -17,6 +17,8 @@ https://github.com/RohitKushvaha01/ReTerminal
 
 建议安装官方 Actions 中包含中文资源的 `1.3.0` 构建，然后进入 ReTerminal 的 Alpine 模式。
 
+Codex for TUI Android App 现在也是先拉取这个目录里的最新安装/恢复脚本，再继续安装或恢复；以后修脚本通常只需要更新仓库，不必重打 APK。
+
 ## 推荐：ReTerminal Alpine 一键安装
 
 如果你已经在 ReTerminal 的 Alpine 模式里，直接执行：
@@ -29,7 +31,7 @@ wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skil
 
 ```text
 1. 官方 Codex 初始化：不写第三方配置，首次运行 codex 时由官方流程提示登录或 API Key
-2. 第三方 Responses API：输入 Base URL 和 API Key，自动请求 `/models`，用编号切换式多选启用模型，再选择默认模型并生成官方风格配置
+2. 第三方 Responses API：输入 Base URL 和 API Key，自动请求 `/models`，用编号切换式多选常用模型，再选择默认模型并生成官方风格配置
 ```
 
 如果 Alpine 里已有 `curl`：
@@ -48,8 +50,8 @@ curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-ski
 - 下载并校验 Codex CLI `0.142.4` 中文 ARM64 musl 二进制
 - 开局询问第三方 API Base URL 和 API Key
 - 自动补齐 API Base URL 的 `/v1` 后缀
-- 请求 `/models`，让用户用纯终端编号多选启用模型，再选择默认模型
-- 按 Codex 官方习惯生成 `~/.codex/config.toml` 和 `~/.codex/auth.json`，默认使用 `wire_api = "responses"`
+- 请求 `/models`，让用户用纯终端编号选择常用模型，再选择默认模型
+- 按 Codex 官方习惯生成 `~/.codex/config.toml` 和 `~/.codex/auth.json`，默认使用 `wire_api = "responses"`，模型列表交给 Codex 自己刷新和缓存
 - 设置 `[features] hooks = false`，避免旧 hook 导致 `Stop hook exited with code 127`
 - 安装后询问启动提示词：默认生成标准版 `AGENTS.md`，也可以粘贴自定义版
 - 默认安装 `codex` 命令到 `/usr/local/bin`，并生成 `codex` 的 32 种大小写入口，例如 `Codex`、`CODEX`
@@ -67,11 +69,7 @@ wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skil
 wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_SETUP_MODE=third_party CODEX_ZH_API_BASE=https://api.example.com/v1 CODEX_ZH_API_KEY=你的key sh
 ```
 
-第三方 API 模式默认必须成功拉取 `/models`。只有确实遇到非标准模型接口时，才建议显式允许手动兜底：
-
-```sh
-wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_SETUP_MODE=third_party CODEX_ZH_ALLOW_MANUAL_MODEL=1 sh
-```
+第三方 API 模式必须成功拉取 `/models`。如果失败，安装器会让你检查 Base URL、API Key、代理或服务端兼容性后重试，不再写入手动拼出来的模型目录。
 
 安装完成后运行：
 
@@ -103,7 +101,7 @@ wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skil
 - 下载并校验 Codex CLI `0.142.4` 中文 ARM64 musl 二进制
 - 开局询问第三方 API Base URL 和 API Key
 - 自动补齐 API Base URL 的 `/v1` 后缀
-- 请求 `/models`，让用户选择默认模型和启用模型
+- 请求 `/models`，让用户选择默认模型和常用模型
 - 生成 `~/.codex/config.toml`，默认使用 `wire_api = "responses"`
 - 设置 `[features] hooks = false`，避免迁移旧 hooks 后出现 `Stop hook exited with code 127`
 - 安装 `codex` 和 `codex-alpine` 命令
@@ -144,7 +142,7 @@ codex-alpine
 
 1. API Base URL，例如 `https://api.example.com` 或 `https://api.example.com/v1`
 2. API Key
-3. 终端编号切换式多选启用模型
+3. 终端编号切换式多选常用模型
 4. 默认模型编号
 
 Base URL 会自动规范化：
@@ -153,12 +151,11 @@ Base URL 会自动规范化：
 - `https://api.example.com/` -> `https://api.example.com/v1`
 - `https://api.example.com/v1` -> 保持不变
 
-生成的配置不把 key 写进 `config.toml`；密钥写入 Codex 官方习惯读取的 `auth.json`：
+生成的配置不把 key 写进 `config.toml`；密钥写入 Codex 官方习惯读取的 `auth.json`。第三方 provider 使用 Codex 上游支持的 command auth 读取 token，因此 Codex 自己可以刷新 `/models` 并写入上游缓存 `models_cache.json`：
 
 ```toml
 model_provider = "custom"
 model = "你选择的默认模型"
-model_catalog_json = "/root/.codex/model-catalog.json"
 model_reasoning_effort = "medium"
 model_auto_compact_token_limit = 120000
 
@@ -169,10 +166,17 @@ hooks = false
 name = "custom"
 base_url = "https://api.example.com/v1"
 wire_api = "responses"
-requires_openai_auth = true
+requires_openai_auth = false
+
+[model_providers.custom.auth]
+command = "/root/.codex/bin/provider-api-key"
+args = []
+timeout_ms = 5000
+refresh_interval_ms = 300000
+cwd = "/root/.codex"
 ```
 
-`/model` 命令读取的是 `model_catalog_json` 指向的模型目录文件；安装器会把你启用的模型写入 `/root/.codex/model-catalog.json`，而不是用旧式 `profiles` 伪装模型列表。
+安装器不会生成 `/root/.codex/model-catalog.json`，也不会写 `model_catalog_json`。上游里 `model_catalog_json` 是启动时加载的静态完整模型目录覆盖项，不是普通 `/models` 缓存；正常缓存文件名由 Codex 管理。
 
 密钥保存在 Alpine rootfs 的 `/root/.codex/auth.json`，权限为 `600`：
 

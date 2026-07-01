@@ -3,8 +3,9 @@ set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 INSTALLER="${1:-$ROOT_DIR/android-arm64-musl/install-reterminal-alpine.sh}"
-BOOTSTRAP="${2:-$ROOT_DIR/android-app/core/main/src/main/assets/codex-for-tui-bootstrap.sh}"
-RESUME="${3:-$ROOT_DIR/android-arm64-musl/codex-local-resume.sh}"
+BOOTSTRAP="${2:-$ROOT_DIR/android-arm64-musl/codex-for-tui-bootstrap.sh}"
+BOOTSTRAP_ASSET="${3:-$ROOT_DIR/android-app/core/main/src/main/assets/codex-for-tui-bootstrap.sh}"
+RESUME="${4:-$ROOT_DIR/android-arm64-musl/codex-local-resume.sh}"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -19,6 +20,16 @@ assert_file_contains() {
     sed -n '1,160p' "$file" >&2 || true
     fail "expected pattern not found: $pattern"
   }
+}
+
+assert_file_not_contains() {
+  file="$1"
+  pattern="$2"
+  if grep -F "$pattern" "$file" >/dev/null 2>&1; then
+    printf '%s\n' "--- $file ---" >&2
+    sed -n '1,160p' "$file" >&2 || true
+    fail "unexpected pattern found: $pattern"
+  fi
 }
 
 make_installer_lib() {
@@ -134,6 +145,79 @@ test_bootstrap_continue_writes_consent() {
   rm -rf "$tmp"
 }
 
+test_bootstrap_script_url_candidates_include_raw_then_release() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-bootstrap-urls.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp"
+  make_bootstrap_lib "$BOOTSTRAP" "$tmp/bootstrap-lib.sh"
+
+  (
+    # shellcheck disable=SC1091
+    . "$tmp/bootstrap-lib.sh"
+    SCRIPT_BASE_URL="https://raw.example.test/repo/branch/android-arm64-musl"
+    SCRIPT_RELEASE_BASE_URL="https://github.example.test/repo/releases/latest/download"
+    script_url_candidates "install-reterminal-alpine.sh" ""
+  ) > "$tmp/urls"
+
+  [ "$(sed -n '1p' "$tmp/urls")" = "https://raw.example.test/repo/branch/android-arm64-musl/install-reterminal-alpine.sh" ] || fail "raw script URL candidate was not first"
+  [ "$(sed -n '2p' "$tmp/urls")" = "https://github.example.test/repo/releases/latest/download/install-reterminal-alpine.sh" ] || fail "release script URL candidate was not second"
+  rm -rf "$tmp"
+}
+
+test_bootstrap_refresh_remote_script_keeps_cache_on_failure() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-bootstrap-cache.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/bin" "$tmp/home"
+  make_bootstrap_lib "$BOOTSTRAP" "$tmp/bootstrap-lib.sh"
+  printf '%s\n' "cached-script" > "$tmp/cached.sh"
+
+  cat > "$tmp/bin/curl" <<'EOF'
+#!/usr/bin/env sh
+exit 22
+EOF
+  chmod +x "$tmp/bin/curl"
+
+  (
+    # shellcheck disable=SC1091
+    . "$tmp/bootstrap-lib.sh"
+    export HOME="$tmp/home"
+    export PATH="$tmp/bin:/bin:/usr/bin"
+    SCRIPT_BASE_URL="https://raw.example.test/repo/branch/android-arm64-musl"
+    SCRIPT_RELEASE_BASE_URL="https://github.example.test/repo/releases/latest/download"
+    refresh_remote_script "安装脚本" "install-reterminal-alpine.sh" "" "$tmp/cached.sh"
+  ) >"$tmp/stdout" 2>"$tmp/stderr" || fail "refresh_remote_script should have reused cache"
+
+  [ "$(sed -n '1p' "$tmp/cached.sh")" = "cached-script" ] || fail "cached script changed after failed refresh"
+  assert_file_contains "$tmp/stderr" "继续使用本地缓存"
+  rm -rf "$tmp"
+}
+
+test_bootstrap_resume_requires_existing_state() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-bootstrap-resume-state.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home"
+  make_bootstrap_lib "$BOOTSTRAP" "$tmp/bootstrap-lib.sh"
+
+  (
+    # shellcheck disable=SC1091
+    . "$tmp/bootstrap-lib.sh"
+    export HOME="$tmp/home"
+    unset CODEX_HOME
+    has_resume_state
+  ) && fail "has_resume_state should be false without any state"
+
+  mkdir -p "$tmp/home/.codex/install-state"
+  (
+    # shellcheck disable=SC1091
+    . "$tmp/bootstrap-lib.sh"
+    export HOME="$tmp/home"
+    unset CODEX_HOME
+    has_resume_state
+  ) || fail "has_resume_state should be true when install-state exists"
+
+  rm -rf "$tmp"
+}
+
 test_resume_menu_rejects_pasted_url_choice() {
   tmp="${TMPDIR:-/tmp}/codex-tui-test-resume-menu.$$"
   rm -rf "$tmp"
@@ -204,6 +288,76 @@ test_resume_rejects_invalid_api_base_before_fetch() {
   rm -rf "$tmp"
 }
 
+test_installer_config_uses_provider_auth_not_model_catalog() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-installer-config.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home"
+  make_installer_lib "$INSTALLER" "$tmp/installer-lib.sh"
+  printf '%s\n' "gpt-test" > "$tmp/enabled-models.txt"
+
+  (
+    # shellcheck disable=SC1091
+    . "$tmp/installer-lib.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    PROVIDER_ID="custom"
+    write_codex_config "https://api.example.com/v1" "sk-test-token" "gpt-test" "$tmp/enabled-models.txt"
+  )
+
+  config="$tmp/home/.codex/config.toml"
+  helper="$tmp/home/.codex/bin/provider-api-key"
+  assert_file_contains "$config" 'requires_openai_auth = false'
+  assert_file_contains "$config" '[model_providers.custom.auth]'
+  assert_file_contains "$config" "command = \"$helper\""
+  assert_file_not_contains "$config" 'model_catalog_json'
+  [ ! -e "$tmp/home/.codex/model-catalog.json" ] || fail "installer created model-catalog.json"
+  [ "$("$helper")" = "sk-test-token" ] || fail "provider auth helper did not read auth.json"
+  rm -rf "$tmp"
+}
+
+test_resume_migrates_legacy_model_catalog_profile() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-resume-migrate.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home" "$tmp/profile"
+  make_resume_lib "$RESUME" "$tmp/resume-lib.sh"
+  cat > "$tmp/profile/config.toml" <<'EOF'
+model_provider = "custom"
+model = "gpt-legacy"
+model_catalog_json = "/root/.codex/model-catalog.json"
+
+[model_providers.custom]
+name = "custom"
+base_url = "https://api.example.com/v1"
+wire_api = "responses"
+requires_openai_auth = true
+EOF
+  printf '%s\n' "third_party" > "$tmp/profile/setup-mode"
+  printf '%s\n' "https://api.example.com/v1" > "$tmp/profile/api-base"
+  printf '%s\n' "gpt-legacy" > "$tmp/profile/default-model"
+  printf '%s\n' "gpt-legacy" > "$tmp/profile/enabled-models.txt"
+  printf '%s\n' '{"OPENAI_API_KEY":"sk-legacy-token"}' > "$tmp/profile/auth.json"
+  printf '%s\n' '{"models":[]}' > "$tmp/profile/model-catalog.json"
+
+  (
+    # shellcheck disable=SC1091
+    . "$tmp/resume-lib.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    PROVIDER_ID="custom"
+    migrate_third_party_profile_if_needed "$tmp/profile"
+  )
+
+  config="$tmp/profile/config.toml"
+  helper="$tmp/profile/bin/provider-api-key"
+  assert_file_contains "$config" 'requires_openai_auth = false'
+  assert_file_contains "$config" '[model_providers.custom.auth]'
+  assert_file_contains "$config" "command = \"$helper\""
+  assert_file_not_contains "$config" 'model_catalog_json'
+  [ ! -e "$tmp/profile/model-catalog.json" ] || fail "legacy model-catalog.json was not removed"
+  [ "$("$helper")" = "sk-legacy-token" ] || fail "migrated provider auth helper did not read auth.json"
+  rm -rf "$tmp"
+}
+
 run_step() {
   name="$1"
   (
@@ -219,10 +373,17 @@ run_step() {
 
 sh -n "$INSTALLER"
 sh -n "$BOOTSTRAP"
+sh -n "$BOOTSTRAP_ASSET"
 sh -n "$RESUME"
+cmp "$BOOTSTRAP" "$BOOTSTRAP_ASSET"
 run_step test_print_download_plan_blank_notice_returns_zero
 run_step test_confirm_deps_choice_minimal_continues
 run_step test_bootstrap_continue_writes_consent
+run_step test_bootstrap_script_url_candidates_include_raw_then_release
+run_step test_bootstrap_refresh_remote_script_keeps_cache_on_failure
+run_step test_bootstrap_resume_requires_existing_state
 run_step test_resume_menu_rejects_pasted_url_choice
 run_step test_resume_rejects_invalid_api_base_before_fetch
+run_step test_installer_config_uses_provider_auth_not_model_catalog
+run_step test_resume_migrates_legacy_model_catalog_profile
 printf 'OK: Codex for TUI installer smoke tests passed\n'

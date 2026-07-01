@@ -7,6 +7,7 @@ BRANCH="${CODEX_ZH_BRANCH:-android-arm64-musl-installer}"
 REPO_RAW="${CODEX_ZH_REPO_RAW:-https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill}"
 BASE_URL="${CODEX_ZH_BASE_URL:-$REPO_RAW/$BRANCH/android-arm64-musl}"
 BINARY_BASE_URL="${CODEX_ZH_BINARY_BASE_URL:-https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/download/codex-for-tui-v1.0.0}"
+SCRIPT_RELEASE_BASE_URL="${CODEX_ZH_SCRIPT_RELEASE_BASE_URL:-https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/latest/download}"
 ARCHIVE="codex-${VERSION}-zh-${TARGET}.tar.gz"
 ARCHIVE_URL="$BINARY_BASE_URL/$ARCHIVE"
 ARCHIVE_SHA256="7BEC4F162DDE06C8B14F2D50309E4999D8239C5AD9E7A138509B0E758007CB29"
@@ -20,7 +21,6 @@ SKIP_RUN="${CODEX_ZH_SKIP_RUN:-0}"
 DEPS_PROFILE="${CODEX_ZH_DEPS_PROFILE:-full}"
 MIRROR_PROFILE="${CODEX_ZH_MIRROR_PROFILE:-auto}"
 SETUP_MODE="${CODEX_ZH_SETUP_MODE:-}"
-ALLOW_MANUAL_MODEL="${CODEX_ZH_ALLOW_MANUAL_MODEL:-0}"
 INSTALLER_VERSION="${CODEX_FOR_TUI_INSTALLER_VERSION:-2026.07.01.2}"
 STATE_ROOT="${CODEX_FOR_TUI_STATE_DIR:-${HOME:-/root}/.codex-for-tui}"
 DOWNLOAD_METHOD_FILE="$STATE_ROOT/download-method"
@@ -299,6 +299,37 @@ download() {
   fi
 }
 
+script_url_candidates() {
+  name="$1"
+  override="${2:-}"
+  [ -n "$override" ] && printf '%s\n' "$override"
+  printf '%s\n' "$BASE_URL/$name"
+  [ -n "$SCRIPT_RELEASE_BASE_URL" ] && printf '%s\n' "$SCRIPT_RELEASE_BASE_URL/$name"
+}
+
+fetch_helper_script() {
+  label="$1"
+  name="$2"
+  override="${3:-}"
+  dest="$4"
+  old_ifs="$IFS"
+  IFS='
+'
+  for url in $(script_url_candidates "$name" "$override"); do
+    [ -n "$url" ] || continue
+    info "尝试拉取${label}: $url"
+    if download "$url" "$dest"; then
+      chmod 755 "$dest" 2>/dev/null || true
+      IFS="$old_ifs"
+      return 0
+    fi
+    warn "${label}拉取失败：$url"
+    rm -f "$dest" "$dest.part"
+  done
+  IFS="$old_ifs"
+  return 1
+}
+
 write_apk_repositories() {
   mirror="$1"
   alpine_version="$(sed -n 's/^VERSION_ID=//p' /etc/os-release 2>/dev/null | tr -d '"' | awk -F. '{print $1 "." $2}')"
@@ -521,7 +552,7 @@ choose_model() {
   count="$(wc -l < "$list_file" | tr -d ' ')"
   [ "$count" -gt 0 ] || return 1
   printf '\n%s\n' "请选择默认启动模型：" >&2
-  printf '%s\n' "这个模型会写入 config.toml 的 model 字段，Codex 启动后会默认使用它；其他已启用模型仍可在 /model 中切换。" >&2
+  printf '%s\n' "这个模型会写入 config.toml 的 model 字段；Codex 后续会通过 provider auth 自行刷新 /models。" >&2
   nl -w2 -s'. ' "$list_file" >&2
   choice="$(tty_read "请输入默认启动模型编号" "1")"
   case "$choice" in
@@ -545,7 +576,7 @@ select_enabled_models_text() {
   seq 1 "$count" > "$selected"
 
   while :; do
-    printf '\n%s\n' "选择要启用的模型（默认已全选）：" >&2
+    printf '\n%s\n' "选择常用模型（默认已全选，用于默认模型候选和本地记录）：" >&2
     i=1
     while [ "$i" -le "$count" ]; do
       model_name="$(sed -n "${i}p" "$list_file")"
@@ -572,7 +603,7 @@ select_enabled_models_text() {
         ;;
       n|none|clear|清空)
         : > "$selected"
-        printf '%s\n' "已清空选择。请至少选择一个模型，或继续按回车使用全部模型兜底。" >&2
+        printf '%s\n' "已清空选择。请至少选择一个常用模型，或继续按回车使用全部模型兜底。" >&2
         continue
         ;;
     esac
@@ -594,7 +625,7 @@ select_enabled_models_text() {
   done
 
   if [ ! -s "$selected" ]; then
-    warn "未选择任何模型，默认启用全部模型。"
+    warn "未选择任何常用模型，默认使用全部模型作为候选。"
     cat "$list_file"
     return
   fi
@@ -616,88 +647,39 @@ select_models() {
   choose_model "$enabled_file" > "$default_file"
 }
 
-write_model_catalog_entry() {
-  model_name="$1"
-  priority="$2"
-  need_comma="$3"
-  model_name_esc="$(json_escape "$model_name")"
+write_provider_auth_helper() {
+  codex_home="$1"
+  helper_dir="$codex_home/bin"
+  helper="$helper_dir/provider-api-key"
+  mkdir -p "$helper_dir"
+  chmod 700 "$helper_dir"
+  cat > "$helper" <<'EOF'
+#!/usr/bin/env sh
+set -eu
 
-  if [ "$need_comma" = "1" ]; then
-    printf ',\n'
+helper_path="$0"
+case "$helper_path" in
+  */*) helper_dir="${helper_path%/*}" ;;
+  *) helper_dir="." ;;
+esac
+
+helper_home="$(CDPATH= cd -- "$helper_dir/.." 2>/dev/null && pwd || printf '%s' "${CODEX_HOME:-${HOME:-/root}/.codex}")"
+auth_file="$helper_home/auth.json"
+[ -r "$auth_file" ] || auth_file="${CODEX_HOME:-$helper_home}/auth.json"
+
+token=""
+if [ -r "$auth_file" ]; then
+  if command -v jq >/dev/null 2>&1; then
+    token="$(jq -r '.OPENAI_API_KEY // empty' "$auth_file" 2>/dev/null || true)"
+  else
+    token="$(sed -n 's/.*"OPENAI_API_KEY"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$auth_file" 2>/dev/null | sed -n '1p')"
   fi
-  printf '    {\n'
-  printf '      "slug": "%s",\n' "$model_name_esc"
-  printf '      "display_name": "%s",\n' "$model_name_esc"
-  printf '      "description": "Third-party API model",\n'
-  printf '      "default_reasoning_level": "medium",\n'
-  printf '      "supported_reasoning_levels": [\n'
-  printf '        {"effort": "low", "description": "Fast responses with lighter reasoning"},\n'
-  printf '        {"effort": "medium", "description": "Balances speed and reasoning depth"},\n'
-  printf '        {"effort": "high", "description": "Greater reasoning depth"},\n'
-  printf '        {"effort": "xhigh", "description": "Extra high reasoning depth"}\n'
-  printf '      ],\n'
-  printf '      "shell_type": "shell_command",\n'
-  printf '      "visibility": "list",\n'
-  printf '      "supported_in_api": true,\n'
-  printf '      "priority": %s,\n' "$priority"
-  printf '      "availability_nux": null,\n'
-  printf '      "upgrade": null,\n'
-  printf '      "base_instructions": "",\n'
-  printf '      "model_messages": null,\n'
-  printf '      "supports_reasoning_summaries": true,\n'
-  printf '      "default_reasoning_summary": "auto",\n'
-  printf '      "support_verbosity": false,\n'
-  printf '      "default_verbosity": null,\n'
-  printf '      "apply_patch_tool_type": null,\n'
-  printf '      "web_search_tool_type": "text",\n'
-  printf '      "truncation_policy": {"mode": "tokens", "limit": 10000},\n'
-  printf '      "supports_parallel_tool_calls": true,\n'
-  printf '      "supports_image_detail_original": false,\n'
-  printf '      "context_window": 120000,\n'
-  printf '      "max_context_window": 120000,\n'
-  printf '      "auto_compact_token_limit": null,\n'
-  printf '      "effective_context_window_percent": 95,\n'
-  printf '      "experimental_supported_tools": [],\n'
-  printf '      "input_modalities": ["text"],\n'
-  printf '      "supports_search_tool": false,\n'
-  printf '      "use_responses_lite": false\n'
-  printf '    }'
-}
+fi
 
-write_model_catalog_json() {
-  catalog_file="$1"
-  enabled_file="$2"
-  default_model="$3"
-
-  first=1
-  priority=0
-  {
-    printf '{\n'
-    printf '  "models": [\n'
-    if [ -n "$default_model" ]; then
-      write_model_catalog_entry "$default_model" "$priority" "0"
-      first=0
-      priority=$((priority + 10))
-    fi
-    if [ -s "$enabled_file" ]; then
-      while IFS= read -r model_name; do
-        [ -n "$model_name" ] || continue
-        [ "$model_name" = "$default_model" ] && continue
-        if [ "$first" -eq 1 ]; then
-          need_comma=0
-          first=0
-        else
-          need_comma=1
-        fi
-        write_model_catalog_entry "$model_name" "$priority" "$need_comma"
-        priority=$((priority + 10))
-      done < "$enabled_file"
-    fi
-    printf '\n'
-    printf '  ]\n'
-    printf '}\n'
-  } > "$catalog_file"
-  chmod 600 "$catalog_file"
+[ -n "$token" ] || exit 1
+printf '%s\n' "$token"
+EOF
+  chmod 700 "$helper"
 }
 
 write_codex_config() {
@@ -717,20 +699,19 @@ write_codex_config() {
     printf '}\n'
   } > "$auth_file"
   chmod 600 "$auth_file"
+  write_provider_auth_helper "$codex_home"
 
   config_file="$codex_home/config.toml"
-  catalog_file="$codex_home/model-catalog.json"
-  write_model_catalog_json "$catalog_file" "$enabled_file" "$default_model"
 
   provider_id_esc="$(toml_escape "$PROVIDER_ID")"
   default_model_esc="$(toml_escape "$default_model")"
   api_base_esc="$(toml_escape "$api_base")"
   home_esc="$(toml_escape "$HOME")"
-  catalog_file_esc="$(toml_escape "$catalog_file")"
+  codex_home_esc="$(toml_escape "$codex_home")"
+  auth_command_esc="$(toml_escape "$codex_home/bin/provider-api-key")"
   {
     printf 'model_provider = "%s"\n' "$provider_id_esc"
     printf 'model = "%s"\n' "$default_model_esc"
-    printf 'model_catalog_json = "%s"\n' "$catalog_file_esc"
     printf 'model_reasoning_effort = "medium"\n'
     printf 'model_auto_compact_token_limit = 120000\n'
     printf 'disable_response_storage = true\n'
@@ -740,7 +721,13 @@ write_codex_config() {
     printf 'name = "%s"\n' "$provider_id_esc"
     printf 'base_url = "%s"\n' "$api_base_esc"
     printf 'wire_api = "responses"\n'
-    printf 'requires_openai_auth = true\n'
+    printf 'requires_openai_auth = false\n'
+    printf '\n[model_providers.%s.auth]\n' "$PROVIDER_ID"
+    printf 'command = "%s"\n' "$auth_command_esc"
+    printf 'args = []\n'
+    printf 'timeout_ms = 5000\n'
+    printf 'refresh_interval_ms = 300000\n'
+    printf 'cwd = "%s"\n' "$codex_home_esc"
     printf '\n[projects."%s"]\n' "$home_esc"
     printf 'trust_level = "trusted"\n'
     printf '\n[tui]\n'
@@ -906,6 +893,13 @@ resume_src=""
 script_dir="$(dirname "$0" 2>/dev/null || printf '.')"
 if [ -s "$script_dir/codex-local-resume.sh" ]; then
   resume_src="$script_dir/codex-local-resume.sh"
+else
+  remote_resume="$tmp/codex-local-resume.sh"
+  if fetch_helper_script "最新恢复脚本" "codex-local-resume.sh" "${CODEX_ZH_RESUME_URL:-}" "$remote_resume"; then
+    resume_src="$remote_resume"
+  else
+    warn "未能拉取最新恢复脚本，将回退到安装器内置配置流程。"
+  fi
 fi
 
 if [ -n "$resume_src" ]; then
@@ -957,27 +951,18 @@ if [ "$setup_mode" = "third_party" ]; then
     if [ -s "$models_err" ]; then
       sed -n '1,20p' "$models_err" >&2 || true
     fi
-    if [ "$ALLOW_MANUAL_MODEL" != "1" ]; then
-      die "第三方 API 模式必须成功获取模型列表。请检查 Base URL、API Key、代理/网络；或显式设置 CODEX_ZH_ALLOW_MANUAL_MODEL=1 才允许手动输入模型名。"
-    fi
-    warn "允许手动模型兜底，因为 CODEX_ZH_ALLOW_MANUAL_MODEL=1"
-    : > "$models_file"
+    die "第三方 API 模式必须成功获取模型列表。请检查 Base URL、API Key、代理/网络后重试。"
   fi
 
   if [ -s "$models_file" ]; then
     select_models "$models_file" "$enabled_file" "$default_file"
     default_model="$(sed -n '1p' "$default_file")"
   else
-    if [ "$ALLOW_MANUAL_MODEL" = "1" ]; then
-      default_model="$(tty_read "请输入默认模型名" "gpt-5.4-mini")"
-      printf '%s\n' "$default_model" > "$enabled_file"
-    else
-      if [ -s "$models_json" ]; then
-        warn "接口返回了内容，但没有解析到 data[].id。返回片段："
-        sed -n '1,20p' "$models_json" >&2 || true
-      fi
-      die "未从 /models 响应中解析到任何模型，已停止。"
+    if [ -s "$models_json" ]; then
+      warn "接口返回了内容，但没有解析到 data[].id。返回片段："
+      sed -n '1,20p' "$models_json" >&2 || true
     fi
+    die "未从 /models 响应中解析到任何模型，已停止。"
   fi
   write_codex_config "$api_base" "$api_key" "$default_model" "$enabled_file"
 else

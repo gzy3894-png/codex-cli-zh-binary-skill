@@ -9,12 +9,16 @@ import java.io.File
 class UpdateManager(private val context: Context) {
     fun onUpdate() {
         with(context) {
+            listOf(
+                "install-reterminal-alpine.sh",
+                "codex-local-resume.sh",
+            ).forEach { outputName ->
+                localBinDir().child(outputName).delete()
+            }
             mapOf(
                 "init-host.sh" to "init-host",
                 "init.sh" to "init",
                 "codex-for-tui-bootstrap.sh" to "codex-for-tui-bootstrap.sh",
-                "install-reterminal-alpine.sh" to "install-reterminal-alpine.sh",
-                "codex-local-resume.sh" to "codex-local-resume.sh",
             ).forEach { (assetName, outputName) ->
                 val file: File = localBinDir().child(outputName)
                 file.createFileIfNot()

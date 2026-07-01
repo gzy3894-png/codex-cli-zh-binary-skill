@@ -2,24 +2,24 @@
 
 这里是 Codex for TUI 的 Android 应用源码。
 
-Codex for TUI 基于 ReTerminal 改造，目标是在 Android 手机上提供一个开箱可用的 Codex CLI 终端环境。应用内置 Alpine 入口，并通过 assets 中的脚本完成 Codex 中文版安装、依赖准备、本地配置恢复和启动。
+Codex for TUI 基于 ReTerminal 改造，目标是在 Android 手机上提供一个开箱可用的 Codex CLI 终端环境。应用内置 Alpine 入口，但 APK 里只保留很薄的启动 bootstrap；真正会变化的安装器和本地配置恢复脚本都从云端仓库拉取最新版本。
 
 ## 这个应用做什么
 
 - 打开应用后进入适合 Codex 运行的 Alpine 终端环境。
-- 首次启动时引导用户安装依赖和 Codex 中文版 ARM64 musl 二进制。
+- 首次启动时先拉取最新安装脚本，再引导用户安装依赖和 Codex 中文版 ARM64 musl 二进制。
 - 支持官方 Codex 登录入口，也支持第三方 Responses API。
-- 第三方 API 模式会自动请求 `/models`，再让用户选择启用模型和默认模型。
-- 本地配置未完成时可以重新打开应用继续，不需要从头安装。
+- 第三方 API 模式会自动请求 `/models`，再让用户选择常用模型和默认模型。
+- 本地配置未完成时会优先刷新最新恢复脚本，再继续上次进度。
 
 ## 关键脚本
 
 - `core/main/src/main/assets/init.sh`
 - `core/main/src/main/assets/codex-for-tui-bootstrap.sh`
-- `core/main/src/main/assets/install-reterminal-alpine.sh`
-- `core/main/src/main/assets/codex-local-resume.sh`
+- `../android-arm64-musl/install-reterminal-alpine.sh`
+- `../android-arm64-musl/codex-local-resume.sh`
 
-这些脚本的源文件主要维护在仓库根目录的 `android-arm64-musl/` 下。修改后要保持 assets 副本同步。
+其中只有 `codex-for-tui-bootstrap.sh` 需要同步进 assets；完整安装/配置逻辑只维护在仓库根目录的 `android-arm64-musl/` 下，由 App 启动时动态拉取。
 
 ## 构建
 

@@ -20,11 +20,16 @@ object MkSession {
         "init-host.sh" to "init-host",
         "init.sh" to "init",
         "codex-for-tui-bootstrap.sh" to "codex-for-tui-bootstrap.sh",
-        "install-reterminal-alpine.sh" to "install-reterminal-alpine.sh",
-        "codex-local-resume.sh" to "codex-local-resume.sh",
+    )
+    private val obsoleteScripts = listOf(
+        "install-reterminal-alpine.sh",
+        "codex-local-resume.sh",
     )
 
     private fun Context.syncManagedScripts() {
+        obsoleteScripts.forEach { outputName ->
+            localBinDir().child(outputName).delete()
+        }
         managedScripts.forEach { (assetName, outputName) ->
             localBinDir().child(outputName).apply {
                 createFileIfNot()

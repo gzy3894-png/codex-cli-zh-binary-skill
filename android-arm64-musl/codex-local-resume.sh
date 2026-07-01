@@ -14,7 +14,6 @@ REAL_BIN=""
 RESUME_SCRIPT=""
 LAUNCHER=""
 WRAPPER=""
-ALLOW_MANUAL_MODEL="${CODEX_ZH_ALLOW_MANUAL_MODEL:-0}"
 SKIP_RUN="${CODEX_ZH_SKIP_RUN:-0}"
 
 info() { printf '%s\n' "$*"; }
@@ -215,7 +214,7 @@ select_enabled_models_text() {
   seq 1 "$count" > "$selected"
 
   while :; do
-    printf '\n%s\n' "选择要启用的模型（默认已全选）：" >&2
+    printf '\n%s\n' "选择常用模型（默认已全选，用于默认模型候选和本地记录）：" >&2
     i=1
     while [ "$i" -le "$count" ]; do
       model_name="$(sed -n "${i}p" "$list_file")"
@@ -240,7 +239,7 @@ select_enabled_models_text() {
         ;;
       n|none|clear|清空)
         : > "$selected"
-        printf '%s\n' "已清空选择。请至少选择一个模型，或继续按回车使用全部模型兜底。" >&2
+        printf '%s\n' "已清空选择。请至少选择一个常用模型，或继续按回车使用全部模型兜底。" >&2
         continue
         ;;
     esac
@@ -263,7 +262,7 @@ select_enabled_models_text() {
   done
 
   if [ ! -s "$selected" ]; then
-    warn "未选择任何模型，默认启用全部模型。"
+    warn "未选择任何常用模型，默认使用全部模型作为候选。"
     cat "$list_file"
     return
   fi
@@ -278,7 +277,7 @@ choose_model() {
   count="$(wc -l < "$list_file" | tr -d ' ')"
   [ "$count" -gt 0 ] || return 1
   printf '\n%s\n' "请选择默认启动模型：" >&2
-  printf '%s\n' "这个模型会写入 config.toml 的 model 字段，Codex 启动后会默认使用它；其他已启用模型仍可在 /model 中切换。" >&2
+  printf '%s\n' "这个模型会写入 config.toml 的 model 字段；Codex 后续会通过 provider auth 自行刷新 /models。" >&2
   nl -w2 -s'. ' "$list_file" >&2
   choice="$(tty_read "请输入默认启动模型编号" "1")"
   case "$choice" in
@@ -292,81 +291,49 @@ choose_model() {
   printf '%s\n' "$chosen"
 }
 
-write_model_catalog_entry() {
-  model_name="$1"
-  priority="$2"
-  need_comma="$3"
-  model_name_esc="$(json_escape "$model_name")"
-
-  [ "$need_comma" = "1" ] && printf ',\n'
-  printf '    {\n'
-  printf '      "slug": "%s",\n' "$model_name_esc"
-  printf '      "display_name": "%s",\n' "$model_name_esc"
-  printf '      "description": "Third-party API model",\n'
-  printf '      "default_reasoning_level": "medium",\n'
-  printf '      "supported_reasoning_levels": [\n'
-  printf '        {"effort": "low", "description": "Fast responses with lighter reasoning"},\n'
-  printf '        {"effort": "medium", "description": "Balances speed and reasoning depth"},\n'
-  printf '        {"effort": "high", "description": "Greater reasoning depth"},\n'
-  printf '        {"effort": "xhigh", "description": "Extra high reasoning depth"}\n'
-  printf '      ],\n'
-  printf '      "shell_type": "shell_command",\n'
-  printf '      "visibility": "list",\n'
-  printf '      "supported_in_api": true,\n'
-  printf '      "priority": %s,\n' "$priority"
-  printf '      "availability_nux": null,\n'
-  printf '      "upgrade": null,\n'
-  printf '      "base_instructions": "",\n'
-  printf '      "model_messages": null,\n'
-  printf '      "supports_reasoning_summaries": true,\n'
-  printf '      "default_reasoning_summary": "auto",\n'
-  printf '      "support_verbosity": false,\n'
-  printf '      "default_verbosity": null,\n'
-  printf '      "apply_patch_tool_type": null,\n'
-  printf '      "web_search_tool_type": "text",\n'
-  printf '      "truncation_policy": {"mode": "tokens", "limit": 10000},\n'
-  printf '      "supports_parallel_tool_calls": true,\n'
-  printf '      "supports_image_detail_original": false,\n'
-  printf '      "context_window": 120000,\n'
-  printf '      "max_context_window": 120000,\n'
-  printf '      "auto_compact_token_limit": null,\n'
-  printf '      "effective_context_window_percent": 95,\n'
-  printf '      "experimental_supported_tools": [],\n'
-  printf '      "input_modalities": ["text"],\n'
-  printf '      "supports_search_tool": false,\n'
-  printf '      "use_responses_lite": false\n'
-  printf '    }'
+read_auth_api_key() {
+  auth_file="$1"
+  [ -r "$auth_file" ] || return 1
+  if have jq; then
+    jq -r '.OPENAI_API_KEY // empty' "$auth_file" 2>/dev/null | sed -n '1p'
+  else
+    sed -n 's/.*"OPENAI_API_KEY"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$auth_file" | sed -n '1p'
+  fi
 }
 
-write_model_catalog_json() {
-  catalog_file="$1"
-  enabled_file="$2"
-  default_model="$3"
+write_provider_auth_helper() {
+  codex_home="$1"
+  helper_dir="$codex_home/bin"
+  helper="$helper_dir/provider-api-key"
+  mkdir -p "$helper_dir"
+  chmod 700 "$helper_dir"
+  cat > "$helper" <<'EOF'
+#!/usr/bin/env sh
+set -eu
 
-  first=1
-  priority=0
-  {
-    printf '{\n'
-    printf '  "models": [\n'
-    if [ -n "$default_model" ]; then
-      write_model_catalog_entry "$default_model" "$priority" "0"
-      first=0
-      priority=$((priority + 10))
-    fi
-    if [ -s "$enabled_file" ]; then
-      while IFS= read -r model_name; do
-        [ -n "$model_name" ] || continue
-        [ "$model_name" = "$default_model" ] && continue
-        if [ "$first" -eq 1 ]; then need_comma=0; first=0; else need_comma=1; fi
-        write_model_catalog_entry "$model_name" "$priority" "$need_comma"
-        priority=$((priority + 10))
-      done < "$enabled_file"
-    fi
-    printf '\n'
-    printf '  ]\n'
-    printf '}\n'
-  } > "$catalog_file"
-  chmod 600 "$catalog_file"
+helper_path="$0"
+case "$helper_path" in
+  */*) helper_dir="${helper_path%/*}" ;;
+  *) helper_dir="." ;;
+esac
+
+helper_home="$(CDPATH= cd -- "$helper_dir/.." 2>/dev/null && pwd || printf '%s' "${CODEX_HOME:-${HOME:-/root}/.codex}")"
+auth_file="$helper_home/auth.json"
+[ -r "$auth_file" ] || auth_file="${CODEX_HOME:-$helper_home}/auth.json"
+
+token=""
+if [ -r "$auth_file" ]; then
+  if command -v jq >/dev/null 2>&1; then
+    token="$(jq -r '.OPENAI_API_KEY // empty' "$auth_file" 2>/dev/null || true)"
+  else
+    token="$(sed -n 's/.*"OPENAI_API_KEY"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$auth_file" 2>/dev/null | sed -n '1p')"
+  fi
+fi
+
+[ -n "$token" ] || exit 1
+printf '%s\n' "$token"
+EOF
+  chmod 700 "$helper"
 }
 
 write_codex_config() {
@@ -386,20 +353,18 @@ write_codex_config() {
     printf '}\n'
   } > "$auth_file"
   chmod 600 "$auth_file"
-
-  catalog_file="$out_home/model-catalog.json"
-  write_model_catalog_json "$catalog_file" "$enabled_file" "$default_model"
+  write_provider_auth_helper "$out_home"
 
   config_file="$out_home/config.toml"
   provider_id_esc="$(toml_escape "$PROVIDER_ID")"
   default_model_esc="$(toml_escape "$default_model")"
   api_base_esc="$(toml_escape "$api_base")"
   home_esc="$(toml_escape "$HOME")"
-  catalog_file_esc="$(toml_escape "$catalog_file")"
+  out_home_esc="$(toml_escape "$out_home")"
+  auth_command_esc="$(toml_escape "$out_home/bin/provider-api-key")"
   {
     printf 'model_provider = "%s"\n' "$provider_id_esc"
     printf 'model = "%s"\n' "$default_model_esc"
-    printf 'model_catalog_json = "%s"\n' "$catalog_file_esc"
     printf 'model_reasoning_effort = "medium"\n'
     printf 'model_auto_compact_token_limit = 120000\n'
     printf 'disable_response_storage = true\n'
@@ -409,7 +374,13 @@ write_codex_config() {
     printf 'name = "%s"\n' "$provider_id_esc"
     printf 'base_url = "%s"\n' "$api_base_esc"
     printf 'wire_api = "responses"\n'
-    printf 'requires_openai_auth = true\n'
+    printf 'requires_openai_auth = false\n'
+    printf '\n[model_providers.%s.auth]\n' "$PROVIDER_ID"
+    printf 'command = "%s"\n' "$auth_command_esc"
+    printf 'args = []\n'
+    printf 'timeout_ms = 5000\n'
+    printf 'refresh_interval_ms = 300000\n'
+    printf 'cwd = "%s"\n' "$out_home_esc"
     printf '\n[projects."%s"]\n' "$home_esc"
     printf 'trust_level = "trusted"\n'
     printf '\n[tui]\n'
@@ -477,11 +448,44 @@ setup_agents_md_if_needed() {
   chmod 600 "$agents_file" "$home_agents" 2>/dev/null || true
 }
 
+migrate_third_party_profile_if_needed() {
+  profile_dir="$1"
+  [ -s "$profile_dir/setup-mode" ] || return 0
+  [ "$(sed -n '1p' "$profile_dir/setup-mode")" = "third_party" ] || return 0
+  [ -s "$profile_dir/config.toml" ] || return 0
+
+  needs_migration=0
+  grep -F 'model_catalog_json' "$profile_dir/config.toml" >/dev/null 2>&1 && needs_migration=1
+  grep -F "[model_providers.$PROVIDER_ID.auth]" "$profile_dir/config.toml" >/dev/null 2>&1 || needs_migration=1
+  [ "$needs_migration" = "1" ] || {
+    rm -f "$profile_dir/model-catalog.json" 2>/dev/null || true
+    return 0
+  }
+
+  api_base="$(sed -n '1p' "$profile_dir/api-base" 2>/dev/null || true)"
+  [ -n "$api_base" ] || api_base="$(sed -n 's/^[[:space:]]*base_url[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$profile_dir/config.toml" | sed -n '1p')"
+  default_model="$(sed -n '1p' "$profile_dir/default-model" 2>/dev/null || true)"
+  [ -n "$default_model" ] || default_model="$(sed -n 's/^[[:space:]]*model[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$profile_dir/config.toml" | sed -n '1p')"
+  enabled_file="$profile_dir/enabled-models.txt"
+  if [ ! -s "$enabled_file" ] && [ -n "$default_model" ]; then
+    printf '%s\n' "$default_model" > "$enabled_file"
+  fi
+  api_key="$(read_auth_api_key "$profile_dir/auth.json" 2>/dev/null || true)"
+
+  [ -n "$api_base" ] || die "旧配置缺少 API Base URL，无法自动迁移：$profile_dir"
+  [ -n "$default_model" ] || die "旧配置缺少默认模型，无法自动迁移：$profile_dir"
+  [ -n "$api_key" ] || die "旧配置 auth.json 缺少 OPENAI_API_KEY，无法自动迁移：$profile_dir"
+
+  write_codex_config "$api_base" "$api_key" "$default_model" "$enabled_file" "$profile_dir"
+  rm -f "$profile_dir/model-catalog.json" 2>/dev/null || true
+  warn "已迁移旧第三方配置：移除 model_catalog_json，改用 provider command auth。"
+}
+
 apply_profile() {
   profile_dir="$1"
   [ -d "$profile_dir" ] || die "配置不存在：$profile_dir"
   if [ -s "$profile_dir/setup-mode" ] && [ "$(sed -n '1p' "$profile_dir/setup-mode")" = "official" ]; then
-    if [ ! -s "$LAST_PROFILE_FILE" ] && { [ -s "$CODEX_HOME/config.toml" ] || [ -s "$CODEX_HOME/auth.json" ] || [ -s "$CODEX_HOME/model-catalog.json" ]; }; then
+    if [ ! -s "$LAST_PROFILE_FILE" ] && { [ -s "$CODEX_HOME/config.toml" ] || [ -s "$CODEX_HOME/auth.json" ]; }; then
       ts="$(date +%Y%m%d-%H%M%S 2>/dev/null || echo legacy)"
       backup_dir="$CONFIGS_DIR/imported-before-official-$ts"
       mkdir -p "$backup_dir"
@@ -489,24 +493,27 @@ apply_profile() {
       printf '%s\n' "third_party" > "$backup_dir/setup-mode"
       [ ! -s "$CODEX_HOME/config.toml" ] || cp "$CODEX_HOME/config.toml" "$backup_dir/config.toml"
       [ ! -s "$CODEX_HOME/auth.json" ] || cp "$CODEX_HOME/auth.json" "$backup_dir/auth.json"
-      [ ! -s "$CODEX_HOME/model-catalog.json" ] || cp "$CODEX_HOME/model-catalog.json" "$backup_dir/model-catalog.json"
       chmod 700 "$backup_dir" 2>/dev/null || true
-      chmod 600 "$backup_dir/config.toml" "$backup_dir/auth.json" "$backup_dir/model-catalog.json" 2>/dev/null || true
+      chmod 600 "$backup_dir/config.toml" "$backup_dir/auth.json" 2>/dev/null || true
       warn "已先把当前 ~/.codex 配置备份为：$backup_dir"
     fi
     rm -f "$CODEX_HOME/config.toml" "$CODEX_HOME/auth.json" "$CODEX_HOME/model-catalog.json"
     [ ! -s "$profile_dir/config.toml" ] || cp "$profile_dir/config.toml" "$CODEX_HOME/config.toml"
     [ ! -s "$profile_dir/auth.json" ] || cp "$profile_dir/auth.json" "$CODEX_HOME/auth.json"
-    [ ! -s "$profile_dir/model-catalog.json" ] || cp "$profile_dir/model-catalog.json" "$CODEX_HOME/model-catalog.json"
-    chmod 600 "$CODEX_HOME/config.toml" "$CODEX_HOME/auth.json" "$CODEX_HOME/model-catalog.json" 2>/dev/null || true
+    chmod 600 "$CODEX_HOME/config.toml" "$CODEX_HOME/auth.json" 2>/dev/null || true
   else
+    migrate_third_party_profile_if_needed "$profile_dir"
     [ -s "$profile_dir/config.toml" ] || die "配置缺少 config.toml：$profile_dir"
     [ -s "$profile_dir/auth.json" ] || die "配置缺少 auth.json：$profile_dir"
-    [ -s "$profile_dir/model-catalog.json" ] || die "配置缺少 model-catalog.json：$profile_dir"
     cp "$profile_dir/config.toml" "$CODEX_HOME/config.toml"
     cp "$profile_dir/auth.json" "$CODEX_HOME/auth.json"
-    cp "$profile_dir/model-catalog.json" "$CODEX_HOME/model-catalog.json"
-    chmod 600 "$CODEX_HOME/config.toml" "$CODEX_HOME/auth.json" "$CODEX_HOME/model-catalog.json" 2>/dev/null || true
+    if [ -x "$profile_dir/bin/provider-api-key" ]; then
+      mkdir -p "$CODEX_HOME/bin"
+      cp "$profile_dir/bin/provider-api-key" "$CODEX_HOME/bin/provider-api-key"
+      chmod 700 "$CODEX_HOME/bin" "$CODEX_HOME/bin/provider-api-key" 2>/dev/null || true
+    fi
+    rm -f "$CODEX_HOME/model-catalog.json" 2>/dev/null || true
+    chmod 600 "$CODEX_HOME/config.toml" "$CODEX_HOME/auth.json" 2>/dev/null || true
   fi
   basename "$profile_dir" > "$LAST_PROFILE_FILE"
   profile_label "$profile_dir" > "$STATE_DIR/active-profile-label"
@@ -526,15 +533,19 @@ sync_current_profile() {
     official)
       [ ! -s "$CODEX_HOME/auth.json" ] || cp "$CODEX_HOME/auth.json" "$profile_dir/auth.json"
       [ ! -s "$CODEX_HOME/config.toml" ] || cp "$CODEX_HOME/config.toml" "$profile_dir/config.toml"
-      [ ! -s "$CODEX_HOME/model-catalog.json" ] || cp "$CODEX_HOME/model-catalog.json" "$profile_dir/model-catalog.json"
       ;;
     third_party)
       [ ! -s "$CODEX_HOME/config.toml" ] || cp "$CODEX_HOME/config.toml" "$profile_dir/config.toml"
       [ ! -s "$CODEX_HOME/auth.json" ] || cp "$CODEX_HOME/auth.json" "$profile_dir/auth.json"
-      [ ! -s "$CODEX_HOME/model-catalog.json" ] || cp "$CODEX_HOME/model-catalog.json" "$profile_dir/model-catalog.json"
+      if [ -x "$CODEX_HOME/bin/provider-api-key" ]; then
+        mkdir -p "$profile_dir/bin"
+        cp "$CODEX_HOME/bin/provider-api-key" "$profile_dir/bin/provider-api-key"
+        chmod 700 "$profile_dir/bin" "$profile_dir/bin/provider-api-key" 2>/dev/null || true
+      fi
       ;;
   esac
-  chmod 600 "$profile_dir/config.toml" "$profile_dir/auth.json" "$profile_dir/model-catalog.json" 2>/dev/null || true
+  rm -f "$profile_dir/model-catalog.json" 2>/dev/null || true
+  chmod 600 "$profile_dir/config.toml" "$profile_dir/auth.json" 2>/dev/null || true
 }
 
 fetch_models_or_prompt() {
@@ -845,7 +856,10 @@ check_status() {
   else
     [ -s "$CODEX_HOME/config.toml" ] || { printf '%s\n' "missing_config"; missing=1; }
     [ -s "$CODEX_HOME/auth.json" ] || { printf '%s\n' "missing_auth"; missing=1; }
-    [ -s "$CODEX_HOME/model-catalog.json" ] || { printf '%s\n' "missing_model_catalog"; missing=1; }
+    if [ -s "$CODEX_HOME/config.toml" ] && grep -F 'model_catalog_json' "$CODEX_HOME/config.toml" >/dev/null 2>&1; then
+      printf '%s\n' "legacy_model_catalog_config"
+      missing=1
+    fi
   fi
   return "$missing"
 }
@@ -873,6 +887,7 @@ all_done_menu() {
   case "$choice" in
     1)
       rm -rf "$STATE_DIR" "$RESUME_SCRIPT" 2>/dev/null || true
+      rm -f "$CODEX_HOME/model-catalog.json" 2>/dev/null || true
       write_real_wrapper
       ln -sf "$WRAPPER" "$LAUNCHER"
       install_case_variants "$INSTALL_DIR" "$LAUNCHER"
