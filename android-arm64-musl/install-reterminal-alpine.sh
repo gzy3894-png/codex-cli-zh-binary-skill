@@ -23,7 +23,8 @@ INSTALLER_VERSION="${CODEX_FOR_TUI_INSTALLER_VERSION:-2026.07.01.2}"
 STATE_ROOT="${CODEX_FOR_TUI_STATE_DIR:-${HOME:-/root}/.codex-for-tui}"
 DOWNLOAD_METHOD_FILE="$STATE_ROOT/download-method"
 DEPS_CONFIRM_FILE="$STATE_ROOT/deps-confirmed"
-NOTICE_URL="${CODEX_FOR_TUI_NOTICE_URL:-$REPO_RAW/$BRANCH/android-arm64-musl/NOTICE.txt}"
+NOTICE_URL="${CODEX_FOR_TUI_NOTICE_URL:-}"
+export PATH="/bin:/sbin:/usr/local/bin:/usr/bin:/usr/sbin:${HOME:-/root}/.local/bin:${PATH:-}"
 
 info() { printf '%s\n' "$*"; }
 warn() { printf '警告: %s\n' "$*" >&2; }
@@ -31,6 +32,8 @@ die() { printf '错误: %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 upper() { tr '[:lower:]' '[:upper:]'; }
 lower() { tr '[:upper:]' '[:lower:]'; }
+is_root() { [ "${USER:-}" = "root" ] || [ "${UID:-}" = "0" ] || [ -w /etc/apk/repositories ]; }
+clear_screen() { printf '\033[H\033[2J' 2>/dev/null || true; }
 
 shell_quote() {
   printf "'"
@@ -62,18 +65,18 @@ tty_available() {
 }
 
 deps_packages_minimal() {
-  printf '%s\n' "ca-certificates curl wget tar gzip jq git openssh-client ripgrep fd bash coreutils findutils sed grep gawk procps"
+  printf '%s\n' "ca-certificates curl wget tar gzip jq git openssh-client ripgrep fd bash sed grep gawk"
 }
 
 deps_packages_full() {
-  printf '%s\n' "ca-certificates curl wget tar gzip unzip xz jq git openssh-client ripgrep fd bash coreutils findutils sed grep gawk diffutils patch procps python3 py3-pip nodejs npm make gcc g++ musl-dev pkgconf cmake ninja openssl openssl-dev libffi-dev perl"
+  printf '%s\n' "ca-certificates curl wget tar gzip unzip xz jq git openssh-client ripgrep fd bash sed grep gawk diffutils patch python3 py3-pip nodejs npm make gcc g++ musl-dev pkgconf cmake ninja openssl openssl-dev libffi-dev perl"
 }
 
 required_commands_for_profile() {
   if [ "$DEPS_PROFILE" = "minimal" ]; then
-    printf '%s\n' "tar gzip jq git ssh rg fd bash sed grep awk ps"
+    printf '%s\n' "tar gzip jq git ssh rg fd bash sed grep awk"
   else
-    printf '%s\n' "tar gzip unzip xz jq git ssh rg fd bash sed grep awk ps python3 node npm make gcc g++ cmake ninja openssl perl"
+    printf '%s\n' "tar gzip unzip xz jq git ssh rg fd bash sed grep awk python3 node npm make gcc g++ cmake ninja openssl perl"
   fi
 }
 
@@ -94,15 +97,25 @@ available_downloaders() {
 }
 
 print_download_plan() {
+  clear_screen
   cat >&2 <<EOF
-环境检查：
-- 安装器版本：$INSTALLER_VERSION
-- 公告预留地址：$NOTICE_URL
-- Codex 压缩包：$ARCHIVE，约 70-90 MB，支持断点续传。
-- Minimal 依赖：约 80-150 MB 下载，安装后约 250-500 MB。
-- Full 依赖：约 300-600 MB 下载，安装后可能超过 1 GB。
-- GitHub raw 下载 Codex 二进制时可能需要代理/梯子；Alpine 依赖会自动尝试清华、北外和官方镜像。
+Codex for TUI 环境检查
+
+资源：
+- Alpine 基础依赖
+- Codex 中文版 ARM64 压缩包
+- 可选开发依赖
+
+预计下载总量：
+- Minimal：约 150-250 MB
+- Full：约 400-700 MB
+
+网络：
+- Alpine 镜像通常不一定需要代理。
+- Codex 压缩包来自 GitHub raw，网络不稳时建议开启代理。
+- 所有下载会尽量使用断点续传和重试。
 EOF
+  [ -n "$NOTICE_URL" ] && printf '%s\n' "公告地址：$NOTICE_URL" >&2
 }
 
 confirm_deps_install() {
@@ -285,23 +298,25 @@ download() {
 
 write_apk_repositories() {
   mirror="$1"
+  alpine_version="$(sed -n 's/^VERSION_ID=//p' /etc/os-release 2>/dev/null | tr -d '"' | awk -F. '{print $1 "." $2}')"
+  [ -n "$alpine_version" ] || alpine_version="3.24"
   case "$mirror" in
     tuna)
-      cat > /etc/apk/repositories <<'EOF'
-http://mirrors.tuna.tsinghua.edu.cn/alpine/v3.24/main
-http://mirrors.tuna.tsinghua.edu.cn/alpine/v3.24/community
+      cat > /etc/apk/repositories <<EOF
+http://mirrors.tuna.tsinghua.edu.cn/alpine/v$alpine_version/main
+http://mirrors.tuna.tsinghua.edu.cn/alpine/v$alpine_version/community
 EOF
       ;;
     bfsu)
-      cat > /etc/apk/repositories <<'EOF'
-http://mirrors.bfsu.edu.cn/alpine/v3.24/main
-http://mirrors.bfsu.edu.cn/alpine/v3.24/community
+      cat > /etc/apk/repositories <<EOF
+http://mirrors.bfsu.edu.cn/alpine/v$alpine_version/main
+http://mirrors.bfsu.edu.cn/alpine/v$alpine_version/community
 EOF
       ;;
     official)
-      cat > /etc/apk/repositories <<'EOF'
-https://dl-cdn.alpinelinux.org/alpine/v3.24/main
-https://dl-cdn.alpinelinux.org/alpine/v3.24/community
+      cat > /etc/apk/repositories <<EOF
+https://dl-cdn.alpinelinux.org/alpine/v$alpine_version/main
+https://dl-cdn.alpinelinux.org/alpine/v$alpine_version/community
 EOF
       ;;
   esac
@@ -340,7 +355,7 @@ install_deps() {
   have apk || die "当前不是 Alpine 环境：找不到 apk。请切到 Codex for TUI 的 Alpine 模式再运行。"
 
   info "安装 Alpine 依赖（$DEPS_PROFILE 模式）..."
-  if [ "$(id -u)" = "0" ]; then
+  if is_root; then
     apk_update_with_fallback
     if [ "$DEPS_PROFILE" = "minimal" ]; then
       apk add --no-cache $(deps_packages_minimal)
@@ -358,7 +373,7 @@ choose_install_dir() {
     printf '%s\n' "$CODEX_ZH_INSTALL_DIR"
     return
   fi
-  if [ "$(id -u)" = "0" ]; then
+  if is_root; then
     mkdir -p /usr/local/bin 2>/dev/null || true
     if [ -w /usr/local/bin ]; then
       printf '%s\n' "/usr/local/bin"
@@ -385,7 +400,7 @@ persist_path() {
     fi
   done
 
-  if [ "$(id -u)" = "0" ] && [ -d /etc/profile.d ]; then
+  if is_root && [ -d /etc/profile.d ]; then
     cat > /etc/profile.d/codex-zh.sh <<EOF
 case ":\${PATH:-}:" in
   *":$dir:"*) ;;
@@ -831,9 +846,10 @@ install_case_variants() {
   done
 }
 
-case "$(uname -m 2>/dev/null || true)" in
+arch="$(uname -m 2>/dev/null || printf unknown)"
+case "$arch" in
   aarch64|arm64) ;;
-  *) warn "这个安装器面向 Android ARM64；当前架构是 $(uname -m 2>/dev/null || echo unknown)" ;;
+  *) warn "这个安装器面向 Android ARM64；当前架构是 $arch" ;;
 esac
 
 [ -n "${HOME:-}" ] && [ "$HOME" != "/" ] || export HOME="/root"

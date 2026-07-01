@@ -7,11 +7,15 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 [ -n "${HOME:-}" ] && [ "$HOME" != "/" ] || export HOME="/root"
 [ -n "${PREFIX:-}" ] || export PREFIX="/data/data/com.gzy3894.codexfortui/files"
-export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:/sbin:${PREFIX}/local/bin:${PATH:-}"
+export PATH="$HOME/.local/bin:/bin:/sbin:/usr/local/bin:/usr/bin:/usr/sbin:${PREFIX}/local/bin:${PATH:-}"
 
 BOOT_DIR="$HOME/.codex-for-tui"
 mkdir -p "$BOOT_DIR" "$HOME/.cache/codex-zh" 2>/dev/null || true
 CONSENT_FILE="$BOOT_DIR/install-consent"
+
+clear_screen() {
+  printf '\033[H\033[2J' 2>/dev/null || true
+}
 
 tty_read() {
   prompt="$1"
@@ -38,18 +42,23 @@ tty_read() {
 confirm_first_install() {
   [ -s "$CONSENT_FILE" ] && return 0
 
+  clear_screen
   cat >&2 <<'EOF'
-检测到当前 Alpine 里还没有 codex，将进入首次安装。
+Codex for TUI 首次安装
 
-将下载/安装的内容：
-- Alpine 基础依赖：curl/wget/tar/gzip/jq/git/openssh/ripgrep/bash/coreutils 等。
-- Codex 中文版 ARM64 二进制压缩包：约 70-90 MB，解压后二进制约 198 MB。
-- 可选完整依赖模式还会安装 python3/nodejs/npm/gcc/cmake 等，下载体积可能 300-600 MB，安装后可能超过 1 GB。
+将准备这些资源：
+- Alpine 基础依赖
+- Codex 中文版 ARM64 压缩包
+- 可选开发依赖
 
-网络说明：
-- Alpine 依赖会优先尝试清华/北外/官方镜像，通常不一定需要代理。
-- Codex 二进制来自 GitHub raw；网络不稳或 GitHub 访问慢时，建议准备代理/梯子。
-- 后续下载支持断点续传和重试；失败后重新打开 App 会继续本地流程。
+预计下载总量：
+- Minimal：约 150-250 MB
+- Full：约 400-700 MB
+
+网络提示：
+- Alpine 镜像通常不一定需要代理。
+- Codex 压缩包来自 GitHub raw，网络不稳时建议开启代理。
+- 下载失败后可重新打开 App 继续。
 EOF
 
   while :; do
@@ -104,7 +113,12 @@ confirm_first_install
 installer="${PREFIX}/local/bin/install-reterminal-alpine.sh"
 if [ ! -s "$installer" ]; then
   installer="$BOOT_DIR/install-reterminal-alpine.sh"
-  url="${CODEX_ZH_INSTALLER_URL:-https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh}"
+  url="${CODEX_ZH_INSTALLER_URL:-}"
+  if [ -z "$url" ]; then
+    warn "未找到内置安装器，且未设置 CODEX_ZH_INSTALLER_URL。"
+    warn "请更新 APK 或手动提供安装器路径后重试。"
+    exit 1
+  fi
   info "未找到内置安装器，尝试下载：$url"
   if have curl; then
     curl -fL --http1.1 --retry 5 --retry-delay 2 --retry-all-errors -C - -o "$installer.part" "$url" && mv "$installer.part" "$installer"

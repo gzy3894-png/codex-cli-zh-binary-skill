@@ -22,6 +22,7 @@ warn() { printf '警告: %s\n' "$*" >&2; }
 die() { printf '错误: %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 lower() { tr '[:upper:]' '[:lower:]'; }
+is_root() { [ "${USER:-}" = "root" ] || [ "${UID:-}" = "0" ] || [ -w /etc/profile.d ]; }
 tty_available() {
   [ "${CODEX_ZH_FORCE_STDIN:-0}" = "1" ] && return 1
   [ -r /dev/tty ] && [ -w /dev/tty ] && { : < /dev/tty; } 2>/dev/null
@@ -639,7 +640,7 @@ persist_path() {
       } >> "$profile_file"
     fi
   done
-  if [ "$(id -u)" = "0" ] && [ -d /etc/profile.d ]; then
+  if is_root && [ -d /etc/profile.d ]; then
     cat > /etc/profile.d/codex-zh.sh <<EOF
 case ":\${PATH:-}:" in
   *":$dir:"*) ;;
