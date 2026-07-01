@@ -377,6 +377,90 @@ select_models() {
   choose_model "$enabled_file" > "$default_file"
 }
 
+write_model_catalog_entry() {
+  model_name="$1"
+  priority="$2"
+  need_comma="$3"
+  model_name_esc="$(json_escape "$model_name")"
+
+  if [ "$need_comma" = "1" ]; then
+    printf ',\n'
+  fi
+  printf '    {\n'
+  printf '      "slug": "%s",\n' "$model_name_esc"
+  printf '      "display_name": "%s",\n' "$model_name_esc"
+  printf '      "description": "Third-party API model",\n'
+  printf '      "default_reasoning_level": "medium",\n'
+  printf '      "supported_reasoning_levels": [\n'
+  printf '        {"effort": "low", "description": "Fast responses with lighter reasoning"},\n'
+  printf '        {"effort": "medium", "description": "Balances speed and reasoning depth"},\n'
+  printf '        {"effort": "high", "description": "Greater reasoning depth"},\n'
+  printf '        {"effort": "xhigh", "description": "Extra high reasoning depth"}\n'
+  printf '      ],\n'
+  printf '      "shell_type": "shell_command",\n'
+  printf '      "visibility": "list",\n'
+  printf '      "supported_in_api": true,\n'
+  printf '      "priority": %s,\n' "$priority"
+  printf '      "availability_nux": null,\n'
+  printf '      "upgrade": null,\n'
+  printf '      "base_instructions": "",\n'
+  printf '      "model_messages": null,\n'
+  printf '      "supports_reasoning_summaries": true,\n'
+  printf '      "default_reasoning_summary": "auto",\n'
+  printf '      "support_verbosity": false,\n'
+  printf '      "default_verbosity": null,\n'
+  printf '      "apply_patch_tool_type": null,\n'
+  printf '      "web_search_tool_type": "text",\n'
+  printf '      "truncation_policy": {"mode": "tokens", "limit": 10000},\n'
+  printf '      "supports_parallel_tool_calls": true,\n'
+  printf '      "supports_image_detail_original": false,\n'
+  printf '      "context_window": 120000,\n'
+  printf '      "max_context_window": 120000,\n'
+  printf '      "auto_compact_token_limit": null,\n'
+  printf '      "effective_context_window_percent": 95,\n'
+  printf '      "experimental_supported_tools": [],\n'
+  printf '      "input_modalities": ["text"],\n'
+  printf '      "supports_search_tool": false,\n'
+  printf '      "use_responses_lite": false\n'
+  printf '    }'
+}
+
+write_model_catalog_json() {
+  catalog_file="$1"
+  enabled_file="$2"
+  default_model="$3"
+
+  first=1
+  priority=0
+  {
+    printf '{\n'
+    printf '  "models": [\n'
+    if [ -n "$default_model" ]; then
+      write_model_catalog_entry "$default_model" "$priority" "0"
+      first=0
+      priority=$((priority + 10))
+    fi
+    if [ -s "$enabled_file" ]; then
+      while IFS= read -r model_name; do
+        [ -n "$model_name" ] || continue
+        [ "$model_name" = "$default_model" ] && continue
+        if [ "$first" -eq 1 ]; then
+          need_comma=0
+          first=0
+        else
+          need_comma=1
+        fi
+        write_model_catalog_entry "$model_name" "$priority" "$need_comma"
+        priority=$((priority + 10))
+      done < "$enabled_file"
+    fi
+    printf '\n'
+    printf '  ]\n'
+    printf '}\n'
+  } > "$catalog_file"
+  chmod 600 "$catalog_file"
+}
+
 write_codex_config() {
   api_base="$1"
   api_key="$2"
@@ -396,13 +480,18 @@ write_codex_config() {
   chmod 600 "$auth_file"
 
   config_file="$codex_home/config.toml"
+  catalog_file="$codex_home/model-catalog.json"
+  write_model_catalog_json "$catalog_file" "$enabled_file" "$default_model"
+
   provider_id_esc="$(toml_escape "$PROVIDER_ID")"
   default_model_esc="$(toml_escape "$default_model")"
   api_base_esc="$(toml_escape "$api_base")"
   home_esc="$(toml_escape "$HOME")"
+  catalog_file_esc="$(toml_escape "$catalog_file")"
   {
     printf 'model_provider = "%s"\n' "$provider_id_esc"
     printf 'model = "%s"\n' "$default_model_esc"
+    printf 'model_catalog_json = "%s"\n' "$catalog_file_esc"
     printf 'model_reasoning_effort = "medium"\n'
     printf 'model_auto_compact_token_limit = 120000\n'
     printf 'disable_response_storage = true\n'
@@ -418,20 +507,6 @@ write_codex_config() {
     printf '\n[tui]\n'
     printf 'status_line = ["model-with-reasoning", "current-dir", "context-remaining"]\n'
     printf 'status_line_use_colors = true\n'
-    if [ -s "$enabled_file" ]; then
-      printf '\n[tui.model_availability_nux]\n'
-      while IFS= read -r model_name; do
-        model_name_esc="$(toml_escape "$model_name")"
-        printf '"%s" = 4\n' "$model_name_esc"
-      done < "$enabled_file"
-      while IFS= read -r model_name; do
-        safe="$(printf '%s' "$model_name" | sed 's/[^A-Za-z0-9_.-]/-/g')"
-        model_name_esc="$(toml_escape "$model_name")"
-        printf '\n[profiles.%s]\n' "$safe"
-        printf 'model_provider = "%s"\n' "$provider_id_esc"
-        printf 'model = "%s"\n' "$model_name_esc"
-      done < "$enabled_file"
-    fi
   } > "$config_file"
   chmod 600 "$config_file"
 }
@@ -469,10 +544,9 @@ setup_agents_md() {
   choice="$(tty_read "请输入选项编号" "1")"
   choice_lc="$(printf '%s' "$choice" | lower)"
 
-  standard_file="$codex_home/AGENTS.standard.md"
   agents_file="$codex_home/AGENTS.md"
   home_agents="$HOME/AGENTS.md"
-  write_standard_agents "$standard_file"
+  rm -f "$codex_home/AGENTS.standard.md"
 
   case "$choice_lc" in
     2|custom|自定义)
@@ -489,16 +563,16 @@ setup_agents_md() {
       done
       if [ ! -s "$agents_file" ]; then
         warn "自定义 AGENTS.md 为空，回退到默认版。"
-        cp "$standard_file" "$agents_file"
+        write_standard_agents "$agents_file"
       fi
       ;;
     *)
-      cp "$standard_file" "$agents_file"
+      write_standard_agents "$agents_file"
       ;;
   esac
 
   cp "$agents_file" "$home_agents"
-  chmod 600 "$agents_file" "$standard_file" "$home_agents" 2>/dev/null || true
+  chmod 600 "$agents_file" "$home_agents" 2>/dev/null || true
 }
 
 create_launcher() {

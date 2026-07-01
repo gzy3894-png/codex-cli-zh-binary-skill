@@ -144,8 +144,8 @@ codex-alpine
 
 1. API Base URL，例如 `https://api.example.com` 或 `https://api.example.com/v1`
 2. API Key
-3. 默认模型编号
-4. 启用模型编号，多个用英文逗号分隔
+3. 终端编号切换式多选启用模型
+4. 默认模型编号
 
 Base URL 会自动规范化：
 
@@ -158,6 +158,7 @@ Base URL 会自动规范化：
 ```toml
 model_provider = "custom"
 model = "你选择的默认模型"
+model_catalog_json = "/root/.codex/model-catalog.json"
 model_reasoning_effort = "medium"
 model_auto_compact_token_limit = 120000
 
@@ -170,6 +171,8 @@ base_url = "https://api.example.com/v1"
 wire_api = "responses"
 requires_openai_auth = true
 ```
+
+`/model` 命令读取的是 `model_catalog_json` 指向的模型目录文件；安装器会把你启用的模型写入 `/root/.codex/model-catalog.json`，而不是用旧式 `profiles` 伪装模型列表。
 
 密钥保存在 Alpine rootfs 的 `/root/.codex/auth.json`，权限为 `600`：
 

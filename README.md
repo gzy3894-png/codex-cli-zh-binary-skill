@@ -60,7 +60,7 @@ DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive 
 curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-alpine-proot.sh | sh
 ```
 
-脚本会在开局要求输入第三方 API Base URL 和 API Key。Base URL 会自动补齐 `/v1`；随后脚本会请求 `/models`，列出模型并让你多选启用模型和选择默认模型；配置按 Codex 官方风格写入 `~/.codex/config.toml` 和 `~/.codex/auth.json`。安装时还会询问是否生成标准版 `AGENTS.md`，或粘贴自定义 `AGENTS.md`。安装完成后直接运行：
+脚本会在开局要求输入第三方 API Base URL 和 API Key。Base URL 会自动补齐 `/v1`；随后脚本会请求 `/models`，列出模型并让你多选启用模型和选择默认模型；配置按 Codex 官方风格写入 `~/.codex/config.toml`、`~/.codex/auth.json` 和 `~/.codex/model-catalog.json`，其中 `/model` 列表由 `model_catalog_json` 指向的模型目录驱动。安装时还会询问是否生成默认 `AGENTS.md`，或粘贴自定义 `AGENTS.md`。安装完成后直接运行：
 
 ```sh
 codex
