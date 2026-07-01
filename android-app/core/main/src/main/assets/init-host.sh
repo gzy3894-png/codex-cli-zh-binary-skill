@@ -1,66 +1,59 @@
-ALPINE_DIR=$PREFIX/local/alpine
+#!/system/bin/sh
+set -e
 
-mkdir -p $ALPINE_DIR
+PREFIX="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}"
+ALPINE_DIR="$PREFIX/local/alpine"
+ALPINE_TARBALL="$PREFIX/files/alpine.tar.gz"
 
-if [ -z "$(ls -A "$ALPINE_DIR" | grep -vE '^(root|tmp)$')" ]; then
-    tar -xf "$PREFIX/files/alpine.tar.gz" -C "$ALPINE_DIR"
+mkdir -p "$ALPINE_DIR"
+
+if [ -f "$ALPINE_TARBALL" ] && [ -z "$(find "$ALPINE_DIR" -mindepth 1 -maxdepth 1 ! -name root ! -name tmp 2>/dev/null | sed -n '1p')" ]; then
+  tar -xf "$ALPINE_TARBALL" -C "$ALPINE_DIR"
 fi
 
-ARGS="--kill-on-exit"
-ARGS="$ARGS -w /"
+add_bind() {
+  src="$1"
+  dst="${2:-}"
+  [ -e "$src" ] || return 0
+  if command -v realpath >/dev/null 2>&1; then
+    src="$(realpath "$src" 2>/dev/null || printf '%s' "$src")"
+  fi
+  if [ -n "$dst" ]; then
+    ARGS="$ARGS -b $src:$dst"
+  else
+    ARGS="$ARGS -b $src"
+  fi
+}
 
-for system_mnt in /apex /odm /product /system /system_ext /vendor \
- /linkerconfig/ld.config.txt \
- /linkerconfig/com.android.art/ld.config.txt \
- /plat_property_contexts /property_contexts; do
+ARGS="--kill-on-exit -w /"
 
- if [ -e "$system_mnt" ]; then
-  system_mnt=$(realpath "$system_mnt")
-  ARGS="$ARGS -b ${system_mnt}"
- fi
+for path in \
+  /apex /odm /product /system /system_ext /vendor \
+  /linkerconfig/ld.config.txt \
+  /linkerconfig/com.android.art/ld.config.txt \
+  /plat_property_contexts /property_contexts
+do
+  add_bind "$path"
 done
-unset system_mnt
 
-ARGS="$ARGS -b /sdcard"
-ARGS="$ARGS -b /storage"
-ARGS="$ARGS -b /dev"
-ARGS="$ARGS -b /data"
-ARGS="$ARGS -b /dev/urandom:/dev/random"
-ARGS="$ARGS -b /proc"
-ARGS="$ARGS -b $PREFIX"
-ARGS="$ARGS -b $PREFIX/local/stat:/proc/stat"
-ARGS="$ARGS -b $PREFIX/local/vmstat:/proc/vmstat"
+add_bind /sdcard
+add_bind /storage
+add_bind /dev
+add_bind /data
+add_bind /dev/urandom /dev/random
+add_bind /proc
+add_bind "$PREFIX"
+add_bind "$PREFIX/local/stat" /proc/stat
+add_bind "$PREFIX/local/vmstat" /proc/vmstat
+add_bind /proc/self/fd /dev/fd
+add_bind /proc/self/fd/0 /dev/stdin
+add_bind /proc/self/fd/1 /dev/stdout
+add_bind /proc/self/fd/2 /dev/stderr
+add_bind /sys
 
-if [ -e "/proc/self/fd" ]; then
-  ARGS="$ARGS -b /proc/self/fd:/dev/fd"
-fi
+mkdir -p "$ALPINE_DIR/tmp"
+chmod 1777 "$ALPINE_DIR/tmp" 2>/dev/null || true
+ARGS="$ARGS -b $ALPINE_DIR/tmp:/dev/shm"
+ARGS="$ARGS -r $ALPINE_DIR -0 --link2symlink --sysvipc -L"
 
-if [ -e "/proc/self/fd/0" ]; then
-  ARGS="$ARGS -b /proc/self/fd/0:/dev/stdin"
-fi
-
-if [ -e "/proc/self/fd/1" ]; then
-  ARGS="$ARGS -b /proc/self/fd/1:/dev/stdout"
-fi
-
-if [ -e "/proc/self/fd/2" ]; then
-  ARGS="$ARGS -b /proc/self/fd/2:/dev/stderr"
-fi
-
-
-ARGS="$ARGS -b $PREFIX"
-ARGS="$ARGS -b /sys"
-
-if [ ! -d "$PREFIX/local/alpine/tmp" ]; then
- mkdir -p "$PREFIX/local/alpine/tmp"
- chmod 1777 "$PREFIX/local/alpine/tmp"
-fi
-ARGS="$ARGS -b $PREFIX/local/alpine/tmp:/dev/shm"
-
-ARGS="$ARGS -r $PREFIX/local/alpine"
-ARGS="$ARGS -0"
-ARGS="$ARGS --link2symlink"
-ARGS="$ARGS --sysvipc"
-ARGS="$ARGS -L"
-
-$PROOT $ARGS sh $PREFIX/local/bin/init "$@"
+exec "$PROOT" $ARGS sh "$PREFIX/local/bin/init" "$@"

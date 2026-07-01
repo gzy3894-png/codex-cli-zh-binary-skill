@@ -1,149 +1,150 @@
-# Codex CLI 中文版 Android ARM64 一键安装包
+# Codex CLI 中文版 Android ARM64 安装包
 
-这个目录发布 Codex CLI `0.142.4` 中文版的 ARM64 musl 构建：
+这个目录发布 Codex CLI `0.142.4` 中文版的 ARM64 musl 构建和 Android/Alpine 安装脚本。
 
 - 目标：`aarch64-unknown-linux-musl`
-- 推荐环境：ReTerminal Alpine 模式，或 Android Termux + Alpine proot
-- 备用环境：原生 Termux ARM64 或兼容 ARM64 Linux musl 环境
+- 推荐环境：Codex for TUI APK 内置 Alpine/proot，或 ReTerminal Alpine
+- 备用环境：Termux + Alpine proot、原生 Termux ARM64
 - 说明：这不是 Android NDK/Bionic 目标；Code Mode 运行时在该 musl 构建中被禁用
 
-## 推荐终端：ReTerminal
+## 脚本分层
 
-Android 端推荐使用 ReTerminal，官方仓库：
+当前脚本按职责拆分，避免启动链路叠加隐藏更新：
 
-```text
-https://github.com/RohitKushvaha01/ReTerminal
+- `lib/codex-zh-common.sh`：路径、校验、日志、基础工具函数。
+- `lib/codex-zh-download.sh`：下载、候选 URL、SHA256 校验。
+- `lib/codex-zh-config.sh`：显式配置、`auth.json`、`model_catalog_json`、`/models` 刷新。
+- `lib/codex-zh-local.sh`：本地安装、launcher、APK/Alpine/Termux/proot 入口。
+- `lib/codex-zh-update.sh`：显式脚本更新。
+- `codex-for-tui-bootstrap.sh`：APK 薄启动器；已安装 `codex` 时只负责 `exec codex`。
+- `codex-update.sh`：用户手动运行的脚本更新命令。
+- `codex-local-resume.sh`：本地诊断、配置、模型刷新、启动器修复命令。
+
+旧脚本已备份到 `backup/legacy-scripts-20260702/`，不再作为运行逻辑来源。
+
+## 启动和更新规则
+
+普通启动不会自动联网更新脚本，不会请求 `/models`，不会覆盖 `~/.codex/config.toml`。
+
+只有这些路径会拉取脚本：
+
+1. 首次打开 APK 且本地没有 `codex`，用户确认安装后。
+2. 用户显式运行：
+
+```sh
+codex-update check
+codex-update apply
 ```
 
-建议安装官方 Actions 中包含中文资源的 `1.3.0` 构建，然后进入 ReTerminal 的 Alpine 模式。
+或者直接调用 bootstrap 的兼容入口：
 
-Codex for TUI Android App 现在也是先拉取这个目录里的最新安装/恢复脚本，再继续安装或恢复；以后修脚本通常只需要更新仓库，不必重打 APK。
+```sh
+codex-for-tui-bootstrap --update-scripts
+```
 
-## 推荐：ReTerminal Alpine 一键安装
+第三方模型目录刷新也是显式命令：
 
-如果你已经在 ReTerminal 的 Alpine 模式里，直接执行：
+```sh
+codex-local refresh-models
+```
+
+它只刷新 `model_catalog_json` 指向的 JSON 文件，并保留当前 `model` 和 `model_reasoning_effort`。
+
+## ReTerminal Alpine 安装
+
+在 ReTerminal Alpine 或 APK 内 Alpine 环境里执行：
 
 ```sh
 wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | sh
 ```
 
-安装器开局会让你选择：
-
-```text
-1. 官方 Codex 初始化：不写第三方配置，首次运行 codex 时由官方流程提示登录或 API Key
-2. 第三方 Responses API：输入 Base URL 和 API Key，自动请求 `/models`，用编号切换式多选常用模型，再选择默认模型并生成官方风格配置
-```
-
-如果 Alpine 里已有 `curl`：
+已有 `curl` 时：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | sh
 ```
 
-这个脚本不会创建 proot，也不依赖 Termux。它会：
+脚本会：
 
-- 使用 Alpine 的 `apk` 安装依赖
-- `apk update` 默认依次尝试 TUNA、BFSU、官方源，并备份原 `/etc/apk/repositories`
-- 默认使用 full 依赖模式，包含 Python、Node/npm、编译工具链、diff/patch、OpenSSL/libffi 等常用 Codex 工作依赖
-- 尽量安装 `bubblewrap`；Alpine 只提供 `bwrap` 时会自动建立 `bubblewrap` 兼容入口
-- 下载 Codex 压缩包时使用 `.part` 断点续传、HTTP/1.1、多次重试和 SHA256 校验
-- 下载并校验 Codex CLI `0.142.4` 中文 ARM64 musl 二进制
-- 开局询问第三方 API Base URL 和 API Key
-- 自动补齐 API Base URL 的 `/v1` 后缀
-- 请求 `/models`，让用户用纯终端编号选择常用模型，再选择默认模型
-- 按 Codex 官方习惯生成 `~/.codex/config.toml` 和 `~/.codex/auth.json`，默认使用 `wire_api = "responses"`，模型列表交给 Codex 自己刷新和缓存
-- 设置 `[features] hooks = false`，避免旧 hook 导致 `Stop hook exited with code 127`
-- 安装后询问启动提示词：默认生成标准版 `AGENTS.md`，也可以粘贴自定义版
-- 默认安装 `codex` 命令到 `/usr/local/bin`，并生成 `codex` 的 32 种大小写入口，例如 `Codex`、`CODEX`
-- 同时写入 profile 和 `/etc/profile.d/codex-zh.sh` 兜底，重进终端也不需要手动 `export PATH`
+- 安装 Alpine 依赖。
+- 下载并校验 Codex 中文版 ARM64 musl 压缩包。
+- 写入真实二进制 `codex-zh-bin` 和薄 launcher `codex`。
+- 生成大小写兼容入口，例如 `Codex`、`CODEX`。
+- 安装 `codex-local`、`codex-local-resume`、`codex-update`。
+- 生成默认 `AGENTS.md`。
+- 如果已有 `~/.codex/config.toml`，默认保留，不覆盖。
+- 如果选择第三方 Responses API，写入 `auth.json` 和 `config.toml`。
 
-API Key 默认明文输入，避免部分 Android 终端在隐藏输入时看起来像卡住。需要隐藏输入时：
+第三方 API 非交互配置：
 
 ```sh
-wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_HIDE_API_KEY=1 sh
+curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_SETUP_MODE=third_party CODEX_ZH_API_BASE=https://api.example.com/v1 CODEX_ZH_API_KEY=你的key sh
 ```
 
-完全非交互配置第三方 API：
+跳过 API 配置：
 
 ```sh
-wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_SETUP_MODE=third_party CODEX_ZH_API_BASE=https://api.example.com/v1 CODEX_ZH_API_KEY=你的key sh
+curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_SKIP_API_SETUP=1 sh
 ```
 
-第三方 API 模式必须成功拉取 `/models`。如果失败，安装器会让你检查 Base URL、API Key、代理或服务端兼容性后重试，不再写入手动拼出来的模型目录。
-
-安装完成后运行：
+安装后运行：
 
 ```sh
 codex
 ```
 
-如果网络很差，只想先装能跑 Codex 的最小依赖：
+## Termux + Alpine proot
 
-```sh
-wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_DEPS_PROFILE=minimal sh
-```
-
-如果不想让脚本改 Alpine 镜像源：
-
-```sh
-wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_MIRROR_PROFILE=keep sh
-```
-
-## 备用：裸 Termux 一键安装
-
-推荐使用 `install-alpine-proot.sh`。它会：
-
-- 安装 Termux 侧依赖：`ca-certificates`、`curl`、`tar`、`gzip`、`proot`、`jq` 等
-- 下载并校验 Alpine `3.24.1` aarch64 minirootfs
-- 直接解压 rootfs，不依赖 `proot-distro install debian/ubuntu` 的 OCI registry 流程
-- 把 Alpine apk 源切到 HTTP TUNA，失败时自动切 BFSU
-- 在 Alpine 内安装 Codex 常用依赖
-- 下载并校验 Codex CLI `0.142.4` 中文 ARM64 musl 二进制
-- 开局询问第三方 API Base URL 和 API Key
-- 自动补齐 API Base URL 的 `/v1` 后缀
-- 请求 `/models`，让用户选择默认模型和常用模型
-- 生成 `~/.codex/config.toml`，默认使用 `wire_api = "responses"`
-- 设置 `[features] hooks = false`，避免迁移旧 hooks 后出现 `Stop hook exited with code 127`
-- 安装 `codex` 和 `codex-alpine` 命令
-
-刚装好的 Termux 执行这一条：
+刚装好的 Termux 执行：
 
 ```sh
 DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl && curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-alpine-proot.sh | sh
 ```
 
-如果已经有 `curl`：
+已有 `curl` 时：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-alpine-proot.sh | sh
 ```
 
-如果只想先安装文件、不配置 API：
+这个入口只负责 Termux/proot 层：
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-alpine-proot.sh | CODEX_ZH_SKIP_API_SETUP=1 sh
+- 安装 Termux 侧依赖。
+- 下载并校验 Alpine `3.24.1` aarch64 minirootfs。
+- 解压 rootfs。
+- 把当前脚本树复制进 rootfs。
+- 在 rootfs 内复用 `install-reterminal-alpine.sh` 完成 Codex 安装。
+- 创建 Termux 侧入口 `codex-alpine` 和 `codex`。
+
+默认 rootfs：
+
+```text
+$PREFIX/var/lib/codex-zh/codex-alpine/rootfs
 ```
 
-安装完成后运行：
-
-```sh
-codex
-```
-
-备用入口：
+默认入口：
 
 ```sh
 codex-alpine
+codex
 ```
 
-## 开局 API 配置
+## 原生 Termux 安装
 
-安装器会要求输入：
+原生 Termux 不是首选路线，但保留安装入口：
+
+```sh
+DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl
+curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
+```
+
+## 第三方 API 配置
+
+第三方 Responses API 配置需要：
 
 1. API Base URL，例如 `https://api.example.com` 或 `https://api.example.com/v1`
 2. API Key
-3. 终端编号切换式多选常用模型
-4. 默认模型编号
+3. 默认模型编号
 
 Base URL 会自动规范化：
 
@@ -151,7 +152,9 @@ Base URL 会自动规范化：
 - `https://api.example.com/` -> `https://api.example.com/v1`
 - `https://api.example.com/v1` -> 保持不变
 
-生成的配置不把 key 写进 `config.toml`；密钥写入 Codex 官方习惯读取的 `auth.json`。第三方 provider 使用 Codex 上游支持的 command auth 读取 token，同时安装器会生成 `model_catalog_json`，让 `/model` 菜单直接显示拉取到的第三方模型名：
+密钥写入 `~/.codex/auth.json`，不写进 `config.toml`。第三方 provider 通过 command auth 读取 token。
+
+生成配置示例：
 
 ```toml
 model_provider = "custom"
@@ -177,129 +180,84 @@ args = []
 timeout_ms = 5000
 refresh_interval_ms = 300000
 cwd = "/root/.codex"
-
-[notice.model_migrations]
-"gpt-5.4mini" = "gpt-5.4-mini"
-"gpt-5.3-codex" = "gpt-5.4"
-"gpt-5.2" = "gpt-5.4"
 ```
 
-安装器会把当前 provider `/v1/models` 拉到的全部模型写入 `/root/.codex/model_catalog.json`，并在 `config.toml` 里通过 `model_catalog_json` 指向它。这样 `/model` 菜单会直接显示拉取到的第三方模型名，provider command auth 仍继续负责刷新 token。
-
-密钥保存在 Alpine rootfs 的 `/root/.codex/auth.json`，权限为 `600`：
-
-```json
-{
-  "OPENAI_API_KEY": "你的 API Key"
-}
-```
-
-## 为什么推荐 Alpine proot
-
-实测原生 Termux 路线在部分设备和代理环境下可能出现：
-
-- Codex 流式输出反复 `Reconnecting`
-- `Stream disconnected before completion`
-- GitHub raw 或 git clone 偶发 `SSL_read unexpected eof`
-- `proot-distro install debian/ubuntu` 卡在 OCI registry 认证并报 `SSL: UNEXPECTED_EOF_WHILE_READING`
-- Alpine 官方 CDN `apk update` 报 I/O error
-
-Alpine proot 路线把 rootfs 下载、校验、解压和 apk mirror 都固定下来，能显著减少这些变量。
-
-## 备用：原生 Termux 安装
-
-原生安装脚本仍保留。如果你确认自己的 Termux 原生环境流式响应稳定，可以执行：
+`/model` 菜单的模型目录来自 `model_catalog_json`。后续服务端模型变化时，手动执行：
 
 ```sh
-DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl
-curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
+codex-local refresh-models
 ```
 
-轻量依赖模式：
+## 本地维护命令
 
 ```sh
-DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl
-curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | CODEX_ZH_DEPS_PROFILE=minimal sh
+codex-local status
+codex-local doctor
+codex-local configure
+codex-local refresh-models
+codex-local repair-launcher
+codex-local run --version
+codex-update check
+codex-update apply
+```
+
+`codex-local configure` 会显式重写第三方 provider 配置；普通 `codex` 启动不会调用它。
+
+## 可选环境变量
+
+```sh
+CODEX_ZH_SKIP_API_SETUP=1 sh install-reterminal-alpine.sh
+CODEX_ZH_SKIP_RUN=1 sh install-reterminal-alpine.sh
+CODEX_ZH_DEPS_PROFILE=minimal sh install-reterminal-alpine.sh
+CODEX_ZH_TERMUX_DEPS_PROFILE=minimal sh install-alpine-proot.sh
+CODEX_ZH_PROVIDER_ID=custom sh install-reterminal-alpine.sh
+CODEX_ZH_INSTALL_NAME=codex-zh sh install-reterminal-alpine.sh
+CODEX_ZH_OVERWRITE_CONFIG=1 sh install-reterminal-alpine.sh
+CODEX_ZH_ALPINE_ROOT_BASE=$PREFIX/var/lib/codex-zh/codex-alpine sh install-alpine-proot.sh
+CODEX_ZH_ALPINE_URL=https://example.com/alpine-minirootfs.tar.gz sh install-alpine-proot.sh
+CODEX_ZH_ALPINE_SHA256=... sh install-alpine-proot.sh
 ```
 
 ## 常见问题
 
-**卡在 `bash.bashrc (Y/I/N/O/D/Z)` 怎么办？**
+**为什么不是上游推送后自动更新？**
 
-执行：
+本地 shell 脚本没有可靠的“接收远端推送”能力。自动拉取只能做轮询或启动时检查；这会造成隐藏联网和启动时改配置。当前设计改为显式命令：用户运行 `codex-update check/apply` 才检测和应用脚本更新。
+
+**打开 App 后没有进入 Codex，而是回到 shell？**
+
+运行：
 
 ```sh
-DEBIAN_FRONTEND=noninteractive dpkg --force-confdef --force-confold --configure -a
-DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -f install -y
+codex-local doctor
 ```
 
-**`proot-distro install debian/ubuntu` 报 SSL EOF 怎么办？**
+如果启动器缺失：
 
-不用走这条路线。推荐脚本直接下载 Alpine rootfs tarball 并本地解压，不需要 Docker/OCI registry 认证。
-
-**Alpine `apk update` 报 I/O error 怎么办？**
-
-推荐脚本默认写入：
-
-```text
-http://mirrors.tuna.tsinghua.edu.cn/alpine/v3.24/main
-http://mirrors.tuna.tsinghua.edu.cn/alpine/v3.24/community
+```sh
+codex-local repair-launcher
 ```
 
-失败时自动切到：
+**第三方 API 配置失败？**
 
-```text
-http://mirrors.bfsu.edu.cn/alpine/v3.24/main
-http://mirrors.bfsu.edu.cn/alpine/v3.24/community
+确认服务兼容 OpenAI Responses API，并测试：
+
+```sh
+curl -v --http1.1 https://api.example.com/v1/models
 ```
 
-**Codex 回复正常，但结束时报 `Stop hook exited with code 127` 怎么办？**
+返回 `401` 通常说明网络通了但缺少 Authorization；连接失败通常是 Base URL、代理或服务端兼容性问题。
 
-这是旧配置里的停止 hook 迁移到新环境后找不到命令。推荐脚本默认写入：
+**Codex 结束时报 `Stop hook exited with code 127`？**
+
+脚本生成的新配置会写入：
 
 ```toml
 [features]
 hooks = false
 ```
 
-**`/sdcard` 权限不足怎么办？**
-
-在 Termux 里执行：
-
-```sh
-termux-setup-storage
-```
-
-然后重新运行安装命令。安装器本身不强制依赖 `/sdcard`，但 launcher 会把 `/sdcard` 绑定进 Alpine，方便后续访问下载目录。
-
-**代理下长连接不稳怎么办？**
-
-Clash Meta / Mihomo 建议：
-
-- Stack Mode 先用 `Mixed Stack`
-- 关闭 IPv6 后测试
-- API 域名固定到单个稳定节点，不要走自动测速组
-- 若服务端支持，优先用 HTTP/1.1 测试 `/models` 和 `/responses`
-
-测试：
-
-```sh
-curl -v --http1.1 https://api.example.com/v1/models
-```
-
-返回 `401 missing Authorization` 说明网络通了，只是没有带 key。
-
-## 可选环境变量
-
-```sh
-CODEX_ZH_SKIP_API_SETUP=1 sh install-alpine-proot.sh
-CODEX_ZH_SKIP_RUN=1 sh install-alpine-proot.sh
-CODEX_ZH_PROVIDER_ID=omnimind sh install-alpine-proot.sh
-CODEX_ZH_INSTALL_NAME=codex-zh sh install-alpine-proot.sh
-CODEX_ZH_ALIAS_NAME=codex-alpine sh install-alpine-proot.sh
-CODEX_ZH_ALPINE_URL=https://example.com/alpine-minirootfs.tar.gz sh install-alpine-proot.sh
-CODEX_ZH_ALPINE_SHA256=... sh install-alpine-proot.sh
-```
+如果你迁移了旧配置，请手动检查 `~/.codex/config.toml`。
 
 ## 文件校验
 
@@ -311,4 +269,4 @@ F55A90F69052C5BD6F92CB09A8F47065970830B194C917A006FB94028E721259  alpine-miniroo
 
 ## 免责声明
 
-这是社区汉化构建，不是 OpenAI 官方发行包。安装前请确认你信任本仓库和对应 SHA256。
+这是社区汉化构建，不是 OpenAI 官方发行包。安装前请确认你信任本仓库、Release 资产和对应 SHA256。

@@ -41,6 +41,12 @@ load_lib() {
     export CODEX_ZH_ACTIVE_SCRIPT_DIR="$SCRIPT_DIR"
     return
   fi
+  if [ -r "$SCRIPT_DIR/../share/codex-zh/scripts/$rel" ]; then
+    # shellcheck disable=SC1090
+    . "$SCRIPT_DIR/../share/codex-zh/scripts/$rel"
+    export CODEX_ZH_ACTIVE_SCRIPT_DIR="$SCRIPT_DIR/../share/codex-zh/scripts"
+    return
+  fi
   [ -r "$CACHE_DIR/$rel" ] || mini_fetch "$SCRIPT_BASE_URL/$rel" "$CACHE_DIR/$rel"
   # shellcheck disable=SC1090
   . "$CACHE_DIR/$rel"
@@ -49,7 +55,21 @@ load_lib() {
 
 load_lib codex-zh-common.sh
 load_lib codex-zh-download.sh
-load_lib codex-zh-config.sh
-load_lib codex-zh-local.sh
+load_lib codex-zh-update.sh
 
-codex_local_install_native_termux "$@"
+case "${1:-apply}" in
+  check)
+    codex_update_apply 1
+    ;;
+  apply|update|"")
+    codex_update_apply 0
+    ;;
+  help|--help|-h)
+    printf '%s\n' "用法: codex-update [check|apply]" >&2
+    ;;
+  *)
+    printf '%s\n' "错误: 未知命令：$1" >&2
+    printf '%s\n' "用法: codex-update [check|apply]" >&2
+    exit 2
+    ;;
+esac

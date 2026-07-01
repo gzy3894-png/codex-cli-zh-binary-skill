@@ -14,9 +14,9 @@ https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-
 1. 推荐：裸 Termux 一键安装 Alpine proot + Codex
 ------------------------------------------------
 
-刚装好的 Termux 复制下面一整条执行。它会安装下载器、proot 和 jq，
-然后下载 Alpine rootfs，安装 Codex 中文版，并在开局询问第三方 API
-Base URL 和 API Key，自动补齐 /v1，获取模型列表并让你选择默认模型。
+刚装好的 Termux 复制下面一整条执行。它会安装下载器和 proot，
+下载 Alpine rootfs，然后在 rootfs 内复用 ReTerminal Alpine 安装器
+安装 Codex 中文版。
 
 DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl && curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-alpine-proot.sh | sh
 
@@ -48,7 +48,22 @@ codex --version
 codex
 
 
-5. 如果上次卡在 bash.bashrc 提问
+5. 更新规则
+-----------
+
+普通 codex 启动不联网更新脚本，不刷新 /models，不覆盖 ~/.codex/config.toml。
+
+检测脚本更新:
+codex-update check
+
+应用脚本更新:
+codex-update apply
+
+显式刷新第三方模型目录:
+codex-local refresh-models
+
+
+6. 如果上次卡在 bash.bashrc 提问
 --------------------------------
 
 先执行下面两行修复 Termux 的 dpkg 未完成配置。它会自动保留你当前的
@@ -58,24 +73,12 @@ DEBIAN_FRONTEND=noninteractive dpkg --force-confdef --force-confold --configure 
 DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -f install -y
 
 
-6. 如果 proot-distro 安装 Debian/Ubuntu 报 SSL EOF
+7. 如果 proot-distro 安装 Debian/Ubuntu 报 SSL EOF
 --------------------------------------------------
 
 不用走 proot-distro 的 OCI registry 路线。推荐脚本直接下载 Alpine
 minirootfs tarball 并本地解压，能绕过 registry 认证阶段的
 SSL: UNEXPECTED_EOF_WHILE_READING。
-
-
-7. 如果 Alpine apk update 报 I/O error
---------------------------------------
-
-推荐脚本默认使用 HTTP TUNA:
-http://mirrors.tuna.tsinghua.edu.cn/alpine/v3.24/main
-http://mirrors.tuna.tsinghua.edu.cn/alpine/v3.24/community
-
-失败时自动切 BFSU:
-http://mirrors.bfsu.edu.cn/alpine/v3.24/main
-http://mirrors.bfsu.edu.cn/alpine/v3.24/community
 
 
 8. 如果 Codex 结束时报 Stop hook code 127
@@ -92,7 +95,7 @@ hooks = false
 9. 备用：原生 Termux 安装
 -------------------------
 
-如果你确认原生 Termux 上流式响应稳定，可以使用旧安装路线:
+如果你确认原生 Termux 上流式响应稳定，可以使用备用安装路线:
 
 DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl
 curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh

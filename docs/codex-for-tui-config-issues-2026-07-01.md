@@ -2,7 +2,18 @@
 
 日期：2026-07-01
 
-本文档记录用户反馈过的问题、前序修复尝试导致或暴露的新问题、以及当前仍未解决的问题。本文档不包含结论、评价或建议。
+本文档记录用户反馈过的问题、前序修复尝试导致或暴露的新问题、以及当时仍未解决的问题。
+
+## 2026-07-02 状态更新
+
+这些问题已按“启动不变更配置、更新显式触发”的方向重构：
+
+1. 普通 `codex` 启动只执行本地二进制，不再调用 preflight、profile refresh、脚本更新或 `/models` 刷新。
+2. APK bootstrap 在检测到本地 `codex` 后直接 `exec codex`；只有首次未安装并经用户确认，或显式 `--update-scripts/update` 才拉取脚本。
+3. 脚本更新改为独立命令：`codex-update check` 和 `codex-update apply`。
+4. 第三方模型目录刷新改为独立命令：`codex-local refresh-models`，只更新 `model_catalog_json`，保留当前 `model` 和 `model_reasoning_effort`。
+5. API Key 写入 `auth.json`，第三方 provider 通过 command auth 读取；不把 key 写入 `config.toml`。
+6. 旧脚本已移入 `backup/legacy-scripts-20260702/`。
 
 ## 用户遇到的问题
 
@@ -40,7 +51,9 @@
     - `android-arm64-musl/codex-local-resume.sh`
     - `tests/codex-for-tui-installer-smoke.sh`
 
-## 仍未解决的问题
+## 重构前仍未解决的问题
+
+以下条目是 2026-07-01 问题归档时的未解决状态。2026-07-02 的当前处理结果见本文开头“状态更新”。
 
 1. 尚未形成用户接受的最终架构或实现。
 2. 日常 `codex` 启动路径尚未完成重新设计。

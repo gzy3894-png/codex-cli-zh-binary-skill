@@ -16,31 +16,18 @@ export PATH="$HOME/.local/bin:/bin:/sbin:/usr/local/bin:/usr/bin:/usr/sbin:${PRE
 
 BOOT_DIR="$HOME/.codex-for-tui"
 REMOTE_DIR="$BOOT_DIR/remote"
-REMOTE_INSTALLER="$REMOTE_DIR/install-reterminal-alpine.sh"
-REMOTE_RESUME="$REMOTE_DIR/codex-local-resume.sh"
 CONSENT_FILE="$BOOT_DIR/install-consent"
-mkdir -p "$BOOT_DIR" "$REMOTE_DIR" "$HOME/.cache/codex-zh" 2>/dev/null || true
-
-clear_screen() {
-  printf '\033[H\033[2J' 2>/dev/null || true
-}
+REMOTE_INSTALLER="$REMOTE_DIR/install-reterminal-alpine.sh"
+mkdir -p "$BOOT_DIR" "$REMOTE_DIR" "$HOME/.local/bin" "$HOME/.cache/codex-zh" 2>/dev/null || true
 
 tty_read() {
   prompt="$1"
   default="${2:-}"
   if [ "${CODEX_ZH_FORCE_STDIN:-0}" != "1" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
-    if [ -n "$default" ]; then
-      printf '%s [%s]: ' "$prompt" "$default" > /dev/tty
-    else
-      printf '%s: ' "$prompt" > /dev/tty
-    fi
+    [ -n "$default" ] && printf '%s [%s]: ' "$prompt" "$default" > /dev/tty || printf '%s: ' "$prompt" > /dev/tty
     IFS= read -r ans < /dev/tty || ans=""
   else
-    if [ -n "$default" ]; then
-      printf '%s [%s]: ' "$prompt" "$default" >&2
-    else
-      printf '%s: ' "$prompt" >&2
-    fi
+    [ -n "$default" ] && printf '%s [%s]: ' "$prompt" "$default" >&2 || printf '%s: ' "$prompt" >&2
     IFS= read -r ans || ans=""
   fi
   [ -n "$ans" ] || ans="$default"
@@ -49,33 +36,19 @@ tty_read() {
 
 confirm_first_install() {
   [ -s "$CONSENT_FILE" ] && return 0
-
-  clear_screen
+  printf '\033[H\033[2J' 2>/dev/null || true
   cat >&2 <<'EOF'
 Codex for TUI 首次安装
 
-将准备这些资源：
-- Alpine 基础依赖
-- Codex 中文版 ARM64 压缩包
-- 最新安装/配置脚本
-- 可选开发依赖
+首次安装会下载依赖、Codex 中文版 ARM64 musl 二进制和安装脚本。
+安装完成后的普通启动不会自动联网更新脚本，也不会刷新模型或覆盖配置。
 
-预计下载总量：
-- Minimal：约 150-250 MB
-- Full：约 400-700 MB
-
-网络提示：
-- Alpine 镜像通常不一定需要代理。
-- Codex 压缩包来自 GitHub Release，网络不稳时建议开启代理。
-- App 会先拉取云端最新安装脚本；失败时会回退到本地缓存或给出手动命令。
-- 下载失败后可重新打开 App 继续。
+请选择：
+1. 继续安装
+2. 退出到 shell，不安装
+3. 本次跳过自动启动
 EOF
-
   while :; do
-    printf '%s\n' "请选择：" >&2
-    printf '%s\n' "1. 继续安装" >&2
-    printf '%s\n' "2. 退出到 shell，不安装" >&2
-    printf '%s\n' "3. 本次跳过自动启动" >&2
     choice="$(tty_read "请输入选项编号" "1")"
     case "$choice" in
       1|"")
@@ -83,7 +56,7 @@ EOF
         return 0
         ;;
       2)
-        info "已退出安装。以后输入 codex 或重新打开 App 可继续。"
+        info "已退出安装。以后重新打开 App 或运行安装命令可继续。"
         exit 0
         ;;
       3)
@@ -95,7 +68,42 @@ EOF
   done
 }
 
-script_url_candidates() {
+best_downloader() {
+  if have curl; then printf '%s\n' curl
+  elif have wget; then printf '%s\n' wget
+  elif have busybox && busybox wget --help >/dev/null 2>&1; then printf '%s\n' busybox-wget
+  else return 1
+  fi
+}
+
+fetch_atomic() {
+  fa_url="$1"
+  fa_dest="$2"
+  fa_tool="$(best_downloader)" || return 1
+  fa_part="$fa_dest.part"
+  mkdir -p "$(dirname "$fa_dest")"
+  rm -f "$fa_part"
+  if [ "$fa_tool" = "curl" ]; then
+    if ! curl -fL --http1.1 --retry 5 --retry-delay 2 --connect-timeout 20 --max-time 300 -o "$fa_part" "$fa_url"; then
+      rm -f "$fa_part"
+      return 1
+    fi
+  elif [ "$fa_tool" = "wget" ]; then
+    if ! wget -O "$fa_part" --tries=5 --timeout=30 "$fa_url"; then
+      rm -f "$fa_part"
+      return 1
+    fi
+  else
+    if ! busybox wget -O "$fa_part" "$fa_url"; then
+      rm -f "$fa_part"
+      return 1
+    fi
+  fi
+  [ -s "$fa_part" ] || { rm -f "$fa_part"; return 1; }
+  mv "$fa_part" "$fa_dest"
+}
+
+script_urls() {
   name="$1"
   override="${2:-}"
   [ -n "$override" ] && printf '%s\n' "$override"
@@ -103,160 +111,104 @@ script_url_candidates() {
   [ -n "$SCRIPT_RELEASE_BASE_URL" ] && printf '%s\n' "$SCRIPT_RELEASE_BASE_URL/$name"
 }
 
-best_downloader() {
-  if have curl; then
-    printf '%s\n' "curl"
-  elif have wget; then
-    printf '%s\n' "wget"
-  elif have busybox && busybox wget --help >/dev/null 2>&1; then
-    printf '%s\n' "busybox-wget"
-  else
-    return 1
-  fi
-}
-
-ensure_fetch_tool() {
-  if tool="$(best_downloader 2>/dev/null)"; then
-    printf '%s\n' "$tool"
-    return 0
-  fi
-  if have apk; then
-    warn "当前没有 curl/wget，尝试补装最小下载工具..."
-    apk add --no-cache ca-certificates curl >/dev/null 2>&1 || \
-      apk add --no-cache ca-certificates wget >/dev/null 2>&1 || true
-  fi
-  best_downloader
-}
-
-fetch_with_tool() {
-  tool="$1"
-  url="$2"
-  dest="$3"
-  part="$dest.part"
-  rm -f "$part"
-  if [ "$tool" = "curl" ]; then
-    curl -fL --http1.1 \
-      --retry 5 --retry-delay 2 --retry-all-errors \
-      --connect-timeout 20 --speed-time 30 --speed-limit 1024 \
-      -o "$part" "$url"
-  elif [ "$tool" = "wget" ]; then
-    wget -O "$part" --tries=5 --timeout=30 "$url"
-  else
-    busybox wget -O "$part" "$url"
-  fi
-  mv "$part" "$dest"
-}
-
-refresh_remote_script() {
-  label="$1"
-  name="$2"
-  override="${3:-}"
-  dest="$4"
-  if ! tool="$(ensure_fetch_tool 2>/dev/null)"; then
-    warn "缺少下载工具，无法刷新${label}。"
-    [ -s "$dest" ] && warn "将继续使用本地缓存的${label}。"
-    [ -s "$dest" ]
-    return
-  fi
-
-  old_ifs="$IFS"
+refresh_one() {
+  ro_label="$1"
+  ro_name="$2"
+  ro_override="${3:-}"
+  ro_dest="$REMOTE_DIR/$ro_name"
+  ro_tmp="$ro_dest.tmp"
+  ro_old_ifs="$IFS"
   IFS='
 '
-  for url in $(script_url_candidates "$name" "$override"); do
-    [ -n "$url" ] || continue
-    info "尝试拉取最新${label}: $url"
-    if fetch_with_tool "$tool" "$url" "$dest"; then
-      chmod 755 "$dest" 2>/dev/null || true
-      info "已刷新${label}。"
-      IFS="$old_ifs"
+  for ro_url in $(script_urls "$ro_name" "$ro_override"); do
+    [ -n "$ro_url" ] || continue
+    info "检测更新：$ro_label $ro_url"
+    if fetch_atomic "$ro_url" "$ro_tmp"; then
+      if [ -s "$ro_dest" ] && cmp -s "$ro_tmp" "$ro_dest"; then
+        info "未变化：$ro_name"
+        rm -f "$ro_tmp"
+      else
+        mv "$ro_tmp" "$ro_dest"
+        chmod 755 "$ro_dest" 2>/dev/null || true
+        info "已更新：$ro_name"
+      fi
+      IFS="$ro_old_ifs"
       return 0
     fi
-    warn "${label}拉取失败：$url"
-    rm -f "$dest.part"
+    warn "下载失败：$ro_url"
+    rm -f "$ro_tmp" "$ro_tmp.part"
   done
-  IFS="$old_ifs"
-
-  if [ -s "$dest" ]; then
-    warn "无法拉取最新${label}，继续使用本地缓存。"
-    return 0
-  fi
-  return 1
+  IFS="$ro_old_ifs"
+  [ -s "$ro_dest" ]
 }
 
-sync_remote_resume_command() {
-  [ -s "$REMOTE_RESUME" ] || return 0
-  for target in "$HOME/.local/bin/codex-local-resume" "/usr/local/bin/codex-local-resume"; do
-    target_dir="$(dirname "$target")"
-    mkdir -p "$target_dir" 2>/dev/null || continue
-    cp "$REMOTE_RESUME" "$target" 2>/dev/null || continue
-    chmod 755 "$target" 2>/dev/null || true
+refresh_remote_scripts() {
+  refresh_one "安装脚本" "install-reterminal-alpine.sh" "${CODEX_ZH_INSTALLER_URL:-}" || true
+  refresh_one "本地命令" "codex-local-resume.sh" "${CODEX_ZH_RESUME_URL:-}" || true
+  refresh_one "更新命令" "codex-update.sh" "${CODEX_ZH_UPDATE_URL:-}" || true
+  refresh_one "bootstrap" "codex-for-tui-bootstrap.sh" "${CODEX_ZH_BOOTSTRAP_URL:-}" || true
+  for lib in codex-zh-common.sh codex-zh-download.sh codex-zh-config.sh codex-zh-local.sh codex-zh-update.sh; do
+    refresh_one "模块" "lib/$lib" "" || true
   done
+  [ -s "$REMOTE_DIR/codex-local-resume.sh" ] && cp "$REMOTE_DIR/codex-local-resume.sh" "$HOME/.local/bin/codex-local-resume" 2>/dev/null && chmod 755 "$HOME/.local/bin/codex-local-resume" 2>/dev/null || true
+  [ -s "$REMOTE_DIR/codex-local-resume.sh" ] && cp "$REMOTE_DIR/codex-local-resume.sh" "$HOME/.local/bin/codex-local" 2>/dev/null && chmod 755 "$HOME/.local/bin/codex-local" 2>/dev/null || true
+  [ -s "$REMOTE_DIR/codex-update.sh" ] && cp "$REMOTE_DIR/codex-update.sh" "$HOME/.local/bin/codex-update" 2>/dev/null && chmod 755 "$HOME/.local/bin/codex-update" 2>/dev/null || true
 }
 
-has_resume_state() {
+has_local_state() {
   codex_home="${CODEX_HOME:-$HOME/.codex}"
   [ -d "$codex_home/install-state" ] && return 0
-  [ -d "$codex_home/api-profiles" ] && return 0
   [ -s "$codex_home/config.toml" ] && return 0
   [ -s "$codex_home/auth.json" ] && return 0
   return 1
 }
 
-choose_resume_runner() {
-  if [ -x "$REMOTE_RESUME" ]; then
-    printf '%s\n' "$REMOTE_RESUME"
-    return 0
-  fi
-  if [ -x "$HOME/.local/bin/codex-local-resume" ]; then
-    printf '%s\n' "$HOME/.local/bin/codex-local-resume"
-    return 0
-  fi
-  if [ -x "/usr/local/bin/codex-local-resume" ]; then
-    printf '%s\n' "/usr/local/bin/codex-local-resume"
-    return 0
-  fi
+resume_runner() {
+  for p in "$HOME/.local/bin/codex-local-resume" "$REMOTE_DIR/codex-local-resume.sh" "/usr/local/bin/codex-local-resume"; do
+    [ -x "$p" ] && { printf '%s\n' "$p"; return 0; }
+  done
   return 1
 }
 
-print_manual_fetch_help() {
-  warn "未能拿到安装脚本，无法继续自动安装。"
-  printf '\n%s\n' "可稍后重试，或在 Alpine shell 手动执行任一命令：" >&2
-  printf '%s\n' "wget -O - $SCRIPT_BASE_URL/install-reterminal-alpine.sh | sh" >&2
-  printf '%s\n' "curl -fsSL $SCRIPT_BASE_URL/install-reterminal-alpine.sh | sh" >&2
-}
-
-refresh_remote_scripts() {
-  refresh_remote_script "安装脚本" "install-reterminal-alpine.sh" "${CODEX_ZH_INSTALLER_URL:-}" "$REMOTE_INSTALLER" || true
-  refresh_remote_script "恢复脚本" "codex-local-resume.sh" "${CODEX_ZH_RESUME_URL:-}" "$REMOTE_RESUME" || true
-  sync_remote_resume_command
-}
+case "${1:-}" in
+  --update-scripts|update)
+    refresh_remote_scripts
+    exit 0
+    ;;
+  --help|-h)
+    printf '%s\n' "用法: codex-for-tui-bootstrap.sh [--update-scripts]" >&2
+    exit 0
+    ;;
+esac
 
 if [ "${CODEX_FOR_TUI_AUTO_START:-1}" = "0" ]; then
   info "已跳过 Codex 自动启动，因为 CODEX_FOR_TUI_AUTO_START=0"
   exit 0
 fi
 
-refresh_remote_scripts
-
 if have codex; then
-  info "Codex 已安装，正在启动..."
-  codex
-  exit $?
+  info "Codex 已安装，直接启动。"
+  exec codex
 fi
 
-if has_resume_state && resume_runner="$(choose_resume_runner 2>/dev/null)"; then
-  info "检测到未完成的 Codex 本地配置，继续恢复..."
-  CODEX_ZH_SKIP_RUN=0 "$resume_runner"
-  exit $?
+if has_local_state && runner="$(resume_runner 2>/dev/null)"; then
+  warn "检测到本地状态但 Codex 启动器缺失；进入本地诊断，不拉取远端更新。"
+  "$runner" doctor || true
 fi
 
 confirm_first_install
 
 if [ ! -x "$REMOTE_INSTALLER" ]; then
-  print_manual_fetch_help
+  refresh_remote_scripts
+fi
+
+if [ ! -x "$REMOTE_INSTALLER" ]; then
+  warn "未能拿到安装脚本，无法继续自动安装。"
+  printf '%s\n' "可手动执行：" >&2
+  printf '%s\n' "wget -O - $SCRIPT_BASE_URL/install-reterminal-alpine.sh | sh" >&2
+  printf '%s\n' "curl -fsSL $SCRIPT_BASE_URL/install-reterminal-alpine.sh | sh" >&2
   exit 1
 fi
 
-info "首次启动 Codex for TUI，开始一键安装 Codex..."
-info "安装过程支持断点续传；如果网络失败，退出后重新打开 App 会继续。"
+info "开始首次安装 Codex for TUI。"
 CODEX_ZH_SKIP_RUN=0 sh "$REMOTE_INSTALLER"
