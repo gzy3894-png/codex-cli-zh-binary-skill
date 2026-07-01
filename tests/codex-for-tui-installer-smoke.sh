@@ -4,6 +4,7 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 INSTALLER="${1:-$ROOT_DIR/android-arm64-musl/install-reterminal-alpine.sh}"
 BOOTSTRAP="${2:-$ROOT_DIR/android-app/core/main/src/main/assets/codex-for-tui-bootstrap.sh}"
+RESUME="${3:-$ROOT_DIR/android-arm64-musl/codex-local-resume.sh}"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -34,6 +35,15 @@ make_bootstrap_lib() {
   dest="$2"
   awk '
     /^if \[ "\$\{CODEX_FOR_TUI_AUTO_START:-1\}"/ { exit }
+    { print }
+  ' "$src" > "$dest"
+}
+
+make_resume_lib() {
+  src="$1"
+  dest="$2"
+  awk '
+    /^main "\$@"/ { exit }
     { print }
   ' "$src" > "$dest"
 }
@@ -124,6 +134,76 @@ test_bootstrap_continue_writes_consent() {
   rm -rf "$tmp"
 }
 
+test_resume_menu_rejects_pasted_url_choice() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-resume-menu.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home" "$tmp/state" "$tmp/bin"
+  make_resume_lib "$RESUME" "$tmp/resume-lib.sh"
+  printf 'https://api.krill-ai.com/v1\nq\n' > "$tmp/input"
+
+  set +e
+  (
+    # shellcheck disable=SC1091
+    . "$tmp/resume-lib.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_FORCE_STDIN=1
+    STATE_DIR="$CODEX_HOME/install-state"
+    CONFIGS_DIR="$CODEX_HOME/api-profiles"
+    LAST_PROFILE_FILE="$CONFIGS_DIR/last-profile"
+    mkdir -p "$STATE_DIR" "$CONFIGS_DIR"
+    select_or_create_profile >"$tmp/stdout" 2>"$tmp/stderr" < "$tmp/input"
+  )
+  rc="$?"
+  set -e
+
+  [ "$rc" -eq 130 ] || {
+    sed -n '1,220p' "$tmp/stderr" >&2 || true
+    fail "pasted URL menu test exited with $rc, expected 130"
+  }
+  assert_file_contains "$tmp/stderr" "你可能把 API Base URL 粘到了菜单编号处"
+  assert_file_contains "$tmp/stderr" "URL 要在选择 2 之后再填写"
+  rm -rf "$tmp"
+}
+
+test_resume_rejects_invalid_api_base_before_fetch() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-resume-url.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home" "$tmp/state"
+  make_resume_lib "$RESUME" "$tmp/resume-lib.sh"
+  printf '5\nq\n' > "$tmp/input"
+
+  set +e
+  (
+    # shellcheck disable=SC1091
+    . "$tmp/resume-lib.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_FORCE_STDIN=1
+    STATE_DIR="$CODEX_HOME/install-state"
+    CONFIGS_DIR="$CODEX_HOME/api-profiles"
+    LAST_PROFILE_FILE="$CONFIGS_DIR/last-profile"
+    mkdir -p "$STATE_DIR" "$CONFIGS_DIR"
+    fetch_models() {
+      printf '%s\n' "fetch_models should not be called for invalid URL" >&2
+      return 99
+    }
+    create_third_party_profile >"$tmp/stdout" 2>"$tmp/stderr" < "$tmp/input"
+  )
+  rc="$?"
+  set -e
+
+  [ "$rc" -eq 130 ] || {
+    sed -n '1,220p' "$tmp/stderr" >&2 || true
+    fail "invalid API Base URL test exited with $rc, expected 130"
+  }
+  assert_file_contains "$tmp/stderr" "API Base URL 格式不对：5"
+  if grep -F "fetch_models should not be called" "$tmp/stderr" >/dev/null 2>&1; then
+    fail "invalid API Base URL reached fetch_models"
+  fi
+  rm -rf "$tmp"
+}
+
 run_step() {
   name="$1"
   (
@@ -139,7 +219,10 @@ run_step() {
 
 sh -n "$INSTALLER"
 sh -n "$BOOTSTRAP"
+sh -n "$RESUME"
 run_step test_print_download_plan_blank_notice_returns_zero
 run_step test_confirm_deps_choice_minimal_continues
 run_step test_bootstrap_continue_writes_consent
+run_step test_resume_menu_rejects_pasted_url_choice
+run_step test_resume_rejects_invalid_api_base_before_fetch
 printf 'OK: Codex for TUI installer smoke tests passed\n'

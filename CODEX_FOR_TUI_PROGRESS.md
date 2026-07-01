@@ -106,3 +106,43 @@
   - non-tty prompts writing to stderr
   - bootstrap respecting `CODEX_ZH_FORCE_STDIN`
   - `init.sh` warning on bootstrap failure instead of silently swallowing it
+
+## 2026-07-01 Local Config UX Regression Report
+
+- User tested `aac1fbf` and reported two local configuration UX problems after the Codex archive download finished:
+  - The transition into local configuration is not clear enough; the screen is not cleared, so the user has little sense that the flow moved from download/install into local setup.
+  - Menu choices are visually too dense, with no blank-line separation; the official-login and third-party-API choices are easy to confuse, and there is no obvious undo/back path.
+- Real failure path reported by user:
+  - At `请选择要新建的 Codex 配置`, the user pasted `https://api.krill-ai.com/v1` into the menu-number prompt.
+  - Current script treats every non-`1` input as third-party mode, so it did not reject the pasted URL.
+  - The next prompt read `5` as API Base URL, normalized it to `5/v1`, then attempted to fetch `5/v1/models`, which appeared stuck.
+- Required fix:
+  - Clear/visually separate local configuration stages.
+  - Only accept explicit menu choices.
+  - Warn when a URL is pasted into a menu-number prompt.
+  - Add back/exit choices where a user can reasonably recover.
+  - Validate API Base URL before fetching models.
+  - Add isolated shell tests covering the wrong-paste and invalid-URL paths before cloud APK build.
+
+## 2026-07-01 Local Config UX Fix
+
+- Updated `codex-local-resume.sh` and synced the APK asset copy.
+- Added stage clear/title output for local setup:
+  - `本地配置 1/2：启动提示词`
+  - `本地配置 2/2：选择 Codex 配置`
+  - `本地配置 2/2：新建 Codex 配置`
+  - `本地配置 2/2：第三方 Responses API`
+- Reworked menu layout with blank lines between choices.
+- Added strict menu validation: invalid text no longer falls through to third-party mode.
+- Added a specific warning if a URL is pasted into a menu-number prompt.
+- Added exit choices (`q`) and a back choice (`b`) from third-party API input to the config-type menu.
+- Added API Base URL validation before model fetching; values like `5` are rejected before any `/models` request.
+- Added isolated tests:
+  - Pasting `https://api.krill-ai.com/v1` at the config-type menu is rejected with the URL-paste warning.
+  - Entering `5` as API Base URL is rejected before `fetch_models` can run.
+- Local verification passed:
+  - `timeout 40s sh tests/codex-for-tui-installer-smoke.sh`
+  - `timeout 40s sh tests/codex-for-tui-installer-smoke.sh android-app/core/main/src/main/assets/install-reterminal-alpine.sh android-app/core/main/src/main/assets/codex-for-tui-bootstrap.sh android-app/core/main/src/main/assets/codex-local-resume.sh`
+  - `sh -n` for installer/bootstrap/init/resume scripts and test script
+  - `git diff --check`
+  - Source and APK asset `codex-local-resume.sh` copies match.

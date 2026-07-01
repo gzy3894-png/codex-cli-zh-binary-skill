@@ -23,9 +23,34 @@ die() { printf '错误: %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 lower() { tr '[:upper:]' '[:lower:]'; }
 is_root() { [ "${USER:-}" = "root" ] || [ "${UID:-}" = "0" ] || [ -w /etc/profile.d ]; }
+looks_like_url() {
+  case "$1" in
+    http://*|https://*|*://*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 tty_available() {
   [ "${CODEX_ZH_FORCE_STDIN:-0}" = "1" ] && return 1
   [ -r /dev/tty ] && [ -w /dev/tty ] && { : < /dev/tty; } 2>/dev/null
+}
+
+clear_screen() {
+  if tty_available && [ "${TERM:-}" != "dumb" ]; then
+    printf '\033[H\033[2J' > /dev/tty
+  else
+    printf '\n\n' >&2
+  fi
+}
+
+section_title() {
+  clear_screen
+  printf '\n%s\n' "======== $1 ========" >&2
+  printf '\n' >&2
+}
+
+exit_for_later() {
+  printf '\n%s\n' "已暂停配置。稍后重新打开 App，或运行 codex / codex-local-resume 继续。" >&2
+  exit 130
 }
 
 shell_quote() {
@@ -94,11 +119,43 @@ tty_read_api_key() {
   printf '%s' "$ans"
 }
 
+menu_read() {
+  prompt="$1"
+  default="$2"
+  allowed="$3"
+  hint="${4:-}"
+  while :; do
+    ans="$(tty_read "$prompt" "$default")"
+    ans_lc="$(printf '%s' "$ans" | lower)"
+    for item in $allowed; do
+      [ "$ans_lc" = "$item" ] && { printf '%s' "$ans_lc"; return 0; }
+    done
+    if looks_like_url "$ans_lc"; then
+      warn "你可能把 API Base URL 粘到了菜单编号处；请先选择对应编号，再填写 URL。"
+    else
+      warn "无效选项：$ans"
+    fi
+    [ -z "$hint" ] || printf '%s\n' "$hint" >&2
+    printf '\n' >&2
+  done
+}
+
 normalize_api_base() {
   printf '%s' "$1" | sed 's/[[:space:]]//g; s#/*$##' | awk '
     /\/v1$/ { print; next }
     { print $0 "/v1" }
   '
+}
+
+valid_api_base_input() {
+  cleaned="$(printf '%s' "$1" | sed 's/[[:space:]]//g')"
+  case "$cleaned" in
+    http://?*|https://?*) ;;
+    *) return 1 ;;
+  esac
+  host_path="$(printf '%s' "$cleaned" | sed 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##')"
+  host="$(printf '%s' "$host_path" | sed 's#[/?#].*##')"
+  [ -n "$host" ] && [ "$host" != "$host_path/" ]
 }
 
 parse_models() {
@@ -393,14 +450,17 @@ setup_agents_md_if_needed() {
     return
   fi
 
-  info "配置启动提示词 AGENTS.md"
+  section_title "本地配置 1/2：启动提示词"
   printf '%s\n' "请选择启动提示词：" >&2
-  printf '%s\n' "1. 默认 AGENTS.md：生成标准版系统提示词，每次启动自动带上" >&2
-  printf '%s\n' "2. 自定义 AGENTS.md：现在粘贴你的内容" >&2
-  choice="$(tty_read "请输入选项编号" "1")"
-  choice_lc="$(printf '%s' "$choice" | lower)"
+  printf '\n%s\n' "  1. 默认 AGENTS.md" >&2
+  printf '%s\n' "     生成标准版系统提示词，每次启动自动带上。" >&2
+  printf '\n%s\n' "  2. 自定义 AGENTS.md" >&2
+  printf '%s\n' "     现在粘贴你的内容，适合已有固定提示词。" >&2
+  printf '\n%s\n' "  q. 退出，稍后继续" >&2
+  printf '\n' >&2
+  choice_lc="$(menu_read "请输入选项编号" "1" "1 2 q" "可选：1 / 2 / q")"
   case "$choice_lc" in
-    2|custom|自定义)
+    2)
       info "请输入自定义 AGENTS.md 内容。单独输入一行 EOF 结束。"
       : > "$agents_file"
       while :; do
@@ -410,6 +470,7 @@ setup_agents_md_if_needed() {
       done
       [ -s "$agents_file" ] || write_standard_agents "$agents_file"
       ;;
+    q) exit_for_later ;;
     *) write_standard_agents "$agents_file" ;;
   esac
   cp "$agents_file" "$home_agents" 2>/dev/null || true
@@ -500,14 +561,15 @@ fetch_models_or_prompt() {
 
     warn "不会让你手填模型名，也不会清掉本地安装成果。"
     printf '%s\n' "请选择下一步：" >&2
-    printf '%s\n' "1. 重试获取模型列表" >&2
-    printf '%s\n' "2. 重新填写 API Base URL 和 API Key" >&2
-    printf '%s\n' "3. 退出，稍后再运行 codex 继续" >&2
-    choice="$(tty_read "请输入选项编号" "2")"
-    case "$(printf '%s' "$choice" | lower)" in
-      1|retry|重试) ;;
-      2|refill|重新填写|重填) return 2 ;;
-      *) return 1 ;;
+    printf '\n%s\n' "  1. 重试获取模型列表" >&2
+    printf '\n%s\n' "  2. 重新填写 API Base URL 和 API Key" >&2
+    printf '\n%s\n' "  q. 退出，稍后再运行 codex 继续" >&2
+    printf '\n' >&2
+    choice="$(menu_read "请输入选项编号" "2" "1 2 q" "可选：1 / 2 / q")"
+    case "$choice" in
+      1) ;;
+      2) return 2 ;;
+      q) return 1 ;;
     esac
   done
 }
@@ -526,14 +588,38 @@ create_third_party_profile() {
   mkdir -p "$work_dir"
 
   while :; do
+    section_title "本地配置 2/2：第三方 Responses API"
     raw_base="${CODEX_ZH_API_BASE:-}"
     api_key="${CODEX_ZH_API_KEY:-}"
-    [ -n "$raw_base" ] || raw_base="$(tty_read "请输入 API Base URL，例如 https://api.example.com 或 https://api.example.com/v1" "")"
+    if [ -z "$raw_base" ]; then
+      printf '%s\n' "请输入 API Base URL。" >&2
+      printf '%s\n' "示例：https://api.example.com 或 https://api.example.com/v1" >&2
+      printf '%s\n' "输入 b 返回配置类型选择；输入 q 退出，稍后继续。" >&2
+      printf '\n' >&2
+      raw_base="$(tty_read "API Base URL" "")"
+    fi
+    case "$(printf '%s' "$raw_base" | lower)" in
+      b|back|返回) return 2 ;;
+      q|quit|exit|退出) exit_for_later ;;
+    esac
+    if ! valid_api_base_input "$raw_base"; then
+      warn "API Base URL 格式不对：$raw_base"
+      warn "必须以 http:// 或 https:// 开头，例如 https://api.example.com/v1"
+      unset CODEX_ZH_API_BASE
+      printf '\n' >&2
+      continue
+    fi
     [ -n "$api_key" ] || api_key="$(tty_read_api_key "请输入 API Key")"
-    [ -n "$raw_base" ] || die "API Base URL 不能为空"
+    case "$(printf '%s' "$api_key" | lower)" in
+      b|back|返回) return 2 ;;
+      q|quit|exit|退出) exit_for_later ;;
+    esac
     [ -n "$api_key" ] || die "API Key 不能为空"
     api_base="$(normalize_api_base "$raw_base")"
-    info "规范化后的 API Base URL: $api_base"
+    printf '\n%s\n' "规范化后的 API Base URL: $api_base" >&2
+    printf '%s\n' "下一步会请求：$api_base/models" >&2
+    printf '%s\n' "如果网络或 Key 有问题，会返回重试/重填/退出菜单。" >&2
+    printf '\n' >&2
 
     models_file="$work_dir/models.txt"
     models_json="$work_dir/models.json"
@@ -543,7 +629,7 @@ create_third_party_profile() {
     else
       rc="$?"
     fi
-    [ "$rc" = "2" ] || return 1
+    [ "$rc" = "2" ] || exit_for_later
     unset CODEX_ZH_API_BASE CODEX_ZH_API_KEY
   done
 
@@ -591,7 +677,8 @@ select_or_create_profile() {
   default_choice=""
   count="$(wc -l < "$profiles_file" | tr -d ' ')"
   if [ "$count" -gt 0 ]; then
-    printf '\n%s\n' "请选择本次启动使用的 Codex 配置：" >&2
+    section_title "本地配置 2/2：选择 Codex 配置"
+    printf '%s\n' "请选择本次启动使用的 Codex 配置：" >&2
     i=1
     while [ "$i" -le "$count" ]; do
       d="$(sed -n "${i}p" "$profiles_file")"
@@ -602,30 +689,49 @@ select_or_create_profile() {
         mark="（上次使用）"
         default_choice="$i"
       fi
-      printf '%2s. %s [%s] %s\n' "$i" "$label" "$mode" "$mark" >&2
+      printf '\n%2s. %s [%s] %s\n' "$i" "$label" "$mode" "$mark" >&2
       i=$((i + 1))
     done
     new_choice=$((count + 1))
-    printf '%2s. 新建配置\n' "$new_choice" >&2
+    printf '\n%2s. 新建配置\n' "$new_choice" >&2
+    printf '\n%s\n' " q. 退出，稍后继续" >&2
+    printf '\n' >&2
     [ -n "$default_choice" ] || default_choice="$new_choice"
-    choice="$(tty_read "请输入选项编号" "$default_choice")"
-    case "$choice" in
-      *[!0-9]*|"") choice="$default_choice" ;;
-    esac
+    allowed="q"
+    i=1
+    while [ "$i" -le "$new_choice" ]; do allowed="$allowed $i"; i=$((i + 1)); done
+    choice="$(menu_read "请输入选项编号" "$default_choice" "$allowed" "请选择列表里的编号，或输入 q 退出。")"
+    [ "$choice" = "q" ] && exit_for_later
     if [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$count" ] 2>/dev/null; then
       apply_profile "$(sed -n "${choice}p" "$profiles_file")"
       return
     fi
   fi
 
-  printf '%s\n' "请选择要新建的 Codex 配置：" >&2
-  printf '%s\n' "1. 官方登录入口：进入 Codex 官方登录/API Key 流程，不写第三方 provider 配置" >&2
-  printf '%s\n' "2. 第三方 Responses API：输入 Base URL 和 API Key，自动拉取模型" >&2
-  mode="$(tty_read "请输入选项编号" "2")"
-  case "$(printf '%s' "$mode" | lower)" in
-    1|official|官方) create_official_profile ;;
-    *) create_third_party_profile ;;
-  esac
+  while :; do
+    section_title "本地配置 2/2：新建 Codex 配置"
+    printf '%s\n' "请选择要新建的 Codex 配置：" >&2
+    printf '\n%s\n' "  1. 官方登录入口" >&2
+    printf '%s\n' "     进入 Codex 官方登录/API Key 流程，不写第三方 provider 配置。" >&2
+    printf '\n%s\n' "  2. 第三方 Responses API" >&2
+    printf '%s\n' "     输入 Base URL 和 API Key，自动拉取模型。" >&2
+    printf '\n%s\n' "  q. 退出，稍后继续" >&2
+    printf '\n' >&2
+    mode="$(menu_read "请输入选项编号" "2" "1 2 q" "可选：1 / 2 / q。URL 要在选择 2 之后再填写。")"
+    case "$mode" in
+      1) create_official_profile; return ;;
+      2)
+        if create_third_party_profile; then
+          return
+        else
+          rc="$?"
+          [ "$rc" = "2" ] && continue
+          exit_for_later
+        fi
+        ;;
+      q) exit_for_later ;;
+    esac
+  done
 }
 
 persist_path() {
