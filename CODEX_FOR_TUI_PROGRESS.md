@@ -94,3 +94,15 @@
   - `timeout 40s sh tests/codex-for-tui-installer-smoke.sh android-app/core/main/src/main/assets/install-reterminal-alpine.sh android-app/core/main/src/main/assets/codex-for-tui-bootstrap.sh`
   - `sh -n` for installer/bootstrap/init/resume scripts and test script
   - `git diff --check`
+- Committed and pushed as `aac1fbf Fix Codex for TUI installer prompt flow`.
+- GitHub Actions run `28492990758` completed successfully. Cloud verification passed `Smoke test installer scripts` before Android build, then produced artifact `codex-for-tui-debug-apk` with artifact ID `7999942097` and uploaded zip size `25455529` bytes.
+- Downloaded artifact with a `60s` timeout in `17.3s`.
+- Current APK: `/workspace/apks/Codex-for-TUI-debug-aac1fbf.apk`
+- APK sha256: `0a2d8846fe31e06a7edf85a012dd8f2b6d5c6f4808a8305b40ddd588384be5e0`
+- APK contents verified to include `assets/codex-for-tui-bootstrap.sh`, `assets/install-reterminal-alpine.sh`, `assets/codex-local-resume.sh`, and `assets/init.sh`.
+- APK embedded script text verified to include:
+  - installer `print_download_plan` returning `0`
+  - installer `tty_read` using `tty_available`
+  - non-tty prompts writing to stderr
+  - bootstrap respecting `CODEX_ZH_FORCE_STDIN`
+  - `init.sh` warning on bootstrap failure instead of silently swallowing it
