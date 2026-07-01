@@ -229,6 +229,20 @@ Termux Codex, ReTerminal Codex, Alpine Codex, proot Codex,
 Codex 中文版, Codex CLI 中文版, Codex 汉化版, 手机 AI 编程终端
 ```
 
+## 社区
+
+Codex for TUI 的使用反馈、安装排错和改进建议可以优先在 GitHub Discussions 中交流：
+
+```text
+https://github.com/gzy3894-png/codex-cli-zh-binary-skill/discussions
+```
+
+也欢迎在 Linux Do 中文开发者社区继续交流移动端 Codex、Android 终端和第三方 Responses API 使用经验：
+
+```text
+https://linux.do
+```
+
 ## 致谢
 
 Codex for TUI 基于 ReTerminal 改造。感谢 ReTerminal 官方项目和作者 Rohit Kushvaha 提供 Android 终端、proot 和 Alpine 能力基础：
@@ -239,11 +253,7 @@ https://github.com/RohitKushvaha01/ReTerminal
 
 感谢 OpenAI Codex CLI 上游项目。本仓库只是围绕 Android 终端环境、中文构建和安装配置流程做整理与集成。
 
-也感谢 Linux Do 社区对移动端 Codex 使用、排错和改进方向的反馈：
-
-```text
-https://linux.do
-```
+也感谢 Linux Do 社区对移动端 Codex 使用、排错和改进方向的反馈。
 
 ## 许可与免责声明
 
