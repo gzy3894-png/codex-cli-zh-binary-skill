@@ -146,3 +146,18 @@
   - `sh -n` for installer/bootstrap/init/resume scripts and test script
   - `git diff --check`
   - Source and APK asset `codex-local-resume.sh` copies match.
+- Committed and pushed as `69b4565 Improve Codex for TUI local config UX`.
+- GitHub Actions run `28493681239` completed successfully:
+  - Cloud `Smoke test installer scripts` passed.
+  - Android debug APK build passed.
+- Downloaded artifact with `timeout 60s`; download completed in about 12 seconds.
+- Current APK: `/workspace/apks/Codex-for-TUI-debug-69b4565.apk`
+- APK sha256: `ee222bac36210376e8848120fe9c8e3192821920ae95049b48d8d09c42ba2dca`
+- APK integrity verified with `unzip -t`.
+- APK contents verified to include `assets/codex-for-tui-bootstrap.sh`, `assets/codex-local-resume.sh`, `assets/init.sh`, and `assets/install-reterminal-alpine.sh`.
+- APK embedded `assets/codex-local-resume.sh` verified to include:
+  - URL-paste warning at menu prompts.
+  - `API Base URL 格式不对` validation.
+  - `输入 b 返回配置类型选择`.
+  - `本地配置 2/2：新建 Codex 配置` stage title.
+- Note: one first `unzip -p` check was run in parallel with copying the APK into `/workspace/apks` and read the destination before the copy finished, producing a transient zip error. A sequential recheck immediately after confirmed the APK is valid and the source/destination SHA256 values match.
