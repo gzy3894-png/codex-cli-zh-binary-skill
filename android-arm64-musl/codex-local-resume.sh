@@ -139,6 +139,60 @@ current_profile_dir() {
   printf '%s\n' "$profile_dir"
 }
 
+config_model_provider() {
+  config_file="$1"
+  sed -n 's/^[[:space:]]*model_provider[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$config_file" | sed -n '1p'
+}
+
+config_model_catalog_path() {
+  config_file="$1"
+  sed -n 's/^[[:space:]]*model_catalog_json[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$config_file" | sed -n '1p'
+}
+
+config_provider_base_url() {
+  config_file="$1"
+  provider_id="$(config_model_provider "$config_file")"
+  [ -n "$provider_id" ] || return 1
+  awk -v provider_id="$provider_id" '
+    $0 ~ "^\\[model_providers\\." provider_id "\\]$" { in_section = 1; next }
+    in_section && /^\[/ { exit }
+    in_section && /^[[:space:]]*base_url[[:space:]]*=/ {
+      if (match($0, /"[^"]*"/)) {
+        value = substr($0, RSTART + 1, RLENGTH - 2)
+        print value
+      }
+      exit
+    }
+  ' "$config_file"
+}
+
+config_provider_requires_openai_auth() {
+  config_file="$1"
+  provider_id="$(config_model_provider "$config_file")"
+  [ -n "$provider_id" ] || return 1
+  awk -v provider_id="$provider_id" '
+    $0 ~ "^\\[model_providers\\." provider_id "\\]$" { in_section = 1; next }
+    in_section && /^\[/ { exit }
+    in_section && /^[[:space:]]*requires_openai_auth[[:space:]]*=/ {
+      value = $0
+      sub(/^[^=]*=[[:space:]]*/, "", value)
+      gsub(/[[:space:]]/, "", value)
+      print value
+      exit
+    }
+  ' "$config_file"
+}
+
+parse_model_catalog_models() {
+  catalog_file="$1"
+  [ -s "$catalog_file" ] || return 1
+  if have jq; then
+    jq -r '.models[]?.slug // empty' "$catalog_file" 2>/dev/null | sed '/^$/d'
+  else
+    sed -n 's/.*"slug"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$catalog_file" | sed '/^$/d'
+  fi
+}
+
 profile_models_source_file() {
   profile_dir="$1"
   if [ -s "$profile_dir/models.txt" ]; then
@@ -902,6 +956,63 @@ sync_current_profile() {
   chmod 600 "$profile_dir/config.toml" "$profile_dir/auth.json" "$(model_catalog_path "$profile_dir")" 2>/dev/null || true
 }
 
+import_current_live_third_party_profile_if_needed() {
+  current_dir="$(current_profile_dir 2>/dev/null || true)"
+  [ -n "$current_dir" ] && return 0
+  [ -s "$CODEX_HOME/config.toml" ] || return 0
+  [ -s "$CODEX_HOME/auth.json" ] || return 0
+
+  requires_auth="$(config_provider_requires_openai_auth "$CODEX_HOME/config.toml" 2>/dev/null || true)"
+  [ "$requires_auth" = "false" ] || return 0
+
+  api_base="$(config_provider_base_url "$CODEX_HOME/config.toml" 2>/dev/null || true)"
+  default_model="$(profile_default_model "$CODEX_HOME")"
+  api_key="$(read_auth_api_key "$CODEX_HOME/auth.json" 2>/dev/null || true)"
+  [ -n "$api_base" ] || return 0
+  [ -n "$default_model" ] || return 0
+  [ -n "$api_key" ] || return 0
+
+  default_name="$(printf '%s' "$api_base" | sed 's#^https\?://##; s#/v1$##; s#[/:]#-#g')"
+  slug="$(profile_slug "$default_name")"
+  profile_dir="$CONFIGS_DIR/$slug"
+  mkdir -p "$profile_dir"
+  chmod 700 "$profile_dir" 2>/dev/null || true
+
+  printf '%s\n' "$default_name" > "$profile_dir/name"
+  printf '%s\n' "third_party" > "$profile_dir/setup-mode"
+  printf '%s\n' "$api_base" > "$profile_dir/api-base"
+  printf '%s\n' "$default_model" > "$profile_dir/default-model"
+  cp "$CODEX_HOME/config.toml" "$profile_dir/config.toml"
+  cp "$CODEX_HOME/auth.json" "$profile_dir/auth.json"
+  copy_model_catalog_file "$CODEX_HOME" "$profile_dir"
+  if [ -x "$CODEX_HOME/bin/provider-api-key" ]; then
+    mkdir -p "$profile_dir/bin"
+    cp "$CODEX_HOME/bin/provider-api-key" "$profile_dir/bin/provider-api-key"
+    chmod 700 "$profile_dir/bin" "$profile_dir/bin/provider-api-key" 2>/dev/null || true
+  fi
+
+  models_tmp="$STATE_DIR/import-live-models.$$"
+  : > "$models_tmp"
+  catalog_path="$(config_model_catalog_path "$CODEX_HOME/config.toml" 2>/dev/null || true)"
+  if [ -n "$catalog_path" ] && [ -s "$catalog_path" ]; then
+    parse_model_catalog_models "$catalog_path" > "$models_tmp" 2>/dev/null || true
+  fi
+  if [ ! -s "$models_tmp" ] && [ -s "$(model_catalog_path "$CODEX_HOME")" ]; then
+    parse_model_catalog_models "$(model_catalog_path "$CODEX_HOME")" > "$models_tmp" 2>/dev/null || true
+  fi
+  if [ ! -s "$models_tmp" ] && [ -n "$default_model" ]; then
+    printf '%s\n' "$default_model" > "$models_tmp"
+  fi
+  cp "$models_tmp" "$profile_dir/models.txt"
+  cp "$models_tmp" "$profile_dir/enabled-models.txt"
+  rm -f "$models_tmp"
+
+  if profile_is_usable "$profile_dir"; then
+    basename "$profile_dir" > "$LAST_PROFILE_FILE"
+    warn "已自动接管当前 ~/.codex 第三方配置：$default_name"
+  fi
+}
+
 fetch_models_or_prompt() {
   api_base="$1"
   api_key="$2"
@@ -1067,6 +1178,77 @@ refresh_current_profile() {
   apply_profile "$profile_dir"
   rm -rf "$work_dir"
   info "已刷新当前配置：$profile_name"
+}
+
+auto_refresh_current_profile_on_start() {
+  [ "${CODEX_ZH_AUTO_REFRESH_CURRENT_PROFILE:-1}" = "0" ] && return 0
+
+  mkdir -p "$CODEX_HOME" "$STATE_DIR" "$CONFIGS_DIR"
+  chmod 700 "$CODEX_HOME" "$STATE_DIR" "$CONFIGS_DIR" 2>/dev/null || true
+  import_current_live_third_party_profile_if_needed
+  sync_current_profile
+
+  profile_dir="$(current_profile_dir 2>/dev/null || true)"
+  [ -n "$profile_dir" ] || return 0
+  [ "$(profile_mode "$profile_dir")" = "third_party" ] || return 0
+
+  profile_name="$(profile_label "$profile_dir")"
+  api_base="$(profile_api_base "$profile_dir")"
+  api_key="$(read_auth_api_key "$profile_dir/auth.json" 2>/dev/null || true)"
+  current_default="$(profile_default_model "$profile_dir")"
+  [ -n "$api_base" ] || return 0
+  [ -n "$api_key" ] || return 0
+
+  work_dir="$STATE_DIR/auto-refresh-profile"
+  rm -rf "$work_dir"
+  mkdir -p "$work_dir"
+  models_file="$work_dir/models.txt"
+  models_json="$work_dir/models.json"
+  models_err="$work_dir/models.err"
+  enabled_file="$work_dir/enabled-models.txt"
+
+  printf '%s\n' "启动前正在同步当前第三方配置：$profile_name" >&2
+  printf '%s\n' "正在请求模型列表：$api_base/models" >&2
+  printf '\n' >&2
+  : > "$models_file"
+  : > "$models_err"
+  if ! fetch_models "$api_base" "$api_key" "$models_json" "$models_err"; then
+    warn "启动前自动同步失败，继续使用现有配置：$profile_name"
+    [ ! -s "$models_err" ] || sed -n '1,12p' "$models_err" >&2 || true
+    rm -rf "$work_dir"
+    return 0
+  fi
+
+  parse_models "$models_json" > "$models_file"
+  if [ ! -s "$models_file" ]; then
+    warn "启动前自动同步未解析到任何模型，继续使用现有配置：$profile_name"
+    [ ! -s "$models_json" ] || sed -n '1,12p' "$models_json" >&2 || true
+    rm -rf "$work_dir"
+    return 0
+  fi
+
+  preserve_enabled_models "$profile_dir/enabled-models.txt" "$models_file" "$enabled_file"
+  default_model="$(pick_refreshed_default_model "$current_default" "$enabled_file" "$models_file")"
+  [ -n "$default_model" ] || default_model="$current_default"
+  [ -n "$default_model" ] || default_model="$(sed -n '1p' "$models_file" 2>/dev/null || true)"
+  [ -n "$default_model" ] || {
+    rm -rf "$work_dir"
+    return 0
+  }
+  if ! list_has_line "$default_model" "$enabled_file"; then
+    printf '%s\n' "$default_model" >> "$enabled_file"
+  fi
+
+  printf '%s\n' "$profile_name" > "$profile_dir/name"
+  printf '%s\n' "third_party" > "$profile_dir/setup-mode"
+  printf '%s\n' "$api_base" > "$profile_dir/api-base"
+  printf '%s\n' "$default_model" > "$profile_dir/default-model"
+  cp "$models_file" "$profile_dir/models.txt"
+  cp "$enabled_file" "$profile_dir/enabled-models.txt"
+  write_codex_config "$api_base" "$api_key" "$default_model" "$models_file" "$profile_dir"
+  apply_profile "$profile_dir"
+  rm -rf "$work_dir"
+  info "启动前已同步当前配置：$profile_name"
 }
 
 create_official_profile() {
@@ -1673,6 +1855,7 @@ main() {
         info "Codex 本地安装未完成，进入续装流程。"
         run_local_setup
       else
+        auto_refresh_current_profile_on_start
         select_or_create_profile
       fi
       ;;

@@ -630,6 +630,113 @@ test_resume_refresh_current_profile_updates_current_third_party_profile() {
   rm -rf "$tmp"
 }
 
+test_resume_imports_current_live_third_party_config_when_profiles_missing() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-resume-import-live.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.codex/install-state" "$tmp/home/.codex/bin" "$tmp/home/.codex/api-profiles"
+  make_resume_lib "$RESUME" "$tmp/resume-lib.sh"
+  cat > "$tmp/home/.codex/config.toml" <<EOF
+model_catalog_json = "$tmp/home/.codex/model_catalog.json"
+model_provider = "custom"
+model = "gpt-5.5"
+
+[model_providers.custom]
+name = "custom"
+base_url = "https://api.krill.example.com/v1"
+wire_api = "responses"
+requires_openai_auth = false
+
+[model_providers.custom.auth]
+command = "$tmp/home/.codex/bin/provider-api-key"
+args = []
+timeout_ms = 5000
+refresh_interval_ms = 300000
+cwd = "$tmp/home/.codex"
+EOF
+  printf '%s\n' '{"OPENAI_API_KEY":"sk-live"}' > "$tmp/home/.codex/auth.json"
+  cat > "$tmp/home/.codex/model_catalog.json" <<'EOF'
+{
+  "models": [
+    {"slug":"gpt-5.5"},
+    {"slug":"deepseek-v4-flash:free"}
+  ]
+}
+EOF
+  printf '#!/usr/bin/env sh\nprintf %s sk-live\n' > "$tmp/home/.codex/bin/provider-api-key"
+  chmod +x "$tmp/home/.codex/bin/provider-api-key"
+
+  (
+    # shellcheck disable=SC1091
+    . "$tmp/resume-lib.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    STATE_DIR="$CODEX_HOME/install-state"
+    CONFIGS_DIR="$CODEX_HOME/api-profiles"
+    LAST_PROFILE_FILE="$CONFIGS_DIR/last-profile"
+    import_current_live_third_party_profile_if_needed >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || fail "import_current_live_third_party_profile_if_needed should succeed"
+
+  profile_dir="$tmp/home/.codex/api-profiles/api.krill.example.com"
+  [ "$(sed -n '1p' "$tmp/home/.codex/api-profiles/last-profile")" = "api.krill.example.com" ] || fail "live config was not imported as current profile"
+  [ -s "$profile_dir/config.toml" ] || fail "imported profile config.toml missing"
+  [ -s "$profile_dir/auth.json" ] || fail "imported profile auth.json missing"
+  assert_file_contains "$profile_dir/models.txt" "gpt-5.5"
+  assert_file_contains "$profile_dir/models.txt" "deepseek-v4-flash:free"
+  [ -x "$profile_dir/bin/provider-api-key" ] || fail "imported profile helper missing"
+  rm -rf "$tmp"
+}
+
+test_resume_auto_refresh_on_start_updates_current_profile_without_manual_command() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-resume-auto-refresh.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.codex/api-profiles/krill" "$tmp/home/.codex/install-state" "$tmp/home/.codex/bin"
+  make_resume_lib "$RESUME" "$tmp/resume-lib.sh"
+  profile_dir="$tmp/home/.codex/api-profiles/krill"
+  printf 'Krill\n' > "$profile_dir/name"
+  printf 'third_party\n' > "$profile_dir/setup-mode"
+  printf 'https://api.krill.example.com/v1\n' > "$profile_dir/api-base"
+  printf 'gpt-5.5\n' > "$profile_dir/default-model"
+  printf 'gpt-5.5\nlegacy-only\n' > "$profile_dir/models.txt"
+  printf 'gpt-5.5\nlegacy-only\n' > "$profile_dir/enabled-models.txt"
+  printf '%s\n' '{"OPENAI_API_KEY":"sk-auto"}' > "$profile_dir/auth.json"
+  printf 'krill\n' > "$tmp/home/.codex/api-profiles/last-profile"
+
+  (
+    # shellcheck disable=SC1091
+    . "$tmp/resume-lib.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    STATE_DIR="$CODEX_HOME/install-state"
+    CONFIGS_DIR="$CODEX_HOME/api-profiles"
+    LAST_PROFILE_FILE="$CONFIGS_DIR/last-profile"
+    fetch_models() {
+      cat > "$3" <<'EOF'
+{
+  "data": [
+    {"id":"gpt-5.5"},
+    {"id":"deepseek-v4-flash:free"},
+    {"id":"codex-auto-review"}
+  ]
+}
+EOF
+      : > "$4"
+      return 0
+    }
+    auto_refresh_current_profile_on_start >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || {
+    sed -n '1,200p' "$tmp/stderr" >&2 || true
+    fail "auto_refresh_current_profile_on_start should succeed"
+  }
+
+  assert_file_contains "$tmp/stderr" "启动前正在同步当前第三方配置：Krill"
+  assert_file_contains "$profile_dir/model_catalog.json" '"slug": "deepseek-v4-flash:free"'
+  assert_file_contains "$profile_dir/model_catalog.json" '"slug": "codex-auto-review"'
+  assert_file_not_contains "$profile_dir/enabled-models.txt" "legacy-only"
+  assert_file_contains "$tmp/home/.codex/config.toml" 'model = "gpt-5.5"'
+  assert_file_contains "$tmp/home/.codex/model_catalog.json" '"slug": "codex-auto-review"'
+  rm -rf "$tmp"
+}
+
 test_resume_fetch_models_or_prompt_prints_progress() {
   tmp="${TMPDIR:-/tmp}/codex-tui-test-resume-fetch-progress.$$"
   rm -rf "$tmp"
@@ -775,6 +882,8 @@ run_step test_resume_delete_profile_clears_active_copy
 run_step test_resume_all_done_cleanup_preserves_model_catalog
 run_step test_resume_status_accepts_model_catalog_config
 run_step test_resume_refresh_current_profile_updates_current_third_party_profile
+run_step test_resume_imports_current_live_third_party_config_when_profiles_missing
+run_step test_resume_auto_refresh_on_start_updates_current_profile_without_manual_command
 run_step test_resume_fetch_models_or_prompt_prints_progress
 run_step test_resume_apply_profile_repairs_missing_catalog_before_switch
 run_step test_resume_select_menu_skips_broken_profiles
