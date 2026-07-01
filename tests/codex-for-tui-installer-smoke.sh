@@ -376,6 +376,7 @@ EOF
   assert_file_contains "$catalog" '"slug": "deepseek-v4-flash:free"'
   assert_file_contains "$catalog" '"default_reasoning_level": "medium"'
   assert_file_contains "$catalog" '"effort":"xhigh"'
+  assert_file_contains "$catalog" '"experimental_supported_tools": []'
   [ "$("$helper")" = "sk-test-token" ] || fail "provider auth helper did not read auth.json"
   rm -rf "$tmp"
 }
@@ -475,6 +476,7 @@ test_resume_edit_third_party_profile_updates_provider_config() {
   assert_file_contains "$catalog" '"slug": "gpt-new"'
   assert_file_contains "$catalog" '"slug": "deepseek-v4-flash:free"'
   assert_file_contains "$catalog" '"default_reasoning_level": "medium"'
+  assert_file_contains "$catalog" '"experimental_supported_tools": []'
   [ "$("$helper")" = "sk-old-token" ] || fail "edited profile did not preserve existing API key when left blank"
   rm -rf "$tmp"
 }
@@ -619,11 +621,98 @@ test_resume_refresh_current_profile_updates_current_third_party_profile() {
   assert_file_not_contains "$profile_dir/enabled-models.txt" "legacy-only"
   [ "$(sed -n '1p' "$profile_dir/default-model")" = "deepseek-old" ] || fail "default model should be preserved when still available"
   assert_file_contains "$profile_dir/model_catalog.json" '"slug": "gpt-5.5"'
+  assert_file_contains "$profile_dir/model_catalog.json" '"experimental_supported_tools": []'
   assert_file_contains "$profile_dir/config.toml" 'model = "deepseek-old"'
   assert_file_contains "$profile_dir/config.toml" '"gpt-5.5" = 4'
   [ "$("$profile_dir/bin/provider-api-key")" = "sk-krill-old" ] || fail "refresh should preserve existing API key"
   assert_file_contains "$tmp/home/.codex/config.toml" 'model = "deepseek-old"'
   assert_file_contains "$tmp/home/.codex/model_catalog.json" '"slug": "new-only"'
+  rm -rf "$tmp"
+}
+
+test_resume_fetch_models_or_prompt_prints_progress() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-resume-fetch-progress.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp"
+  make_resume_lib "$RESUME" "$tmp/resume-lib.sh"
+
+  (
+    # shellcheck disable=SC1091
+    . "$tmp/resume-lib.sh"
+    fetch_models() {
+      cat > "$3" <<'EOF'
+{"data":[{"id":"gpt-5.5"}]}
+EOF
+      : > "$4"
+      return 0
+    }
+    fetch_models_or_prompt "https://api.krill.example.com/v1" "sk-test" "$tmp/models.txt" "$tmp/models.json" "$tmp/models.err" >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || fail "fetch_models_or_prompt should succeed with stubbed fetch_models"
+
+  assert_file_contains "$tmp/stderr" "正在请求模型列表：https://api.krill.example.com/v1/models"
+  assert_file_contains "$tmp/models.txt" "gpt-5.5"
+  rm -rf "$tmp"
+}
+
+test_resume_apply_profile_repairs_missing_catalog_before_switch() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-resume-repair-profile.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.codex/api-profiles/krill" "$tmp/home/.codex/install-state" "$tmp/bin"
+  make_resume_lib "$RESUME" "$tmp/resume-lib.sh"
+  profile_dir="$tmp/home/.codex/api-profiles/krill"
+  printf 'Krill\n' > "$profile_dir/name"
+  printf 'third_party\n' > "$profile_dir/setup-mode"
+  printf 'https://api.krill.example.com/v1\n' > "$profile_dir/api-base"
+  printf 'gpt-5.5\n' > "$profile_dir/default-model"
+  printf 'gpt-5.5\ndeepseek-v4-flash:free\n' > "$profile_dir/models.txt"
+  printf 'gpt-5.5\ndeepseek-v4-flash:free\n' > "$profile_dir/enabled-models.txt"
+  printf '%s\n' '{"OPENAI_API_KEY":"sk-krill-old"}' > "$profile_dir/auth.json"
+
+  (
+    # shellcheck disable=SC1091
+    . "$tmp/resume-lib.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    INSTALL_DIR="$tmp/bin"
+    STATE_DIR="$CODEX_HOME/install-state"
+    CONFIGS_DIR="$CODEX_HOME/api-profiles"
+    LAST_PROFILE_FILE="$CONFIGS_DIR/last-profile"
+    apply_profile "$profile_dir" >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || {
+    sed -n '1,200p' "$tmp/stderr" >&2 || true
+    fail "apply_profile should repair missing third-party catalog before switching"
+  }
+
+  assert_file_contains "$profile_dir/model_catalog.json" '"experimental_supported_tools": []'
+  [ -x "$profile_dir/bin/provider-api-key" ] || fail "repaired profile should recreate provider helper"
+  assert_file_contains "$tmp/home/.codex/model_catalog.json" '"slug": "gpt-5.5"'
+  rm -rf "$tmp"
+}
+
+test_resume_select_menu_skips_broken_profiles() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-resume-skip-broken.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.codex/api-profiles/broken" "$tmp/home/.codex/install-state"
+  make_resume_lib "$RESUME" "$tmp/resume-lib.sh"
+  printf 'Broken\n' > "$tmp/home/.codex/api-profiles/broken/name"
+  printf 'third_party\n' > "$tmp/home/.codex/api-profiles/broken/setup-mode"
+  printf 'q\n' > "$tmp/input"
+
+  (
+    # shellcheck disable=SC1091
+    . "$tmp/resume-lib.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_FORCE_STDIN=1
+    STATE_DIR="$CODEX_HOME/install-state"
+    CONFIGS_DIR="$CODEX_HOME/api-profiles"
+    LAST_PROFILE_FILE="$CONFIGS_DIR/last-profile"
+    select_or_create_profile >"$tmp/stdout" 2>"$tmp/stderr" < "$tmp/input"
+  ) && fail "select_or_create_profile should exit when user chooses q" || rc="$?"
+
+  [ "$rc" = "130" ] || fail "expected exit_for_later status 130, got $rc"
+  assert_file_contains "$tmp/stderr" "已从启动列表跳过"
+  assert_file_not_contains "$tmp/stderr" "Broken [third_party]"
   rm -rf "$tmp"
 }
 
@@ -686,5 +775,8 @@ run_step test_resume_delete_profile_clears_active_copy
 run_step test_resume_all_done_cleanup_preserves_model_catalog
 run_step test_resume_status_accepts_model_catalog_config
 run_step test_resume_refresh_current_profile_updates_current_third_party_profile
+run_step test_resume_fetch_models_or_prompt_prints_progress
+run_step test_resume_apply_profile_repairs_missing_catalog_before_switch
+run_step test_resume_select_menu_skips_broken_profiles
 run_step test_resume_refresh_current_profile_noops_for_official_profile
 printf 'OK: Codex for TUI installer smoke tests passed\n'

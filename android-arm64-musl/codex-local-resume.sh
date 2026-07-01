@@ -139,6 +139,78 @@ current_profile_dir() {
   printf '%s\n' "$profile_dir"
 }
 
+profile_models_source_file() {
+  profile_dir="$1"
+  if [ -s "$profile_dir/models.txt" ]; then
+    printf '%s\n' "$profile_dir/models.txt"
+    return 0
+  fi
+  if [ -s "$profile_dir/enabled-models.txt" ]; then
+    printf '%s\n' "$profile_dir/enabled-models.txt"
+    return 0
+  fi
+  return 1
+}
+
+ensure_third_party_profile_usable() {
+  profile_dir="$1"
+  [ -d "$profile_dir" ] || return 1
+  [ "$(profile_mode "$profile_dir")" = "third_party" ] || return 0
+
+  api_base="$(profile_api_base "$profile_dir")"
+  api_key="$(read_auth_api_key "$profile_dir/auth.json" 2>/dev/null || true)"
+  models_source="$(profile_models_source_file "$profile_dir" 2>/dev/null || true)"
+  default_model="$(profile_default_model "$profile_dir")"
+
+  [ -n "$api_base" ] || return 1
+  [ -n "$api_key" ] || return 1
+  [ -n "$models_source" ] || return 1
+  [ -n "$default_model" ] || default_model="$(sed -n '1p' "$models_source" 2>/dev/null || true)"
+  [ -n "$default_model" ] || return 1
+
+  if [ ! -s "$profile_dir/models.txt" ]; then
+    cp "$models_source" "$profile_dir/models.txt"
+    models_source="$profile_dir/models.txt"
+  fi
+  if [ ! -s "$profile_dir/enabled-models.txt" ]; then
+    cp "$models_source" "$profile_dir/enabled-models.txt"
+  fi
+  if ! list_has_line "$default_model" "$profile_dir/models.txt"; then
+    printf '%s\n' "$default_model" >> "$profile_dir/models.txt"
+  fi
+  if ! list_has_line "$default_model" "$profile_dir/enabled-models.txt"; then
+    printf '%s\n' "$default_model" >> "$profile_dir/enabled-models.txt"
+  fi
+
+  needs_rebuild=0
+  [ -s "$profile_dir/config.toml" ] || needs_rebuild=1
+  [ -s "$(model_catalog_path "$profile_dir")" ] || [ -s "$(legacy_model_catalog_path "$profile_dir")" ] || needs_rebuild=1
+  [ -x "$profile_dir/bin/provider-api-key" ] || needs_rebuild=1
+  if [ "$needs_rebuild" = "1" ]; then
+    write_codex_config "$api_base" "$api_key" "$default_model" "$profile_dir/models.txt" "$profile_dir"
+  fi
+
+  chmod 700 "$profile_dir" "$profile_dir/bin" 2>/dev/null || true
+  chmod 600 "$profile_dir/config.toml" "$profile_dir/auth.json" "$profile_dir/models.txt" "$profile_dir/enabled-models.txt" "$(model_catalog_path "$profile_dir")" 2>/dev/null || true
+  chmod 700 "$profile_dir/bin/provider-api-key" 2>/dev/null || true
+  return 0
+}
+
+profile_is_usable() {
+  profile_dir="$1"
+  case "$(profile_mode "$profile_dir")" in
+    official)
+      [ -s "$profile_dir/setup-mode" ]
+      ;;
+    third_party)
+      ensure_third_party_profile_usable "$profile_dir"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 list_has_line() {
   value="$1"
   list_file="$2"
@@ -571,6 +643,8 @@ write_model_catalog() {
       "base_instructions": "",
       "model_messages": null,
       "supports_reasoning_summaries": true,
+      "effective_context_window_percent": 95,
+      "experimental_supported_tools": [],
       "supports_search_tool": true,
       "use_responses_lite": false
     }
@@ -772,6 +846,7 @@ apply_profile() {
     chmod 600 "$CODEX_HOME/config.toml" "$CODEX_HOME/auth.json" 2>/dev/null || true
   else
     migrate_third_party_profile_if_needed "$profile_dir"
+    ensure_third_party_profile_usable "$profile_dir" || die "第三方配置缺少必要文件，无法启用：$profile_dir。请到“管理已有配置”里删除后重建。"
     [ -s "$profile_dir/config.toml" ] || die "配置缺少 config.toml：$profile_dir"
     [ -s "$profile_dir/auth.json" ] || die "配置缺少 auth.json：$profile_dir"
     cp "$profile_dir/config.toml" "$CODEX_HOME/config.toml"
@@ -835,6 +910,9 @@ fetch_models_or_prompt() {
   models_err="$5"
 
   while :; do
+    printf '%s\n' "正在请求模型列表：$api_base/models" >&2
+    printf '%s\n' "网络较慢时这一步可能需要几十秒，请稍候..." >&2
+    printf '\n' >&2
     : > "$models_file"
     : > "$models_err"
     if fetch_models "$api_base" "$api_key" "$models_json" "$models_err"; then
@@ -1120,7 +1198,11 @@ manage_existing_profiles() {
     i=1
     while [ "$i" -le "$count" ]; do
       d="$(sed -n "${i}p" "$profiles_file")"
-      printf '\n%2s. %s [%s]\n' "$i" "$(profile_label "$d")" "$(profile_mode "$d")" >&2
+      suffix=""
+      if ! profile_is_usable "$d"; then
+        suffix="（配置缺失，启动时已跳过）"
+      fi
+      printf '\n%2s. %s [%s] %s\n' "$i" "$(profile_label "$d")" "$(profile_mode "$d")" "$suffix" >&2
       i=$((i + 1))
     done
     printf '\n%s\n' " b. 返回上一层" >&2
@@ -1138,11 +1220,19 @@ manage_existing_profiles() {
 
     profile_dir="$(sed -n "${choice}p" "$profiles_file")"
     mode="$(profile_mode "$profile_dir")"
+    usable=1
+    if profile_is_usable "$profile_dir"; then
+      usable=0
+    fi
     while :; do
       section_title "本地配置 2/2：管理 $(profile_label "$profile_dir")"
-      printf '%s\n' "类型：$mode" >&2
-      printf '\n%s\n' "  1. 直接切换到这个配置" >&2
-      if [ "$mode" = "third_party" ]; then
+      if [ "$usable" = "0" ]; then
+        printf '%s\n' "类型：$mode" >&2
+        printf '\n%s\n' "  1. 直接切换到这个配置" >&2
+      else
+        printf '%s\n' "类型：$mode（当前缺少必要文件）" >&2
+      fi
+      if [ "$mode" = "third_party" ] && [ "$usable" = "0" ]; then
         printf '\n%s\n' "  2. 编辑供应商配置（Base URL / API Key / 模型列表 / 默认模型）" >&2
         printf '\n%s\n' "  3. 删除这个配置" >&2
         printf '\n%s\n' "  b. 返回配置列表" >&2
@@ -1167,7 +1257,7 @@ manage_existing_profiles() {
           b) break ;;
           q) exit_for_later ;;
         esac
-      else
+      elif [ "$usable" = "0" ]; then
         printf '\n%s\n' "  2. 删除这个配置" >&2
         printf '\n%s\n' "  b. 返回配置列表" >&2
         printf '%s\n' "  q. 退出，稍后继续" >&2
@@ -1176,6 +1266,21 @@ manage_existing_profiles() {
         case "$action" in
           1) apply_profile "$profile_dir"; return 10 ;;
           2)
+            delete_profile "$profile_dir" || true
+            return 0
+            ;;
+          b) break ;;
+          q) exit_for_later ;;
+        esac
+      else
+        printf '%s\n' "这个配置缺少必要文件，暂时不能直接启用。" >&2
+        printf '\n%s\n' "  1. 删除这个配置" >&2
+        printf '\n%s\n' "  b. 返回配置列表" >&2
+        printf '%s\n' "  q. 退出，稍后继续" >&2
+        printf '\n' >&2
+        action="$(menu_read "请输入选项编号" "1" "1 b q" "可选：1 / b / q")"
+        case "$action" in
+          1)
             delete_profile "$profile_dir" || true
             return 0
             ;;
@@ -1271,19 +1376,34 @@ select_or_create_profile() {
   sync_current_profile
 
   while :; do
+    all_profiles_file="$STATE_DIR/all-profiles.txt"
     profiles_file="$STATE_DIR/profiles.txt"
+    broken_profiles_file="$STATE_DIR/broken-profiles.txt"
+    : > "$all_profiles_file"
     : > "$profiles_file"
+    : > "$broken_profiles_file"
     for d in "$CONFIGS_DIR"/*; do
       [ -d "$d" ] || continue
       [ -s "$d/setup-mode" ] || continue
-      printf '%s\n' "$d" >> "$profiles_file"
+      printf '%s\n' "$d" >> "$all_profiles_file"
+      if profile_is_usable "$d"; then
+        printf '%s\n' "$d" >> "$profiles_file"
+      else
+        printf '%s\n' "$d" >> "$broken_profiles_file"
+      fi
     done
 
     last_slug="$(sed -n '1p' "$LAST_PROFILE_FILE" 2>/dev/null || true)"
     default_choice=""
+    all_count="$(wc -l < "$all_profiles_file" | tr -d ' ')"
     count="$(wc -l < "$profiles_file" | tr -d ' ')"
+    broken_count="$(wc -l < "$broken_profiles_file" | tr -d ' ')"
     if [ "$count" -gt 0 ]; then
       section_title "本地配置 2/2：选择 Codex 配置"
+      if [ "$broken_count" -gt 0 ]; then
+        warn "已跳过 $broken_count 个缺少必要文件的本地配置；可进入“管理已有配置”删除。"
+        printf '\n' >&2
+      fi
       printf '%s\n' "请选择本次启动使用的 Codex 配置：" >&2
       i=1
       while [ "$i" -le "$count" ]; do
@@ -1315,7 +1435,7 @@ select_or_create_profile() {
         return
       fi
       if [ "$choice" = "$manage_choice" ]; then
-        if manage_existing_profiles "$profiles_file" "$count"; then
+        if manage_existing_profiles "$all_profiles_file" "$all_count"; then
           continue
         else
           rc="$?"
@@ -1326,14 +1446,25 @@ select_or_create_profile() {
     fi
 
     section_title "本地配置 2/2：新建 Codex 配置"
+    if [ "$broken_count" -gt 0 ]; then
+      warn "检测到 $broken_count 个缺少必要文件的本地配置；已从启动列表跳过。"
+      printf '\n' >&2
+    fi
     printf '%s\n' "请选择要新建的 Codex 配置：" >&2
     printf '\n%s\n' "  1. 官方登录入口" >&2
     printf '%s\n' "     进入 Codex 官方登录/API Key 流程，不写第三方 provider 配置。" >&2
     printf '\n%s\n' "  2. 第三方 Responses API" >&2
     printf '%s\n' "     输入 Base URL 和 API Key，自动拉取模型。" >&2
+    if [ "$all_count" -gt 0 ]; then
+      printf '\n%s\n' "  3. 管理已有配置" >&2
+    fi
     printf '\n%s\n' "  q. 退出，稍后继续" >&2
     printf '\n' >&2
-    mode="$(menu_read "请输入选项编号" "2" "1 2 q" "可选：1 / 2 / q。URL 要在选择 2 之后再填写。")"
+    if [ "$all_count" -gt 0 ]; then
+      mode="$(menu_read "请输入选项编号" "2" "1 2 3 q" "可选：1 / 2 / 3 / q。URL 要在选择 2 之后再填写。")"
+    else
+      mode="$(menu_read "请输入选项编号" "2" "1 2 q" "可选：1 / 2 / q。URL 要在选择 2 之后再填写。")"
+    fi
     case "$mode" in
       1) create_official_profile; return ;;
       2)
@@ -1342,6 +1473,15 @@ select_or_create_profile() {
         else
           rc="$?"
           [ "$rc" = "2" ] && continue
+          exit_for_later
+        fi
+        ;;
+      3)
+        if manage_existing_profiles "$all_profiles_file" "$all_count"; then
+          continue
+        else
+          rc="$?"
+          [ "$rc" = "10" ] && return
           exit_for_later
         fi
         ;;

@@ -861,6 +861,8 @@ write_model_catalog() {
       "base_instructions": "",
       "model_messages": null,
       "supports_reasoning_summaries": true,
+      "effective_context_window_percent": 95,
+      "experimental_supported_tools": [],
       "supports_search_tool": true,
       "use_responses_lite": false
     }
