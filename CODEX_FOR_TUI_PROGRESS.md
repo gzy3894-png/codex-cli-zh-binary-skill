@@ -161,3 +161,35 @@
   - `输入 b 返回配置类型选择`.
   - `本地配置 2/2：新建 Codex 配置` stage title.
 - Note: one first `unzip -p` check was run in parallel with copying the APK into `/workspace/apks` and read the destination before the copy finished, producing a transient zip error. A sequential recheck immediately after confirmed the APK is valid and the source/destination SHA256 values match.
+
+## 2026-07-01 Formal Release `codex-for-tui-v1.0.0`
+
+- Updated the repository README to focus on Codex for TUI in Chinese:
+  - Explains what the app is and who it is for.
+  - Lists only relevant advantages: Alpine environment, guided install, API/model setup, resume/back/exit flow, terminal-friendly interaction, and Codex command aliases.
+  - Adds first-use steps, network notes, repository structure, build/verification notes, upstream attribution, license, and disclaimer.
+- Updated `android-app/README.md` to a concise Chinese app-source overview.
+- Changed app version name to `1.0.0`; package remains `com.gzy3894.codexfortui`, versionCode remains `10`.
+- Changed GitHub Actions Android build from debug APK to release APK:
+  - Artifact name: `codex-for-tui-release-apk`
+  - Gradle task: `:app:assembleRelease`
+  - Release signing uses configured release signing when available, otherwise falls back to the repository testkey so Actions can produce an installable formal package.
+- Local script verification passed:
+  - `timeout 40s sh tests/codex-for-tui-installer-smoke.sh`
+  - `git diff --check`
+- Committed and pushed as `d70702f Prepare Codex for TUI release`.
+- GitHub Actions run `28494113744` completed successfully:
+  - Cloud `Smoke test installer scripts` passed.
+  - Android release APK build passed.
+- Downloaded release artifact with `timeout 60s`; the artifact download completed, but a follow-up `find -ls` listing failed because BusyBox `find` does not support `-ls`. Rechecked with `ls` and confirmed the downloaded file exists.
+- Current formal APK: `/workspace/apks/Codex-for-TUI-1.0.0.apk`
+- APK SHA256: `ed24e750df4aa6022ac909927d211c6584b47e7c90fe835e18bd2ae823cb9126`
+- APK integrity verified with `unzip -t`.
+- APK contents verified to include the bootstrap, installer, local resume, and init scripts.
+- APK embedded `assets/codex-local-resume.sh` verified to include the local-config UX fixes from `69b4565`.
+- Created GitHub Release:
+  - URL: `https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v1.0.0`
+  - Tag: `codex-for-tui-v1.0.0`
+  - Target commit: `d70702f9c58fbc95490f8c1121e0aadd0d882eb8`
+  - Asset: `Codex-for-TUI-1.0.0.apk`
+  - Asset size: `22924135` bytes
