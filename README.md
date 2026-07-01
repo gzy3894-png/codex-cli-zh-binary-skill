@@ -1,260 +1,114 @@
-# Codex CLI 中文二进制替换技能
+# Codex for TUI
 
-这是一个 Codex CLI 汉化项目 / 中文汉化 Skill，面向 Windows 上通过 npm 安装的 OpenAI Codex CLI。它用预编译的中文 `codex.exe` 接管当前 npm wrapper，适合想把本机 `codex` 命令切到 Codex 中文版、但不想重新编译源码的场景。
+Codex for TUI 是一个面向 Android 的 Codex 终端应用。它基于 ReTerminal 改造，打开后进入 Alpine 环境，并引导用户完成 Codex 中文版的安装、依赖准备和 API 配置。
 
-Android 手机端推荐终端：ReTerminal，官方仓库为 <https://github.com/RohitKushvaha01/ReTerminal>。推荐安装官方 Actions 中包含中文资源的 `1.3.0` 构建，然后切到 Alpine 模式运行本仓库的 ReTerminal Alpine 一键脚本。
+它解决的是一个很具体的问题：在手机上直接跑 Codex CLI 往往要自己处理终端、proot、Alpine、依赖、下载、环境变量、模型配置和恢复流程。Codex for TUI 把这些步骤收进一个应用里，让用户尽量少碰零散命令。
 
-如果你在找 `codex汉化项目`、`codex 汉化项目`、`Codex CLI 汉化项目`、`Codex CLI 中文汉化`、`Codex 中文版`、`Codex 汉化版`、`OpenAI Codex 中文版`、`codex.exe 中文版`、`codex 源码汉化`、`Codex 编译汉化`、`Termux Codex 中文版`、`Android Codex 汉化` 或 Windows 下的一键中文化方案，这个仓库提供的是“不编译源码，只替换当前 npm wrapper 指向的二进制”的路径。
+## 适合谁
 
-当前 `main` 分支发布的是二进制替换技能；`compile-skill` 分支发布源码编译技能，面向需要自己从 OpenAI Codex 官方源码打补丁并编译的用户。
+- 想在 Android 手机上使用 Codex CLI 的用户。
+- 想用中文界面的 Codex CLI，但不想自己编译二进制的用户。
+- 已经有官方 API Key，或使用兼容 Responses API 的第三方服务的用户。
+- 希望配置失败后可以重新打开应用继续，而不是从头排错的用户。
 
-## Android ARM64 一键安装分支
+## 主要优势
 
-`android-arm64-musl-installer` 分支发布 Android/Termux ARM64 一键安装包，包含 Codex CLI `0.142.4` 中文版 `aarch64-unknown-linux-musl` 压缩包和自动安装脚本。
+- 内置 Alpine 运行环境，避免很多原生 Termux 环境里的兼容性问题。
+- 首次启动会检查依赖和下载内容，用户可以先看到大概需要下载什么。
+- Codex 中文版 ARM64 musl 二进制由脚本自动下载、校验和安装。
+- 第三方 Responses API 配置会自动请求 `/models`，再让用户选择启用模型和默认模型。
+- 本地配置流程支持继续、返回和稍后再来，减少输错一步就卡住的情况。
+- 菜单使用纯终端交互，适合手机小屏和外接键盘。
+- 安装完成后提供 `codex`、`Codex`、`CODEX` 等大小写入口。
 
-推荐使用 Alpine proot 路线。这个路线会在 Termux 里自动下载 Alpine rootfs、安装 Codex 中文版、交互式配置第三方 Responses API、获取模型列表并让你选择默认/启用模型。它绕过了原生 Termux 下可能出现的流式断连、GitHub/OCI TLS EOF、`apk` CDN I/O error 等问题。
+## 下载
 
-如果你使用的是 ReTerminal，并且已经进入它自带的 Alpine 模式，直接执行这一条：
+正式 APK 请到 GitHub Releases 下载：
 
-```sh
-wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | sh
+```text
+https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases
 ```
 
-安装器开局会让你选择初始化方式：`1` 为官方 Codex 初始化，不写第三方配置；`2` 为第三方 Responses API，会输入 Base URL / API Key，自动请求 `/models`，然后用纯终端编号切换式多选启用模型，再选择默认模型。
+安装包名为 `com.gzy3894.codexfortui`。如果之前装过 debug 包，debug 包名是 `com.gzy3894.codexfortui.debug`，它和正式版不是同一个应用。
 
-如果 Alpine 里已有 `curl`，也可以：
+## 首次使用
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | sh
+1. 安装 APK 并打开应用。
+2. 进入终端后按提示确认安装。
+3. 选择依赖模式：
+   - Minimal：下载更少，适合网络差时先跑起来。
+   - Full：依赖更完整，适合长期使用。
+4. 等待 Codex 中文版和依赖安装完成。
+5. 选择启动提示词：
+   - 默认 AGENTS.md：直接生成一份通用中文提示词。
+   - 自定义 AGENTS.md：粘贴自己的提示词。
+6. 选择 Codex 配置：
+   - 官方登录入口：走 Codex 官方登录或 API Key 流程。
+   - 第三方 Responses API：输入 Base URL 和 API Key，自动拉取模型列表。
+
+第三方 API 的 Base URL 示例：
+
+```text
+https://api.example.com
+https://api.example.com/v1
 ```
 
-默认会安装较完整的 Codex 工作依赖，包括 Python、Node/npm、编译工具链、diff/patch、OpenSSL/libffi 等，并尽量安装 `bubblewrap`。`codex` 命令默认安装到 `/usr/local/bin`，同时写入 profile 和 `/etc/profile.d/codex-zh.sh` 兜底，重进终端也不需要手动 `export PATH`；还会生成 `Codex`、`CODEX` 等 32 种大小写入口。网络很差时可以先用最小依赖模式：
+脚本会自动补齐 `/v1`。如果把 URL 粘到了菜单编号处，脚本会提示你先选择编号，再填写 URL。
 
-```sh
-wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_DEPS_PROFILE=minimal sh
-```
+## 日常使用
 
-脚本会对 Codex 压缩包使用 `.part` 断点续传、HTTP/1.1、多次重试和 SHA256 校验；`apk update` 默认依次尝试 TUNA、BFSU、官方源。全程不会出现 apt/dpkg 那种 Y/N 配置文件提示，只有 API 信息和模型选择是交互输入。
-
-完全非交互配置第三方 API：
-
-```sh
-wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_SETUP_MODE=third_party CODEX_ZH_API_BASE=https://api.example.com/v1 CODEX_ZH_API_KEY=你的key sh
-```
-
-第三方 API 模式默认必须成功拉取 `/models`。只有确实遇到非标准模型接口时，才建议显式允许手动兜底：
-
-```sh
-wget -O - https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-reterminal-alpine.sh | CODEX_ZH_SETUP_MODE=third_party CODEX_ZH_ALLOW_MANUAL_MODEL=1 sh
-```
-
-刚装好的 Termux / Termux 裸环境执行这一条：
-
-```sh
-DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl && curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-alpine-proot.sh | sh
-```
-
-如果环境已经有 `curl`：
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install-alpine-proot.sh | sh
-```
-
-脚本会在开局要求输入第三方 API Base URL 和 API Key。Base URL 会自动补齐 `/v1`；随后脚本会请求 `/models`，列出模型并让你多选启用模型和选择默认模型；配置按 Codex 官方风格写入 `~/.codex/config.toml`、`~/.codex/auth.json` 和 `~/.codex/model-catalog.json`，其中 `/model` 列表由 `model_catalog_json` 指向的模型目录驱动。安装时还会询问是否生成默认 `AGENTS.md`，或粘贴自定义 `AGENTS.md`。安装完成后直接运行：
+安装完成后，重新打开应用会自动进入 Codex。也可以在终端里手动运行：
 
 ```sh
 codex
 ```
 
-原生 Termux 安装脚本仍保留为备选。如果你明确想安装到 Termux 原生环境，而不是 Alpine proot：
+如果本地配置没有完成，重新打开应用或运行下面的命令会继续配置：
 
 ```sh
-DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y ca-certificates curl
-curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill/android-arm64-musl-installer/android-arm64-musl/install.sh | sh
+codex-local-resume
 ```
 
-如果上次已经卡在 `bash.bashrc (Y/I/N/O/D/Z)` 并失败，先执行：
+## 网络说明
+
+安装过程中主要下载三类内容：
+
+- Alpine 基础依赖。
+- Codex 中文版 ARM64 压缩包。
+- 可选开发依赖。
+
+Alpine 镜像通常不一定需要代理；Codex 压缩包来自 GitHub raw，网络不稳时建议开启代理。下载会尽量使用断点续传、HTTP/1.1、重试和 SHA256 校验。
+
+## 仓库结构
+
+- `android-app/`：Codex for TUI Android 应用。
+- `android-arm64-musl/`：Android/Alpine 安装脚本和 Codex 中文版 ARM64 说明。
+- `tests/`：安装和本地配置流程的隔离 smoke test。
+- `codex-cli-zh-binary/`：Windows 版 Codex CLI 中文二进制替换技能。
+- `codex-cli-zh/`、`codex-android-musl-zh/`：源码汉化和构建相关技能。
+
+## 构建与验证
+
+仓库使用 GitHub Actions 构建 Android APK。每次构建前会先运行安装脚本 smoke test，覆盖首次安装提示、依赖选择、本地配置菜单、错误输入和 API Base URL 校验等路径。
+
+本地只建议运行脚本测试：
 
 ```sh
-DEBIAN_FRONTEND=noninteractive dpkg --force-confdef --force-confold --configure -a
-DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -f install -y
+sh tests/codex-for-tui-installer-smoke.sh
 ```
 
-没有 `pkg`、`curl`、`wget` 的纯 Android shell 不能远程一键安装；需要先手动提供下载器或本地复制安装文件。脚本会自动安装终端依赖、下载汉化版 ARM64 musl 二进制、校验 SHA256，并把 `codex` 命令指向 Alpine proot 里的 Codex。
+Android APK 构建建议交给 GitHub Actions，避免本机 SDK/JDK 环境差异影响结果。
 
-如果在 `su` 或 Android root shell 里提示 `codex: inaccessible or not found`，先运行：
+## 上游与许可
 
-```sh
-export PATH="/data/data/com.termux/files/usr/bin:$PATH"
-```
-
-如果看到 `Location: /.codex/state_5.sqlite`，重新运行安装脚本。新版脚本会安装 `codex` 包装命令，自动把 `HOME`/`CODEX_HOME` 修回 Termux home。
-
-## 编译技能分支
-
-源码编译技能在 `compile-skill` 分支：
-
-```powershell
-git clone -b compile-skill https://github.com/gzy3894-png/codex-cli-zh-binary-skill.git
-Copy-Item -Recurse -Force .\codex-cli-zh-binary-skill\codex-cli-zh "$env:USERPROFILE\.codex\skills\codex-cli-zh"
-Copy-Item -Recurse -Force .\codex-cli-zh-binary-skill\codex-android-musl-zh "$env:USERPROFILE\.codex\skills\codex-android-musl-zh"
-```
-
-它包含：
-
-- `codex-cli-zh`：源码级汉化、Windows x64 构建、macOS 本机构建、覆盖扫描和 Windows npm wrapper 安装。
-- `codex-android-musl-zh`：从 Windows 交叉编译 `aarch64-unknown-linux-musl` 中文 Codex CLI。
-- `codex-cli-zh-slash-patch` / `codex-cli-zh-deep-patch`：拆分版 slash 命令和深层 TUI 文案补丁技能。
-
-已验证支持：
-
-- Windows x64：Codex CLI `0.142.2`、`0.142.4`
-- Windows x64 当前发布基线：Codex CLI `0.142.4`
-- ARM64 musl：Codex CLI `0.142.4`，目标 `aarch64-unknown-linux-musl`
-
-macOS 支持：
-
-- `compile-skill` 分支包含 `codex-cli-zh/scripts/build-codex-cli-zh-macos.sh`。
-- 支持 macOS 本机 patch + Cargo build，可传 `--repo-ref rust-v0.142.4` 或 `--target aarch64-apple-darwin`。
-- 当前维护主机是 Windows，无法在本次发布中宣称 macOS 产物已真机运行验证；后续有 macOS 机器后应补充实际哈希和 `codex --version` 验证记录。
-
-它的改动范围刻意保持很小：不改用户配置、不碰 CC Switch、不处理 Codex Desktop，只定位当前终端实际会执行的 npm wrapper，并让新开的 Codex CLI 启动中文二进制。
-
-当前预编译二进制基于 Codex CLI `0.142.4`。本地验证过的 Windows x64 产物信息：
-
-- 版本：`codex-cli 0.142.4`
-- SHA256：`0DD8649E0C19FA57590D2F7B674FFDFE278744E2DCCC4036C28DB168B2E073A5`
-- 汉化覆盖：授权/审批、登录/API key、信任目录、MCP、`/` 命令弹窗和次级页面等高频 TUI 文案。
-
-仓库里只放技能和安装脚本，不把 300MB 级别的 exe 写进 Git 历史。预编译二进制会作为 GitHub Release 资产发布，文件名固定为 `codex-cli-zh-windows-x64.exe`。
-
-## 它怎么工作
-
-Codex CLI 的 npm 包在 Windows 上通常会生成 `codex.ps1` / `codex.cmd` 入口，真正执行时再进入：
+Codex for TUI 基于 ReTerminal 改造。感谢 ReTerminal 项目提供 Android 终端和 Alpine 能力基础：
 
 ```text
-%APPDATA%\npm\node_modules\@openai\codex\bin\codex.js
+https://github.com/RohitKushvaha01/ReTerminal
 ```
 
-这个技能不会盲目扫描全盘，也不会硬编码某个用户目录。脚本会先用 `Get-Command codex -All` 找到当前终端实际会执行的 `codex`，再从这个 shim 反推它所属的 `codex.js`，确认里面有 `findCodexExecutable` 后才写入带标记的 override。
-
-写入后的逻辑大致是：
-
-```javascript
-const localWindowsBinaryPath = "已安装的中文 codex.exe";
-const binaryPath =
-  process.platform === "win32" && existsSync(localWindowsBinaryPath)
-    ? localWindowsBinaryPath
-    : findCodexExecutable();
-```
-
-如果中文二进制不存在，wrapper 会回退到官方解析逻辑。安装前会备份原始 `codex.js`。
-
-## 安装技能
-
-克隆仓库后，把技能目录复制到 Codex 的 skills 目录：
-
-```powershell
-git clone https://github.com/gzy3894-png/codex-cli-zh-binary-skill.git
-Copy-Item -Recurse -Force .\codex-cli-zh-binary-skill\codex-cli-zh-binary "$env:USERPROFILE\.codex\skills\codex-cli-zh-binary"
-```
-
-然后在 Codex 里可以这样说：
-
-```text
-使用 $codex-cli-zh-binary 安装中文 Codex CLI
-```
-
-也可以直接运行脚本。
-
-## 一键安装
-
-默认从本仓库最新 Release 下载 `codex-cli-zh-windows-x64.exe`，复制到当前用户本地目录，然后修改当前 `codex` wrapper：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\codex-cli-zh-binary\scripts\install-codex-cli-zh-binary.ps1"
-```
-
-如果你已经有本地编译好的 `codex.exe`，可以直接指定：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\codex-cli-zh-binary\scripts\install-codex-cli-zh-binary.ps1" -BinaryPath "D:\path\to\codex.exe"
-```
-
-预览将要修改什么，不落盘：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\codex-cli-zh-binary\scripts\install-codex-cli-zh-binary.ps1" -DryRun
-```
-
-默认下载官方 Release 资产时，脚本会校验上面列出的 SHA256。你指定自己的 `-BinaryPath` 时，默认不强制校验；如果需要，也可以传入 `-ExpectedSha256`。
-
-## 验证
-
-安装后运行：
-
-```powershell
-codex --version
-```
-
-应该看到中文二进制对应的版本，例如：
-
-```text
-codex-cli 0.142.4
-```
-
-再检查 wrapper 是否有技能标记：
-
-```powershell
-rg -n -F "codex-cli-zh-binary" "$env:APPDATA\npm\node_modules\@openai\codex\bin\codex.js"
-```
-
-最后新开一个 Codex CLI，输入 `/`，再打开 `/model`，确认命令说明和模型选择界面已经变成中文。
-
-## 恢复
-
-恢复最近一次备份：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\codex-cli-zh-binary\scripts\install-codex-cli-zh-binary.ps1" -Restore
-```
-
-只移除 override，回到官方 `findCodexExecutable()`：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\codex-cli-zh-binary\scripts\install-codex-cli-zh-binary.ps1" -RemoveOverride
-```
-
-## 常见问题
-
-**这会改 Codex Desktop 吗？**
-
-不会。它只处理 npm 安装的 Codex CLI。
-
-**这会改我的 `config.toml`、密钥或 provider 配置吗？**
-
-不会。脚本只改 `codex.js` wrapper，并把中文二进制放到当前用户本地目录。
-
-**我跑了 `npm install -g @openai/codex` 后又变英文了怎么办？**
-
-这是正常的。npm 更新会覆盖 `codex.js`，重新运行这个技能即可。
-
-**为什么不把 300MB 的 exe 直接放进 Git？**
-
-Git 历史不适合放大二进制。仓库只保存技能和脚本，编译产物放在 GitHub Release 资产里。
-
-**多个 Codex 怎么办？**
-
-脚本默认只处理当前 PATH 下第一个 `codex`。如果你要改另一个安装位置，请显式传入 `-WrapperPath`，避免误改。
-
-## 开源与许可
-
-本仓库里的技能和安装脚本按 Apache-2.0 许可证开源。Release 里的预编译二进制基于 OpenAI Codex CLI 源码及本地中文化改动构建；上游 npm 包声明为 Apache-2.0。这个仓库不是 OpenAI 官方发布渠道。
-
-## Community
-
-本项目认可并感谢 [Linux Do](https://linux.do) 社区。相关交流、反馈和使用经验可以在 Linux Do 社区中展开。
+本仓库脚本和改动按 Apache-2.0 许可证开源。Codex 中文版二进制基于 OpenAI Codex CLI 源码及本地中文化改动构建；本项目不是 OpenAI 官方发布渠道。
 
 ## 免责声明
 
-这是社区自用的中文替换方案，不是 OpenAI 官方发行包。二进制来自对 OpenAI Codex CLI 源码的本地化构建；请只在你理解风险并信任发布者的情况下使用。安装前脚本会备份 wrapper，建议确认中文界面正常后再清理旧备份。
+这是社区维护的 Android Codex 终端方案。安装前请确认你信任本仓库、Release 资产和对应校验信息。API Key 会写入应用内 Alpine 环境的 Codex 配置目录，请妥善保管设备和应用数据。

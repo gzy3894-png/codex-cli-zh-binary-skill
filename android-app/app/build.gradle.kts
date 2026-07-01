@@ -60,7 +60,11 @@ android {
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (signingConfigs.getByName("release").storeFile?.exists() == true) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             resValue("string","app_name","Codex for TUI")
         }
         debug{
@@ -76,7 +80,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 10
-        versionName = "1.3.0"
+        versionName = "1.0.0"
         vectorDrawables {
             useSupportLibrary = true
         }

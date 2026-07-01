@@ -1,23 +1,40 @@
-# Codex for TUI
-**Codex for TUI** is a ReTerminal-based Android terminal package customized to bootstrap and run Codex in an Alpine environment.
+# Codex for TUI Android App
 
-Debug APKs are built by this repository's GitHub Actions workflow.
+这里是 Codex for TUI 的 Android 应用源码。
 
-# Features
-- [x] Basic Terminal
-- [x] Virtual Keys
-- [x] Multiple Sessions
-- [x] Alpine Linux support
-- [x] Configurable Keyboard Shortcuts (Paste, Session Management)
+Codex for TUI 基于 ReTerminal 改造，目标是在 Android 手机上提供一个开箱可用的 Codex CLI 终端环境。应用内置 Alpine 入口，并通过 assets 中的脚本完成 Codex 中文版安装、依赖准备、本地配置恢复和启动。
 
-# Screenshots
-<div>
-  <img src="/fastlane/metadata/android/en-US/images/phoneScreenshots/01.png" width="32%" />
-  <img src="/fastlane/metadata/android/en-US/images/phoneScreenshots/02.jpg" width="32%" />
-  <img src="/fastlane/metadata/android/en-US/images/phoneScreenshots/03.jpg" width="32%" />
-</div>
+## 这个应用做什么
 
-## Community
-> [!TIP]
-Join the reTerminal community to stay updated and engage with other users:
-- [Telegram](https://t.me/reTerminal)
+- 打开应用后进入适合 Codex 运行的 Alpine 终端环境。
+- 首次启动时引导用户安装依赖和 Codex 中文版 ARM64 musl 二进制。
+- 支持官方 Codex 登录入口，也支持第三方 Responses API。
+- 第三方 API 模式会自动请求 `/models`，再让用户选择启用模型和默认模型。
+- 本地配置未完成时可以重新打开应用继续，不需要从头安装。
+
+## 关键脚本
+
+- `core/main/src/main/assets/init.sh`
+- `core/main/src/main/assets/codex-for-tui-bootstrap.sh`
+- `core/main/src/main/assets/install-reterminal-alpine.sh`
+- `core/main/src/main/assets/codex-local-resume.sh`
+
+这些脚本的源文件主要维护在仓库根目录的 `android-arm64-musl/` 下。修改后要保持 assets 副本同步。
+
+## 构建
+
+推荐使用仓库的 GitHub Actions 构建 release APK。构建前会先运行安装器 smoke test。
+
+本地只建议做脚本级验证：
+
+```sh
+sh tests/codex-for-tui-installer-smoke.sh
+```
+
+## 上游
+
+本应用基于 ReTerminal 改造：
+
+```text
+https://github.com/RohitKushvaha01/ReTerminal
+```
