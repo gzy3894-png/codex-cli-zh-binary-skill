@@ -231,16 +231,12 @@ Codex 中文版, Codex CLI 中文版, Codex 汉化版, 手机 AI 编程终端
 
 ## 社区
 
-Codex for TUI 的使用反馈、安装排错和改进建议可以优先在 GitHub Discussions 中交流：
+本开源项目已链接并认可 [LINUX DO 社区](https://linux.do)。
+
+Codex for TUI 的使用反馈、安装排错和改进建议可以在 GitHub Discussions 中交流：
 
 ```text
 https://github.com/gzy3894-png/codex-cli-zh-binary-skill/discussions
-```
-
-也欢迎在 Linux Do 中文开发者社区继续交流移动端 Codex、Android 终端和第三方 Responses API 使用经验：
-
-```text
-https://linux.do
 ```
 
 ## 致谢
