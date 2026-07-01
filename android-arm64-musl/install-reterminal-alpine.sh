@@ -682,11 +682,88 @@ EOF
   chmod 700 "$helper"
 }
 
+write_model_catalog() {
+  models_file="$1"
+  default_model="$2"
+  out_json="$3"
+  tmp_json="$out_json.tmp"
+  dedup_file="$out_json.models.tmp"
+  fallback_file=""
+  source_file="$models_file"
+
+  if [ ! -s "$source_file" ] && [ -n "$default_model" ]; then
+    fallback_file="$out_json.default-model.tmp"
+    printf '%s\n' "$default_model" > "$fallback_file"
+    source_file="$fallback_file"
+  fi
+
+  awk 'NF && !seen[$0]++ { print }' "$source_file" > "$dedup_file"
+  [ -s "$dedup_file" ] || die "无法生成模型目录：没有可写入 model_catalog_json 的模型名"
+
+  {
+    printf '{\n'
+    printf '  "models": [\n'
+    count=0
+    while IFS= read -r model; do
+      [ -n "$model" ] || continue
+      model_esc="$(json_escape "$model")"
+      [ "$count" -eq 0 ] || printf ',\n'
+      cat <<EOF
+    {
+      "slug": "$model_esc",
+      "display_name": "$model_esc",
+      "description": "Third-party API model",
+      "default_reasoning_level": "medium",
+      "supported_reasoning_levels": [
+        {"effort": "low", "description": "Fast responses with lighter reasoning"},
+        {"effort": "medium", "description": "Balances speed and reasoning depth"},
+        {"effort": "high", "description": "Greater reasoning depth"},
+        {"effort": "xhigh", "description": "Extra high reasoning depth"}
+      ],
+      "shell_type": "shell_command",
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 0,
+      "availability_nux": null,
+      "upgrade": null,
+      "base_instructions": "",
+      "model_messages": null,
+      "supports_reasoning_summaries": true,
+      "default_reasoning_summary": "auto",
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "web_search_tool_type": "text",
+      "truncation_policy": {"mode": "tokens", "limit": 10000},
+      "supports_parallel_tool_calls": true,
+      "supports_image_detail_original": false,
+      "context_window": 120000,
+      "max_context_window": 120000,
+      "auto_compact_token_limit": 120000,
+      "effective_context_window_percent": 95,
+      "experimental_supported_tools": [],
+      "input_modalities": ["text"],
+      "supports_search_tool": false,
+      "use_responses_lite": false
+    }
+EOF
+      count=$((count + 1))
+    done < "$dedup_file"
+    printf '\n'
+    printf '  ]\n'
+    printf '}\n'
+  } > "$tmp_json"
+
+  mv "$tmp_json" "$out_json"
+  chmod 600 "$out_json"
+  rm -f "$dedup_file" "$fallback_file"
+}
+
 write_codex_config() {
   api_base="$1"
   api_key="$2"
   default_model="$3"
-  enabled_file="$4"
+  models_file="$4"
 
   codex_home="${CODEX_HOME:-$HOME/.codex}"
   mkdir -p "$codex_home"
@@ -700,6 +777,7 @@ write_codex_config() {
   } > "$auth_file"
   chmod 600 "$auth_file"
   write_provider_auth_helper "$codex_home"
+  write_model_catalog "$models_file" "$default_model" "$codex_home/model-catalog.json"
 
   config_file="$codex_home/config.toml"
 
@@ -709,13 +787,15 @@ write_codex_config() {
   home_esc="$(toml_escape "$HOME")"
   codex_home_esc="$(toml_escape "$codex_home")"
   auth_command_esc="$(toml_escape "$codex_home/bin/provider-api-key")"
+  model_catalog_esc="$(toml_escape "$codex_home/model-catalog.json")"
   {
+    printf 'model_catalog_json = "%s"\n' "$model_catalog_esc"
     printf 'model_provider = "%s"\n' "$provider_id_esc"
     printf 'model = "%s"\n' "$default_model_esc"
     printf 'model_reasoning_effort = "medium"\n'
     printf 'model_auto_compact_token_limit = 120000\n'
-    printf 'disable_response_storage = true\n'
     printf '\n[features]\n'
+    printf 'auto_compaction = true\n'
     printf 'hooks = false\n'
     printf '\n[model_providers.%s]\n' "$PROVIDER_ID"
     printf 'name = "%s"\n' "$provider_id_esc"
@@ -733,6 +813,10 @@ write_codex_config() {
     printf '\n[tui]\n'
     printf 'status_line = ["model-with-reasoning", "current-dir", "context-remaining"]\n'
     printf 'status_line_use_colors = true\n'
+    printf '\n[notice.model_migrations]\n'
+    printf '"gpt-5.4mini" = "gpt-5.4-mini"\n'
+    printf '"gpt-5.3-codex" = "gpt-5.4"\n'
+    printf '"gpt-5.2" = "gpt-5.4"\n'
   } > "$config_file"
   chmod 600 "$config_file"
 }
@@ -964,7 +1048,7 @@ if [ "$setup_mode" = "third_party" ]; then
     fi
     die "未从 /models 响应中解析到任何模型，已停止。"
   fi
-  write_codex_config "$api_base" "$api_key" "$default_model" "$enabled_file"
+  write_codex_config "$api_base" "$api_key" "$default_model" "$models_file"
 else
   info "使用官方 Codex 初始化模式：不写第三方 provider/auth 配置。"
   if [ -s "${CODEX_HOME:-$HOME/.codex}/config.toml" ]; then

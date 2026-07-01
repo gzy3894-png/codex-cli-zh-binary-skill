@@ -81,6 +81,41 @@ profile_label() {
   fi
 }
 
+profile_mode() {
+  profile_dir="$1"
+  sed -n '1p' "$profile_dir/setup-mode" 2>/dev/null || true
+}
+
+profile_api_base() {
+  profile_dir="$1"
+  api_base="$(sed -n '1p' "$profile_dir/api-base" 2>/dev/null || true)"
+  [ -n "$api_base" ] || api_base="$(sed -n 's/^[[:space:]]*base_url[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$profile_dir/config.toml" | sed -n '1p')"
+  printf '%s' "$api_base"
+}
+
+profile_default_model() {
+  profile_dir="$1"
+  default_model="$(sed -n '1p' "$profile_dir/default-model" 2>/dev/null || true)"
+  [ -n "$default_model" ] || default_model="$(sed -n 's/^[[:space:]]*model[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$profile_dir/config.toml" | sed -n '1p')"
+  printf '%s' "$default_model"
+}
+
+current_profile_dir() {
+  slug="$(sed -n '1p' "$LAST_PROFILE_FILE" 2>/dev/null || true)"
+  [ -n "$slug" ] || return 1
+  profile_dir="$CONFIGS_DIR/$slug"
+  [ -d "$profile_dir" ] || return 1
+  printf '%s\n' "$profile_dir"
+}
+
+list_has_line() {
+  value="$1"
+  list_file="$2"
+  [ -n "$value" ] || return 1
+  [ -s "$list_file" ] || return 1
+  grep -Fx "$value" "$list_file" >/dev/null 2>&1
+}
+
 tty_read() {
   prompt="$1"
   default="${2:-}"
@@ -336,11 +371,88 @@ EOF
   chmod 700 "$helper"
 }
 
+write_model_catalog() {
+  models_file="$1"
+  default_model="$2"
+  out_json="$3"
+  tmp_json="$out_json.tmp"
+  dedup_file="$out_json.models.tmp"
+  fallback_file=""
+  source_file="$models_file"
+
+  if [ ! -s "$source_file" ] && [ -n "$default_model" ]; then
+    fallback_file="$out_json.default-model.tmp"
+    printf '%s\n' "$default_model" > "$fallback_file"
+    source_file="$fallback_file"
+  fi
+
+  awk 'NF && !seen[$0]++ { print }' "$source_file" > "$dedup_file"
+  [ -s "$dedup_file" ] || die "无法生成模型目录：没有可写入 model_catalog_json 的模型名"
+
+  {
+    printf '{\n'
+    printf '  "models": [\n'
+    count=0
+    while IFS= read -r model; do
+      [ -n "$model" ] || continue
+      model_esc="$(json_escape "$model")"
+      [ "$count" -eq 0 ] || printf ',\n'
+      cat <<EOF
+    {
+      "slug": "$model_esc",
+      "display_name": "$model_esc",
+      "description": "Third-party API model",
+      "default_reasoning_level": "medium",
+      "supported_reasoning_levels": [
+        {"effort": "low", "description": "Fast responses with lighter reasoning"},
+        {"effort": "medium", "description": "Balances speed and reasoning depth"},
+        {"effort": "high", "description": "Greater reasoning depth"},
+        {"effort": "xhigh", "description": "Extra high reasoning depth"}
+      ],
+      "shell_type": "shell_command",
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 0,
+      "availability_nux": null,
+      "upgrade": null,
+      "base_instructions": "",
+      "model_messages": null,
+      "supports_reasoning_summaries": true,
+      "default_reasoning_summary": "auto",
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "web_search_tool_type": "text",
+      "truncation_policy": {"mode": "tokens", "limit": 10000},
+      "supports_parallel_tool_calls": true,
+      "supports_image_detail_original": false,
+      "context_window": 120000,
+      "max_context_window": 120000,
+      "auto_compact_token_limit": 120000,
+      "effective_context_window_percent": 95,
+      "experimental_supported_tools": [],
+      "input_modalities": ["text"],
+      "supports_search_tool": false,
+      "use_responses_lite": false
+    }
+EOF
+      count=$((count + 1))
+    done < "$dedup_file"
+    printf '\n'
+    printf '  ]\n'
+    printf '}\n'
+  } > "$tmp_json"
+
+  mv "$tmp_json" "$out_json"
+  chmod 600 "$out_json"
+  rm -f "$dedup_file" "$fallback_file"
+}
+
 write_codex_config() {
   api_base="$1"
   api_key="$2"
   default_model="$3"
-  enabled_file="$4"
+  models_file="$4"
   out_home="${5:-$CODEX_HOME}"
 
   mkdir -p "$out_home"
@@ -354,6 +466,7 @@ write_codex_config() {
   } > "$auth_file"
   chmod 600 "$auth_file"
   write_provider_auth_helper "$out_home"
+  write_model_catalog "$models_file" "$default_model" "$out_home/model-catalog.json"
 
   config_file="$out_home/config.toml"
   provider_id_esc="$(toml_escape "$PROVIDER_ID")"
@@ -362,13 +475,15 @@ write_codex_config() {
   home_esc="$(toml_escape "$HOME")"
   out_home_esc="$(toml_escape "$out_home")"
   auth_command_esc="$(toml_escape "$out_home/bin/provider-api-key")"
+  model_catalog_esc="$(toml_escape "$out_home/model-catalog.json")"
   {
+    printf 'model_catalog_json = "%s"\n' "$model_catalog_esc"
     printf 'model_provider = "%s"\n' "$provider_id_esc"
     printf 'model = "%s"\n' "$default_model_esc"
     printf 'model_reasoning_effort = "medium"\n'
     printf 'model_auto_compact_token_limit = 120000\n'
-    printf 'disable_response_storage = true\n'
     printf '\n[features]\n'
+    printf 'auto_compaction = true\n'
     printf 'hooks = false\n'
     printf '\n[model_providers.%s]\n' "$PROVIDER_ID"
     printf 'name = "%s"\n' "$provider_id_esc"
@@ -386,6 +501,10 @@ write_codex_config() {
     printf '\n[tui]\n'
     printf 'status_line = ["model-with-reasoning", "current-dir", "context-remaining"]\n'
     printf 'status_line_use_colors = true\n'
+    printf '\n[notice.model_migrations]\n'
+    printf '"gpt-5.4mini" = "gpt-5.4-mini"\n'
+    printf '"gpt-5.3-codex" = "gpt-5.4"\n'
+    printf '"gpt-5.2" = "gpt-5.4"\n'
   } > "$config_file"
   chmod 600 "$config_file"
 }
@@ -455,20 +574,25 @@ migrate_third_party_profile_if_needed() {
   [ -s "$profile_dir/config.toml" ] || return 0
 
   needs_migration=0
-  grep -F 'model_catalog_json' "$profile_dir/config.toml" >/dev/null 2>&1 && needs_migration=1
+  grep -F 'model_catalog_json' "$profile_dir/config.toml" >/dev/null 2>&1 || needs_migration=1
   grep -F "[model_providers.$PROVIDER_ID.auth]" "$profile_dir/config.toml" >/dev/null 2>&1 || needs_migration=1
-  [ "$needs_migration" = "1" ] || {
-    rm -f "$profile_dir/model-catalog.json" 2>/dev/null || true
-    return 0
-  }
+  [ -s "$profile_dir/model-catalog.json" ] || needs_migration=1
+  [ "$needs_migration" = "1" ] || return 0
 
   api_base="$(sed -n '1p' "$profile_dir/api-base" 2>/dev/null || true)"
   [ -n "$api_base" ] || api_base="$(sed -n 's/^[[:space:]]*base_url[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$profile_dir/config.toml" | sed -n '1p')"
   default_model="$(sed -n '1p' "$profile_dir/default-model" 2>/dev/null || true)"
   [ -n "$default_model" ] || default_model="$(sed -n 's/^[[:space:]]*model[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$profile_dir/config.toml" | sed -n '1p')"
   enabled_file="$profile_dir/enabled-models.txt"
+  models_file="$profile_dir/models.txt"
+  if [ ! -s "$models_file" ] && [ -s "$enabled_file" ]; then
+    cp "$enabled_file" "$models_file"
+  fi
   if [ ! -s "$enabled_file" ] && [ -n "$default_model" ]; then
     printf '%s\n' "$default_model" > "$enabled_file"
+  fi
+  if [ ! -s "$models_file" ] && [ -n "$default_model" ]; then
+    printf '%s\n' "$default_model" > "$models_file"
   fi
   api_key="$(read_auth_api_key "$profile_dir/auth.json" 2>/dev/null || true)"
 
@@ -476,15 +600,14 @@ migrate_third_party_profile_if_needed() {
   [ -n "$default_model" ] || die "旧配置缺少默认模型，无法自动迁移：$profile_dir"
   [ -n "$api_key" ] || die "旧配置 auth.json 缺少 OPENAI_API_KEY，无法自动迁移：$profile_dir"
 
-  write_codex_config "$api_base" "$api_key" "$default_model" "$enabled_file" "$profile_dir"
-  rm -f "$profile_dir/model-catalog.json" 2>/dev/null || true
-  warn "已迁移旧第三方配置：移除 model_catalog_json，改用 provider command auth。"
+  write_codex_config "$api_base" "$api_key" "$default_model" "$models_file" "$profile_dir"
+  warn "已迁移旧第三方配置：补齐 provider command auth，并重新生成 model_catalog_json。"
 }
 
 apply_profile() {
   profile_dir="$1"
   [ -d "$profile_dir" ] || die "配置不存在：$profile_dir"
-  if [ -s "$profile_dir/setup-mode" ] && [ "$(sed -n '1p' "$profile_dir/setup-mode")" = "official" ]; then
+  if [ -s "$profile_dir/setup-mode" ] && [ "$(profile_mode "$profile_dir")" = "official" ]; then
     if [ ! -s "$LAST_PROFILE_FILE" ] && { [ -s "$CODEX_HOME/config.toml" ] || [ -s "$CODEX_HOME/auth.json" ]; }; then
       ts="$(date +%Y%m%d-%H%M%S 2>/dev/null || echo legacy)"
       backup_dir="$CONFIGS_DIR/imported-before-official-$ts"
@@ -493,8 +616,9 @@ apply_profile() {
       printf '%s\n' "third_party" > "$backup_dir/setup-mode"
       [ ! -s "$CODEX_HOME/config.toml" ] || cp "$CODEX_HOME/config.toml" "$backup_dir/config.toml"
       [ ! -s "$CODEX_HOME/auth.json" ] || cp "$CODEX_HOME/auth.json" "$backup_dir/auth.json"
+      [ ! -s "$CODEX_HOME/model-catalog.json" ] || cp "$CODEX_HOME/model-catalog.json" "$backup_dir/model-catalog.json"
       chmod 700 "$backup_dir" 2>/dev/null || true
-      chmod 600 "$backup_dir/config.toml" "$backup_dir/auth.json" 2>/dev/null || true
+      chmod 600 "$backup_dir/config.toml" "$backup_dir/auth.json" "$backup_dir/model-catalog.json" 2>/dev/null || true
       warn "已先把当前 ~/.codex 配置备份为：$backup_dir"
     fi
     rm -f "$CODEX_HOME/config.toml" "$CODEX_HOME/auth.json" "$CODEX_HOME/model-catalog.json"
@@ -507,16 +631,26 @@ apply_profile() {
     [ -s "$profile_dir/auth.json" ] || die "配置缺少 auth.json：$profile_dir"
     cp "$profile_dir/config.toml" "$CODEX_HOME/config.toml"
     cp "$profile_dir/auth.json" "$CODEX_HOME/auth.json"
+    [ ! -s "$profile_dir/model-catalog.json" ] || cp "$profile_dir/model-catalog.json" "$CODEX_HOME/model-catalog.json"
     if [ -x "$profile_dir/bin/provider-api-key" ]; then
       mkdir -p "$CODEX_HOME/bin"
       cp "$profile_dir/bin/provider-api-key" "$CODEX_HOME/bin/provider-api-key"
       chmod 700 "$CODEX_HOME/bin" "$CODEX_HOME/bin/provider-api-key" 2>/dev/null || true
     fi
-    rm -f "$CODEX_HOME/model-catalog.json" 2>/dev/null || true
-    chmod 600 "$CODEX_HOME/config.toml" "$CODEX_HOME/auth.json" 2>/dev/null || true
+    chmod 600 "$CODEX_HOME/config.toml" "$CODEX_HOME/auth.json" "$CODEX_HOME/model-catalog.json" 2>/dev/null || true
   fi
   basename "$profile_dir" > "$LAST_PROFILE_FILE"
   profile_label "$profile_dir" > "$STATE_DIR/active-profile-label"
+}
+
+clear_active_profile_state() {
+  rm -f \
+    "$CODEX_HOME/config.toml" \
+    "$CODEX_HOME/auth.json" \
+    "$CODEX_HOME/model-catalog.json" \
+    "$CODEX_HOME/bin/provider-api-key" \
+    "$STATE_DIR/active-profile-label"
+  rmdir "$CODEX_HOME/bin" 2>/dev/null || true
 }
 
 sync_current_profile() {
@@ -537,6 +671,7 @@ sync_current_profile() {
     third_party)
       [ ! -s "$CODEX_HOME/config.toml" ] || cp "$CODEX_HOME/config.toml" "$profile_dir/config.toml"
       [ ! -s "$CODEX_HOME/auth.json" ] || cp "$CODEX_HOME/auth.json" "$profile_dir/auth.json"
+      [ ! -s "$CODEX_HOME/model-catalog.json" ] || cp "$CODEX_HOME/model-catalog.json" "$profile_dir/model-catalog.json"
       if [ -x "$CODEX_HOME/bin/provider-api-key" ]; then
         mkdir -p "$profile_dir/bin"
         cp "$CODEX_HOME/bin/provider-api-key" "$profile_dir/bin/provider-api-key"
@@ -544,8 +679,7 @@ sync_current_profile() {
       fi
       ;;
   esac
-  rm -f "$profile_dir/model-catalog.json" 2>/dev/null || true
-  chmod 600 "$profile_dir/config.toml" "$profile_dir/auth.json" 2>/dev/null || true
+  chmod 600 "$profile_dir/config.toml" "$profile_dir/auth.json" "$profile_dir/model-catalog.json" 2>/dev/null || true
 }
 
 fetch_models_or_prompt() {
@@ -585,12 +719,327 @@ fetch_models_or_prompt() {
   done
 }
 
+preserve_enabled_models() {
+  old_enabled="$1"
+  new_models="$2"
+  out_enabled="$3"
+
+  : > "$out_enabled"
+  if [ -s "$old_enabled" ]; then
+    awk '
+      NR == FNR { available[$0] = 1; next }
+      NF && available[$0] && !seen[$0]++ { print }
+    ' "$new_models" "$old_enabled" > "$out_enabled"
+  fi
+  [ -s "$out_enabled" ] || cp "$new_models" "$out_enabled"
+}
+
+pick_refreshed_default_model() {
+  current_default="$1"
+  enabled_file="$2"
+  models_file="$3"
+
+  if list_has_line "$current_default" "$models_file"; then
+    printf '%s\n' "$current_default"
+    return 0
+  fi
+  if [ -s "$enabled_file" ]; then
+    sed -n '1p' "$enabled_file"
+    return 0
+  fi
+  sed -n '1p' "$models_file"
+}
+
+refresh_current_profile() {
+  mkdir -p "$CODEX_HOME" "$STATE_DIR" "$CONFIGS_DIR"
+  chmod 700 "$CODEX_HOME" "$STATE_DIR" "$CONFIGS_DIR" 2>/dev/null || true
+  sync_current_profile
+
+  profile_dir="$(current_profile_dir 2>/dev/null || true)"
+  [ -n "$profile_dir" ] || die "当前没有可刷新的已激活配置。请先运行 codex-local-resume 选择或新建配置。"
+
+  mode="$(profile_mode "$profile_dir")"
+  case "$mode" in
+    official)
+      info "当前配置是官方登录入口；不需要刷新第三方模型目录。"
+      return 0
+      ;;
+    third_party) ;;
+    *)
+      die "无法识别当前配置类型：$profile_dir"
+      ;;
+  esac
+
+  profile_name="$(profile_label "$profile_dir")"
+  api_base="$(profile_api_base "$profile_dir")"
+  api_key="$(read_auth_api_key "$profile_dir/auth.json" 2>/dev/null || true)"
+  current_default="$(profile_default_model "$profile_dir")"
+  [ -n "$api_base" ] || die "当前配置缺少 API Base URL，无法刷新：$profile_dir"
+  [ -n "$api_key" ] || die "当前配置缺少 API Key，无法刷新：$profile_dir"
+
+  work_dir="$STATE_DIR/refresh-profile"
+  rm -rf "$work_dir"
+  mkdir -p "$work_dir"
+  models_file="$work_dir/models.txt"
+  models_json="$work_dir/models.json"
+  models_err="$work_dir/models.err"
+  enabled_file="$work_dir/enabled-models.txt"
+
+  while :; do
+    if fetch_models_or_prompt "$api_base" "$api_key" "$models_file" "$models_json" "$models_err"; then
+      break
+    else
+      rc="$?"
+    fi
+    [ "$rc" = "2" ] || exit_for_later
+
+    section_title "本地配置：刷新当前配置"
+    printf '%s\n' "正在刷新：$profile_name" >&2
+    printf '%s\n' "接口请求失败，请确认 API Base URL / API Key。" >&2
+    printf '%s\n' "输入 q 退出，稍后继续。" >&2
+    printf '\n' >&2
+
+    raw_base="$(tty_read "API Base URL" "$api_base")"
+    case "$(printf '%s' "$raw_base" | lower)" in
+      q|quit|exit|退出) exit_for_later ;;
+    esac
+    if ! valid_api_base_input "$raw_base"; then
+      warn "API Base URL 格式不对：$raw_base"
+      warn "必须以 http:// 或 https:// 开头，例如 https://api.example.com/v1"
+      printf '\n' >&2
+      continue
+    fi
+
+    printf '%s\n' "如需沿用当前 API Key，直接回车即可。" >&2
+    new_api_key="$(tty_read_api_key "新的 API Key（留空则保持当前）")"
+    case "$(printf '%s' "$new_api_key" | lower)" in
+      q|quit|exit|退出) exit_for_later ;;
+    esac
+    [ -n "$new_api_key" ] || new_api_key="$api_key"
+
+    api_base="$(normalize_api_base "$raw_base")"
+    api_key="$new_api_key"
+    printf '\n%s\n' "规范化后的 API Base URL: $api_base" >&2
+    printf '%s\n' "下一步会重新请求：$api_base/models" >&2
+    printf '\n' >&2
+  done
+
+  preserve_enabled_models "$profile_dir/enabled-models.txt" "$models_file" "$enabled_file"
+  default_model="$(pick_refreshed_default_model "$current_default" "$enabled_file" "$models_file")"
+  [ -n "$default_model" ] || die "刷新后没有可用模型，无法更新配置：$profile_dir"
+  if ! list_has_line "$default_model" "$enabled_file"; then
+    printf '%s\n' "$default_model" >> "$enabled_file"
+  fi
+  if [ "$default_model" != "$current_default" ]; then
+    warn "默认模型已从 $current_default 调整为 $default_model，因为原模型不在最新 /models 列表里。"
+  fi
+
+  printf '%s\n' "$profile_name" > "$profile_dir/name"
+  printf '%s\n' "third_party" > "$profile_dir/setup-mode"
+  printf '%s\n' "$api_base" > "$profile_dir/api-base"
+  printf '%s\n' "$default_model" > "$profile_dir/default-model"
+  cp "$models_file" "$profile_dir/models.txt"
+  cp "$enabled_file" "$profile_dir/enabled-models.txt"
+  write_codex_config "$api_base" "$api_key" "$default_model" "$models_file" "$profile_dir"
+  apply_profile "$profile_dir"
+  rm -rf "$work_dir"
+  info "已刷新当前配置：$profile_name"
+}
+
 create_official_profile() {
   profile_dir="$CONFIGS_DIR/official"
   mkdir -p "$profile_dir"
   printf '%s\n' "官方登录入口" > "$profile_dir/name"
   printf '%s\n' "official" > "$profile_dir/setup-mode"
   apply_profile "$profile_dir"
+}
+
+edit_third_party_profile() {
+  profile_dir="$1"
+  [ -d "$profile_dir" ] || die "配置不存在：$profile_dir"
+  [ "$(profile_mode "$profile_dir")" = "third_party" ] || die "只有第三方 Responses API 配置支持编辑：$profile_dir"
+
+  work_dir="$STATE_DIR/edit-profile"
+  rm -rf "$work_dir"
+  mkdir -p "$work_dir"
+
+  current_name="$(profile_label "$profile_dir")"
+  current_base="$(profile_api_base "$profile_dir")"
+  current_key="$(read_auth_api_key "$profile_dir/auth.json" 2>/dev/null || true)"
+  [ -n "$current_base" ] || die "配置缺少 API Base URL，无法编辑：$profile_dir"
+  [ -n "$current_key" ] || die "配置缺少 API Key，无法编辑：$profile_dir"
+
+  while :; do
+    section_title "本地配置 2/2：编辑第三方配置"
+    printf '%s\n' "正在编辑：$current_name" >&2
+    printf '%s\n' "输入 b 返回上一层；输入 q 退出，稍后继续。" >&2
+    printf '\n' >&2
+
+    profile_name="$(tty_read "配置名称" "$current_name")"
+    case "$(printf '%s' "$profile_name" | lower)" in
+      b|back|返回) return 2 ;;
+      q|quit|exit|退出) exit_for_later ;;
+    esac
+
+    raw_base="$(tty_read "API Base URL" "$current_base")"
+    case "$(printf '%s' "$raw_base" | lower)" in
+      b|back|返回) return 2 ;;
+      q|quit|exit|退出) exit_for_later ;;
+    esac
+    if ! valid_api_base_input "$raw_base"; then
+      warn "API Base URL 格式不对：$raw_base"
+      warn "必须以 http:// 或 https:// 开头，例如 https://api.example.com/v1"
+      printf '\n' >&2
+      continue
+    fi
+
+    printf '%s\n' "如需沿用当前 API Key，直接回车即可。" >&2
+    api_key="$(tty_read_api_key "新的 API Key（留空则保持当前）")"
+    case "$(printf '%s' "$api_key" | lower)" in
+      b|back|返回) return 2 ;;
+      q|quit|exit|退出) exit_for_later ;;
+    esac
+    [ -n "$api_key" ] || api_key="$current_key"
+
+    api_base="$(normalize_api_base "$raw_base")"
+    printf '\n%s\n' "规范化后的 API Base URL: $api_base" >&2
+    printf '%s\n' "下一步会请求：$api_base/models" >&2
+    printf '\n' >&2
+
+    models_file="$work_dir/models.txt"
+    models_json="$work_dir/models.json"
+    models_err="$work_dir/models.err"
+    if fetch_models_or_prompt "$api_base" "$api_key" "$models_file" "$models_json" "$models_err"; then
+      break
+    else
+      rc="$?"
+    fi
+    [ "$rc" = "2" ] || exit_for_later
+  done
+
+  enabled_file="$work_dir/enabled-models.txt"
+  default_file="$work_dir/default-model.txt"
+  select_enabled_models_text "$models_file" > "$enabled_file"
+  choose_model "$enabled_file" > "$default_file"
+  default_model="$(sed -n '1p' "$default_file")"
+
+  printf '%s\n' "$profile_name" > "$profile_dir/name"
+  printf '%s\n' "third_party" > "$profile_dir/setup-mode"
+  printf '%s\n' "$api_base" > "$profile_dir/api-base"
+  printf '%s\n' "$default_model" > "$profile_dir/default-model"
+  cp "$models_file" "$profile_dir/models.txt"
+  cp "$enabled_file" "$profile_dir/enabled-models.txt"
+  write_codex_config "$api_base" "$api_key" "$default_model" "$models_file" "$profile_dir"
+  apply_profile "$profile_dir"
+  rm -rf "$work_dir"
+  info "已更新第三方配置：$profile_name"
+}
+
+delete_profile() {
+  profile_dir="$1"
+  [ -d "$profile_dir" ] || die "配置不存在：$profile_dir"
+  label="$(profile_label "$profile_dir")"
+  mode="$(profile_mode "$profile_dir")"
+
+  section_title "本地配置 2/2：删除配置"
+  printf '%s\n' "即将删除：" >&2
+  printf '%s\n' "名称：$label" >&2
+  printf '%s\n' "类型：$mode" >&2
+  if [ "$(basename "$profile_dir")" = "$(sed -n '1p' "$LAST_PROFILE_FILE" 2>/dev/null || true)" ]; then
+    printf '%s\n' "这也是当前激活的配置，删除后会一并清空 ~/.codex 当前副本。" >&2
+  fi
+  printf '\n' >&2
+  choice="$(menu_read "确认删除？y=删除，n=取消，q=退出" "n" "y n q" "删除后该配置目录会被移除。")"
+  case "$choice" in
+    q) exit_for_later ;;
+    n) return 1 ;;
+  esac
+
+  last_slug="$(sed -n '1p' "$LAST_PROFILE_FILE" 2>/dev/null || true)"
+  if [ "$(basename "$profile_dir")" = "$last_slug" ]; then
+    clear_active_profile_state
+    rm -f "$LAST_PROFILE_FILE"
+  fi
+  rm -rf "$profile_dir"
+  info "已删除配置：$label"
+}
+
+manage_existing_profiles() {
+  profiles_file="$1"
+  count="$2"
+  [ "$count" -gt 0 ] || return 0
+
+  while :; do
+    section_title "本地配置 2/2：管理已有配置"
+    printf '%s\n' "请选择要管理的配置：" >&2
+    i=1
+    while [ "$i" -le "$count" ]; do
+      d="$(sed -n "${i}p" "$profiles_file")"
+      printf '\n%2s. %s [%s]\n' "$i" "$(profile_label "$d")" "$(profile_mode "$d")" >&2
+      i=$((i + 1))
+    done
+    printf '\n%s\n' " b. 返回上一层" >&2
+    printf '%s\n' " q. 退出，稍后继续" >&2
+    printf '\n' >&2
+
+    allowed="b q"
+    i=1
+    while [ "$i" -le "$count" ]; do allowed="$allowed $i"; i=$((i + 1)); done
+    choice="$(menu_read "请输入选项编号" "b" "$allowed" "请选择列表里的编号，或输入 b / q。")"
+    case "$choice" in
+      b) return 0 ;;
+      q) exit_for_later ;;
+    esac
+
+    profile_dir="$(sed -n "${choice}p" "$profiles_file")"
+    mode="$(profile_mode "$profile_dir")"
+    while :; do
+      section_title "本地配置 2/2：管理 $(profile_label "$profile_dir")"
+      printf '%s\n' "类型：$mode" >&2
+      printf '\n%s\n' "  1. 直接切换到这个配置" >&2
+      if [ "$mode" = "third_party" ]; then
+        printf '\n%s\n' "  2. 编辑供应商配置（Base URL / API Key / 模型列表 / 默认模型）" >&2
+        printf '\n%s\n' "  3. 删除这个配置" >&2
+        printf '\n%s\n' "  b. 返回配置列表" >&2
+        printf '%s\n' "  q. 退出，稍后继续" >&2
+        printf '\n' >&2
+        action="$(menu_read "请输入选项编号" "1" "1 2 3 b q" "可选：1 / 2 / 3 / b / q")"
+        case "$action" in
+          1) apply_profile "$profile_dir"; return 10 ;;
+          2)
+            if edit_third_party_profile "$profile_dir"; then
+              return 0
+            else
+              rc="$?"
+              [ "$rc" = "2" ] && break
+              exit_for_later
+            fi
+            ;;
+          3)
+            delete_profile "$profile_dir" || true
+            return 0
+            ;;
+          b) break ;;
+          q) exit_for_later ;;
+        esac
+      else
+        printf '\n%s\n' "  2. 删除这个配置" >&2
+        printf '\n%s\n' "  b. 返回配置列表" >&2
+        printf '%s\n' "  q. 退出，稍后继续" >&2
+        printf '\n' >&2
+        action="$(menu_read "请输入选项编号" "1" "1 2 b q" "可选：1 / 2 / b / q")"
+        case "$action" in
+          1) apply_profile "$profile_dir"; return 10 ;;
+          2)
+            delete_profile "$profile_dir" || true
+            return 0
+            ;;
+          b) break ;;
+          q) exit_for_later ;;
+        esac
+      fi
+    done
+  done
 }
 
 create_third_party_profile() {
@@ -667,7 +1116,7 @@ create_third_party_profile() {
   printf '%s\n' "$default_model" > "$profile_dir/default-model"
   cp "$models_file" "$profile_dir/models.txt"
   cp "$enabled_file" "$profile_dir/enabled-models.txt"
-  write_codex_config "$api_base" "$api_key" "$default_model" "$enabled_file" "$profile_dir"
+  write_codex_config "$api_base" "$api_key" "$default_model" "$models_file" "$profile_dir"
   apply_profile "$profile_dir"
 }
 
@@ -676,50 +1125,61 @@ select_or_create_profile() {
   chmod 700 "$CONFIGS_DIR" "$STATE_DIR" 2>/dev/null || true
   sync_current_profile
 
-  profiles_file="$STATE_DIR/profiles.txt"
-  : > "$profiles_file"
-  for d in "$CONFIGS_DIR"/*; do
-    [ -d "$d" ] || continue
-    [ -s "$d/setup-mode" ] || continue
-    printf '%s\n' "$d" >> "$profiles_file"
-  done
-
-  last_slug="$(sed -n '1p' "$LAST_PROFILE_FILE" 2>/dev/null || true)"
-  default_choice=""
-  count="$(wc -l < "$profiles_file" | tr -d ' ')"
-  if [ "$count" -gt 0 ]; then
-    section_title "本地配置 2/2：选择 Codex 配置"
-    printf '%s\n' "请选择本次启动使用的 Codex 配置：" >&2
-    i=1
-    while [ "$i" -le "$count" ]; do
-      d="$(sed -n "${i}p" "$profiles_file")"
-      label="$(profile_label "$d")"
-      mode="$(sed -n '1p' "$d/setup-mode" 2>/dev/null || true)"
-      mark=""
-      if [ "$(basename "$d")" = "$last_slug" ]; then
-        mark="（上次使用）"
-        default_choice="$i"
-      fi
-      printf '\n%2s. %s [%s] %s\n' "$i" "$label" "$mode" "$mark" >&2
-      i=$((i + 1))
-    done
-    new_choice=$((count + 1))
-    printf '\n%2s. 新建配置\n' "$new_choice" >&2
-    printf '\n%s\n' " q. 退出，稍后继续" >&2
-    printf '\n' >&2
-    [ -n "$default_choice" ] || default_choice="$new_choice"
-    allowed="q"
-    i=1
-    while [ "$i" -le "$new_choice" ]; do allowed="$allowed $i"; i=$((i + 1)); done
-    choice="$(menu_read "请输入选项编号" "$default_choice" "$allowed" "请选择列表里的编号，或输入 q 退出。")"
-    [ "$choice" = "q" ] && exit_for_later
-    if [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$count" ] 2>/dev/null; then
-      apply_profile "$(sed -n "${choice}p" "$profiles_file")"
-      return
-    fi
-  fi
-
   while :; do
+    profiles_file="$STATE_DIR/profiles.txt"
+    : > "$profiles_file"
+    for d in "$CONFIGS_DIR"/*; do
+      [ -d "$d" ] || continue
+      [ -s "$d/setup-mode" ] || continue
+      printf '%s\n' "$d" >> "$profiles_file"
+    done
+
+    last_slug="$(sed -n '1p' "$LAST_PROFILE_FILE" 2>/dev/null || true)"
+    default_choice=""
+    count="$(wc -l < "$profiles_file" | tr -d ' ')"
+    if [ "$count" -gt 0 ]; then
+      section_title "本地配置 2/2：选择 Codex 配置"
+      printf '%s\n' "请选择本次启动使用的 Codex 配置：" >&2
+      i=1
+      while [ "$i" -le "$count" ]; do
+        d="$(sed -n "${i}p" "$profiles_file")"
+        label="$(profile_label "$d")"
+        mode="$(profile_mode "$d")"
+        mark=""
+        if [ "$(basename "$d")" = "$last_slug" ]; then
+          mark="（上次使用）"
+          default_choice="$i"
+        fi
+        printf '\n%2s. %s [%s] %s\n' "$i" "$label" "$mode" "$mark" >&2
+        i=$((i + 1))
+      done
+      new_choice=$((count + 1))
+      manage_choice=$((count + 2))
+      printf '\n%2s. 新建配置\n' "$new_choice" >&2
+      printf '\n%2s. 管理已有配置\n' "$manage_choice" >&2
+      printf '\n%s\n' " q. 退出，稍后继续" >&2
+      printf '\n' >&2
+      [ -n "$default_choice" ] || default_choice="$new_choice"
+      allowed="q"
+      i=1
+      while [ "$i" -le "$manage_choice" ]; do allowed="$allowed $i"; i=$((i + 1)); done
+      choice="$(menu_read "请输入选项编号" "$default_choice" "$allowed" "请选择列表里的编号，或输入 q 退出。")"
+      [ "$choice" = "q" ] && exit_for_later
+      if [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$count" ] 2>/dev/null; then
+        apply_profile "$(sed -n "${choice}p" "$profiles_file")"
+        return
+      fi
+      if [ "$choice" = "$manage_choice" ]; then
+        if manage_existing_profiles "$profiles_file" "$count"; then
+          continue
+        else
+          rc="$?"
+          [ "$rc" = "10" ] && return
+          exit_for_later
+        fi
+      fi
+    fi
+
     section_title "本地配置 2/2：新建 Codex 配置"
     printf '%s\n' "请选择要新建的 Codex 配置：" >&2
     printf '\n%s\n' "  1. 官方登录入口" >&2
@@ -851,15 +1311,11 @@ check_status() {
   [ -x "$LAUNCHER" ] || { printf '%s\n' "missing_launcher"; missing=1; }
   [ -s "$CODEX_HOME/AGENTS.md" ] || { printf '%s\n' "missing_agents"; missing=1; }
   last_slug="$(sed -n '1p' "$LAST_PROFILE_FILE" 2>/dev/null || true)"
-  if [ -n "$last_slug" ] && [ -s "$CONFIGS_DIR/$last_slug/setup-mode" ] && [ "$(sed -n '1p' "$CONFIGS_DIR/$last_slug/setup-mode")" = "official" ]; then
+  if [ -n "$last_slug" ] && [ -s "$CONFIGS_DIR/$last_slug/setup-mode" ] && [ "$(profile_mode "$CONFIGS_DIR/$last_slug")" = "official" ]; then
     :
   else
     [ -s "$CODEX_HOME/config.toml" ] || { printf '%s\n' "missing_config"; missing=1; }
     [ -s "$CODEX_HOME/auth.json" ] || { printf '%s\n' "missing_auth"; missing=1; }
-    if [ -s "$CODEX_HOME/config.toml" ] && grep -F 'model_catalog_json' "$CODEX_HOME/config.toml" >/dev/null 2>&1; then
-      printf '%s\n' "legacy_model_catalog_config"
-      missing=1
-    fi
   fi
   return "$missing"
 }
@@ -916,6 +1372,9 @@ main() {
   case "${1:-}" in
     --status)
       check_status
+      ;;
+    --refresh-current-profile)
+      refresh_current_profile
       ;;
     --preflight)
       if check_status >/dev/null 2>&1; then

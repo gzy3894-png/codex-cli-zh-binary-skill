@@ -236,13 +236,13 @@ if [ "${CODEX_FOR_TUI_AUTO_START:-1}" = "0" ]; then
   exit 0
 fi
 
+refresh_remote_scripts
+
 if have codex; then
   info "Codex 已安装，正在启动..."
   codex
   exit $?
 fi
-
-refresh_remote_scripts
 
 if has_resume_state && resume_runner="$(choose_resume_runner 2>/dev/null)"; then
   info "检测到未完成的 Codex 本地配置，继续恢复..."
