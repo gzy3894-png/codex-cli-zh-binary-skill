@@ -31,7 +31,7 @@ Codex for TUI 基于 ReTerminal 改造，目标是在 Android 手机上提供一
 sh tests/codex-for-tui-installer-smoke.sh
 ```
 
-## 上游
+## 致谢
 
 本应用基于 ReTerminal 改造。感谢 ReTerminal 官方项目和作者 Rohit Kushvaha 提供 Android 终端、proot 和 Alpine 能力基础：
 
@@ -39,7 +39,7 @@ sh tests/codex-for-tui-installer-smoke.sh
 https://github.com/RohitKushvaha01/ReTerminal
 ```
 
-也感谢 ReTerminal 中文资源/汉化版维护者，让手机端终端体验更接近中文用户的日常使用习惯。若需要在致谢中写入具体作者名，请以可核验的作者主页或发布链接为准。
+感谢 OpenAI Codex CLI 上游项目。Codex for TUI 只是围绕 Android 终端环境、中文构建和安装配置流程做整理与集成，不是 OpenAI 官方发布渠道。
 
 ## 社区
 

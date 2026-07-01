@@ -2,7 +2,9 @@
 
 Codex for TUI 是一个面向 Android 的 Codex 终端应用。它基于 ReTerminal 改造，打开后进入 Alpine 环境，并引导用户完成 Codex 中文版的安装、依赖准备和 API 配置。
 
-它解决的是一个很具体的问题：在手机上直接跑 Codex CLI 往往要自己处理终端、proot、Alpine、依赖、下载、环境变量、模型配置和恢复流程。Codex for TUI 把这些步骤收进一个应用里，让用户尽量少碰零散命令。
+它解决的是一个很具体的问题：在手机上直接跑 Codex CLI 往往要自己处理终端、proot、Alpine、依赖、下载、环境变量、模型配置和恢复流程。Codex for TUI 把这些步骤收进一个应用里，尽量把“会劝退普通用户的一长串命令”压缩成一次可恢复的终端引导。
+
+简单说，它是给 Android 用户准备的 Codex TUI 随身入口：装好 APK，打开终端，按提示走完安装和配置，就能在手机上进入 Codex。
 
 ## 适合谁
 
@@ -11,19 +13,20 @@ Codex for TUI 是一个面向 Android 的 Codex 终端应用。它基于 ReTermi
 - 已经有官方 API Key，或使用兼容 Responses API 的第三方服务的用户。
 - 希望配置失败后可以重新打开应用继续，而不是从头排错的用户。
 
-## 主要优势
+## 特色
 
-- 内置 Alpine 运行环境，避免很多原生 Termux 环境里的兼容性问题。
-- 首次启动会检查依赖和下载内容，用户可以先看到大概需要下载什么。
-- Codex 中文版 ARM64 musl 二进制由脚本自动下载、校验和安装。
-- 第三方 Responses API 配置会自动请求 `/models`，再让用户选择启用模型和默认模型。
-- 本地配置流程支持继续、返回和稍后再来，减少输错一步就卡住的情况。
-- 菜单使用纯终端交互，适合手机小屏和外接键盘。
-- 安装完成后提供 `codex`、`Codex`、`CODEX` 等大小写入口。
+- **把复杂环境收进一个 APK**：终端、Alpine、安装脚本和恢复流程放在一起，不再要求用户先搭好一整套手机 Linux 环境。
+- **面向 Codex 的启动体验**：应用不是泛用终端换壳，启动目标就是把 Codex 跑起来；未安装、未配置、配置未完成都会进入对应引导。
+- **适合中文用户的 Codex CLI 路线**：自动安装 Codex 中文版 ARM64 musl 二进制，减少自己找包、传文件、改 PATH 的折腾。
+- **第三方 API 配置更像正常产品流程**：输入 Base URL 和 API Key 后自动请求 `/models`，再用编号选择启用模型和默认模型。
+- **输错也不容易崩盘**：本地配置支持返回、退出稍后继续；URL 粘到菜单编号处会提示纠正，非法 Base URL 不会直接拿去请求。
+- **网络差时更能扛**：下载尽量使用断点续传、HTTP/1.1、重试和 SHA256 校验；依赖安装提供 Minimal / Full 两种路径。
+- **手机终端友好**：纯 TUI 菜单、清晰阶段标题、选项留白，适合小屏触控、软键盘和外接键盘。
+- **入口不挑大小写**：安装完成后提供 `codex`、`Codex`、`CODEX` 等大小写入口，少一点手机输入时的烦躁。
 
 ## 关键词
 
-如果你在找 `codex汉化项目`、`codex 汉化项目`、`Codex CLI 汉化项目`、`Codex CLI 中文汉化`、`Codex 中文版`、`Codex 汉化版`、`OpenAI Codex 中文版`、`Termux Codex 中文版`、`Android Codex 汉化`、`Android Codex CLI`、`手机运行 Codex`、`Codex for TUI` 或 `ReTerminal Codex`，这个仓库提供的是面向 Android 终端的一键安装和配置路线。
+如果你在找 `codex`、`codex cli`、`openai codex`、`codex tui`、`codex for tui`、`codex android`、`android codex`、`codex termux`、`termux codex`、`codex alpine`、`codex proot`、`codex reterminal`、`reterminal codex`、`codex mobile`、`mobile codex`、`手机 Codex`、`手机运行 Codex`、`Android Codex CLI`、`Codex CLI Android`、`Codex 中文版`、`Codex 汉化版`、`OpenAI Codex 中文版`、`Codex CLI 中文版`、`Codex CLI 汉化项目`、`Codex CLI 中文汉化`、`codex汉化项目`、`codex 汉化项目`、`Termux Codex 中文版`、`Android Codex 汉化`、`Responses API Codex`、`第三方 API Codex`、`Alpine Codex` 或 `手机 AI 编程终端`，这个仓库提供的是面向 Android 终端的一键安装和配置路线。
 
 ## 下载
 
@@ -103,7 +106,7 @@ sh tests/codex-for-tui-installer-smoke.sh
 
 Android APK 构建建议交给 GitHub Actions，避免本机 SDK/JDK 环境差异影响结果。
 
-## 上游与许可
+## 致谢与许可
 
 Codex for TUI 基于 ReTerminal 改造。感谢 ReTerminal 官方项目和作者 Rohit Kushvaha 提供 Android 终端、proot 和 Alpine 能力基础：
 
@@ -111,9 +114,9 @@ Codex for TUI 基于 ReTerminal 改造。感谢 ReTerminal 官方项目和作者
 https://github.com/RohitKushvaha01/ReTerminal
 ```
 
-也感谢 ReTerminal 中文资源/汉化版维护者，让手机端终端体验更接近中文用户的日常使用习惯。若需要在致谢中写入具体作者名，请以可核验的作者主页或发布链接为准。
+感谢 OpenAI Codex CLI 上游项目。Codex for TUI 只是围绕 Android 终端环境、中文构建和安装配置流程做整理与集成，不是 OpenAI 官方发布渠道。
 
-本仓库脚本和改动按 Apache-2.0 许可证开源。Codex 中文版二进制基于 OpenAI Codex CLI 源码及本地中文化改动构建；本项目不是 OpenAI 官方发布渠道。
+本仓库脚本和改动按 Apache-2.0 许可证开源。Codex 中文版二进制基于 OpenAI Codex CLI 源码及本地中文化改动构建。
 
 ## 社区
 
