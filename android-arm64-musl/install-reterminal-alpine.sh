@@ -294,36 +294,46 @@ choose_model() {
   list_file="$1"
   count="$(wc -l < "$list_file" | tr -d ' ')"
   [ "$count" -gt 0 ] || return 1
-  printf '%s\n' "可用模型：" >&2
+  printf '\n%s\n' "请选择默认启动模型：" >&2
+  printf '%s\n' "这个模型会写入 config.toml 的 model 字段，Codex 启动后会默认使用它；其他已启用模型仍可在 /model 中切换。" >&2
   nl -w2 -s'. ' "$list_file" >&2
-  choice="$(tty_read "请选择默认模型编号" "1")"
+  choice="$(tty_read "请输入默认启动模型编号" "1")"
   case "$choice" in
     *[!0-9]*|"") choice=1 ;;
   esac
   if [ "$choice" -lt 1 ] 2>/dev/null || [ "$choice" -gt "$count" ] 2>/dev/null; then
     choice=1
   fi
-  sed -n "${choice}p" "$list_file"
+  chosen="$(sed -n "${choice}p" "$list_file")"
+  printf '已选择默认启动模型：%s\n' "$chosen" >&2
+  printf '%s\n' "$chosen"
 }
 
 select_enabled_models_text() {
   list_file="$1"
   count="$(wc -l < "$list_file" | tr -d ' ')"
   [ "$count" -gt 0 ] || return 1
-  printf '%s\n' "可用模型：" >&2
-  nl -w2 -s'. ' "$list_file" >&2
 
   selected="$tmp/selected-model-indexes.txt"
   : > "$selected"
   seq 1 "$count" > "$selected"
 
   while :; do
-    printf '\n%s\n' "当前已选择：" >&2
-    while IFS= read -r i; do
-      sed -n "${i}p" "$list_file" | sed "s/^/  [$i] /" >&2
-    done < "$selected"
-    printf '%s\n' "输入编号可切换选择，多个编号可用空格/逗号分隔；a=全选，n=清空，d=完成，回车=完成。" >&2
-    picks="$(tty_read "多选操作" "d")"
+    printf '\n%s\n' "选择要启用的模型（默认已全选）：" >&2
+    i=1
+    while [ "$i" -le "$count" ]; do
+      model_name="$(sed -n "${i}p" "$list_file")"
+      if grep -x "$i" "$selected" >/dev/null 2>&1; then
+        mark="x"
+      else
+        mark=" "
+      fi
+      printf '  [%s] %2s. %s\n' "$mark" "$i" "$model_name" >&2
+      i=$((i + 1))
+    done
+    printf '%s\n' "操作：输入编号切换选择，多个编号可用空格/逗号分隔；a=全选，n=清空。" >&2
+    printf '%s\n' "选好了直接按回车即可；也可以输入 d/done 完成。" >&2
+    picks="$(tty_read "多选操作（回车=完成）" "")"
     picks_lc="$(printf '%s' "$picks" | lower | tr ',' ' ')"
     case "$picks_lc" in
       ""|d|done|ok|y|yes|完成)
@@ -331,10 +341,12 @@ select_enabled_models_text() {
         ;;
       a|all|全选)
         seq 1 "$count" > "$selected"
+        printf '%s\n' "已全选。选好了直接按回车。" >&2
         continue
         ;;
       n|none|clear|清空)
         : > "$selected"
+        printf '%s\n' "已清空选择。请至少选择一个模型，或继续按回车使用全部模型兜底。" >&2
         continue
         ;;
     esac
@@ -352,6 +364,7 @@ select_enabled_models_text() {
         sort -n -u "$selected" -o "$selected"
       fi
     done
+    printf '%s\n' "已更新选择。选好了直接按回车完成；还要调整就继续输入编号。" >&2
   done
 
   if [ ! -s "$selected" ]; then
@@ -600,7 +613,9 @@ install_case_variants() {
       for d in d D; do
         for e in e E; do
           for x in x X; do
-            ln -sf "$target" "$dir/$c$o$d$e$x" 2>/dev/null || true
+            link="$dir/$c$o$d$e$x"
+            [ "$link" = "$target" ] && continue
+            ln -sf "$target" "$link" 2>/dev/null || true
           done
         done
       done
@@ -732,7 +747,8 @@ else
 fi
 
 if [ "$SKIP_RUN" != "1" ]; then
-  "$launcher_path" --version
+  info "安装配置完成，正在启动 Codex..."
+  exec "$launcher_path"
 fi
 
 info "完成。现在可以直接运行：$INSTALL_NAME"
