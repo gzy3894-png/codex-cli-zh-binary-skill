@@ -7,8 +7,8 @@ plugins {
 
 
 android {
-    namespace = "com.rk.application"
-    compileSdk = 37
+    namespace = "com.gzy3894.codexfortui"
+    compileSdk = 36
 
 
     dependenciesInfo {
@@ -74,7 +74,7 @@ android {
     defaultConfig {
         applicationId = "com.gzy3894.codexfortui"
         minSdk = 26
-        targetSdk = 37
+        targetSdk = 36
         versionCode = 10
         versionName = "1.3.0"
         vectorDrawables {
