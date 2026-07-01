@@ -33,8 +33,18 @@ sh tests/codex-for-tui-installer-smoke.sh
 
 ## 上游
 
-本应用基于 ReTerminal 改造：
+本应用基于 ReTerminal 改造。感谢 ReTerminal 官方项目和作者 Rohit Kushvaha 提供 Android 终端、proot 和 Alpine 能力基础：
 
 ```text
 https://github.com/RohitKushvaha01/ReTerminal
+```
+
+也感谢 ReTerminal 中文资源/汉化版维护者，让手机端终端体验更接近中文用户的日常使用习惯。若需要在致谢中写入具体作者名，请以可核验的作者主页或发布链接为准。
+
+## 社区
+
+本项目认可并感谢 Linux Do 社区：
+
+```text
+https://linux.do
 ```
