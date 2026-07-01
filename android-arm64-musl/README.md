@@ -158,7 +158,8 @@ model_provider = "custom"
 model = "你选择的默认模型"
 model_reasoning_effort = "medium"
 model_auto_compact_token_limit = 120000
-model_catalog_json = "/root/.codex/model-catalog.json"
+model_catalog_json = "/root/.codex/model_catalog.json"
+disable_response_storage = true
 
 [features]
 auto_compaction = true
@@ -183,7 +184,7 @@ cwd = "/root/.codex"
 "gpt-5.2" = "gpt-5.4"
 ```
 
-安装器会把拉取到的模型名写入 `/root/.codex/model-catalog.json`，并在 `config.toml` 里通过 `model_catalog_json` 指向它。这样 `/model` 菜单能看到第三方模型名，provider command auth 仍继续负责刷新 token。
+安装器会把当前 provider `/v1/models` 拉到的全部模型写入 `/root/.codex/model_catalog.json`，并在 `config.toml` 里通过 `model_catalog_json` 指向它。这样 `/model` 菜单会直接显示拉取到的第三方模型名，provider command auth 仍继续负责刷新 token。
 
 密钥保存在 Alpine rootfs 的 `/root/.codex/auth.json`，权限为 `600`：
 

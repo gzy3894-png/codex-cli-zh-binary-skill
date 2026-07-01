@@ -360,16 +360,22 @@ EOF
 
   config="$tmp/home/.codex/config.toml"
   helper="$tmp/home/.codex/bin/provider-api-key"
-  catalog="$tmp/home/.codex/model-catalog.json"
+  catalog="$tmp/home/.codex/model_catalog.json"
   assert_file_contains "$config" 'requires_openai_auth = false'
   assert_file_contains "$config" '[model_providers.custom.auth]'
   assert_file_contains "$config" "command = \"$helper\""
   assert_file_contains "$config" "model_catalog_json = \"$catalog\""
   assert_file_contains "$config" 'auto_compaction = true'
+  assert_file_contains "$config" 'disable_response_storage = true'
+  assert_file_contains "$config" '[tui.model_availability_nux]'
+  assert_file_contains "$config" '"gpt-test" = 3'
+  assert_file_contains "$config" '"deepseek-v4-flash:free" = 3'
   assert_file_contains "$config" '"gpt-5.3-codex" = "gpt-5.4"'
-  [ -e "$catalog" ] || fail "installer did not create model-catalog.json"
+  [ -e "$catalog" ] || fail "installer did not create model_catalog.json"
   assert_file_contains "$catalog" '"slug": "gpt-test"'
   assert_file_contains "$catalog" '"slug": "deepseek-v4-flash:free"'
+  assert_file_contains "$catalog" '"default_reasoning_level": "medium"'
+  assert_file_contains "$catalog" '"effort":"xhigh"'
   [ "$("$helper")" = "sk-test-token" ] || fail "provider auth helper did not read auth.json"
   rm -rf "$tmp"
 }
@@ -408,13 +414,14 @@ EOF
 
   config="$tmp/profile/config.toml"
   helper="$tmp/profile/bin/provider-api-key"
-  catalog="$tmp/profile/model-catalog.json"
+  catalog="$tmp/profile/model_catalog.json"
   assert_file_contains "$config" 'requires_openai_auth = false'
   assert_file_contains "$config" '[model_providers.custom.auth]'
   assert_file_contains "$config" "command = \"$helper\""
   assert_file_contains "$config" "model_catalog_json = \"$catalog\""
-  [ -e "$catalog" ] || fail "legacy model-catalog.json was not recreated"
+  [ -e "$catalog" ] || fail "legacy model_catalog.json was not recreated"
   assert_file_contains "$catalog" '"slug": "gpt-legacy"'
+  [ ! -e "$tmp/profile/model-catalog.json" ] || fail "legacy hyphenated model catalog should be removed after migration"
   [ "$("$helper")" = "sk-legacy-token" ] || fail "migrated provider auth helper did not read auth.json"
   rm -rf "$tmp"
 }
@@ -458,14 +465,16 @@ test_resume_edit_third_party_profile_updates_provider_config() {
   profile_dir="$tmp/home/.codex/api-profiles/krill"
   config="$profile_dir/config.toml"
   helper="$profile_dir/bin/provider-api-key"
-  catalog="$profile_dir/model-catalog.json"
+  catalog="$profile_dir/model_catalog.json"
   [ "$(sed -n '1p' "$profile_dir/name")" = "Krill New" ] || fail "profile name was not updated"
   [ "$(sed -n '1p' "$profile_dir/api-base")" = "https://api.new.example.com/v1" ] || fail "profile API base was not updated"
   [ "$(sed -n '1p' "$profile_dir/default-model")" = "deepseek-v4-flash:free" ] || fail "profile default model was not updated"
   assert_file_contains "$config" 'base_url = "https://api.new.example.com/v1"'
   assert_file_contains "$config" 'model = "deepseek-v4-flash:free"'
+  assert_file_contains "$config" '"gpt-new" = 3'
   assert_file_contains "$catalog" '"slug": "gpt-new"'
   assert_file_contains "$catalog" '"slug": "deepseek-v4-flash:free"'
+  assert_file_contains "$catalog" '"default_reasoning_level": "medium"'
   [ "$("$helper")" = "sk-old-token" ] || fail "edited profile did not preserve existing API key when left blank"
   rm -rf "$tmp"
 }
@@ -481,7 +490,7 @@ test_resume_delete_profile_clears_active_copy() {
   printf 'active\n' > "$tmp/home/.codex/install-state/active-profile-label"
   printf 'cfg\n' > "$tmp/home/.codex/config.toml"
   printf 'auth\n' > "$tmp/home/.codex/auth.json"
-  printf 'catalog\n' > "$tmp/home/.codex/model-catalog.json"
+  printf 'catalog\n' > "$tmp/home/.codex/model_catalog.json"
   printf '#!/usr/bin/env sh\n' > "$tmp/home/.codex/bin/provider-api-key"
   chmod +x "$tmp/home/.codex/bin/provider-api-key"
   printf 'y\n' > "$tmp/input"
@@ -502,8 +511,36 @@ test_resume_delete_profile_clears_active_copy() {
   [ ! -e "$tmp/home/.codex/api-profiles/last-profile" ] || fail "last-profile marker was not cleared"
   [ ! -e "$tmp/home/.codex/config.toml" ] || fail "active config copy was not cleared"
   [ ! -e "$tmp/home/.codex/auth.json" ] || fail "active auth copy was not cleared"
-  [ ! -e "$tmp/home/.codex/model-catalog.json" ] || fail "active model catalog copy was not cleared"
+  [ ! -e "$tmp/home/.codex/model_catalog.json" ] || fail "active model catalog copy was not cleared"
   [ ! -e "$tmp/home/.codex/bin/provider-api-key" ] || fail "active provider helper was not cleared"
+  rm -rf "$tmp"
+}
+
+test_resume_all_done_cleanup_preserves_model_catalog() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-resume-all-done.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.codex/install-state" "$tmp/bin"
+  make_resume_lib "$RESUME" "$tmp/resume-lib.sh"
+  printf 'catalog\n' > "$tmp/home/.codex/model_catalog.json"
+  printf '1\n' > "$tmp/input"
+
+  (
+    # shellcheck disable=SC1091
+    . "$tmp/resume-lib.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_FORCE_STDIN=1
+    STATE_DIR="$CODEX_HOME/install-state"
+    INSTALL_DIR="$tmp/bin"
+    RESUME_SCRIPT="$tmp/bin/codex-local-resume"
+    WRAPPER="$tmp/bin/.codex-launcher-real"
+    LAUNCHER="$tmp/bin/codex"
+    write_real_wrapper() { :; }
+    install_case_variants() { :; }
+    all_done_menu >"$tmp/stdout" 2>"$tmp/stderr" < "$tmp/input"
+  ) || fail "all_done_menu cleanup should succeed"
+
+  [ -e "$tmp/home/.codex/model_catalog.json" ] || fail "all_done_menu cleanup should preserve model catalog"
   rm -rf "$tmp"
 }
 
@@ -517,7 +554,7 @@ test_resume_status_accepts_model_catalog_config() {
     chmod +x "$file"
   done
   printf 'agents\n' > "$tmp/home/.codex/AGENTS.md"
-  printf 'cfg\nmodel_catalog_json = "/root/.codex/model-catalog.json"\n' > "$tmp/home/.codex/config.toml"
+  printf 'cfg\nmodel_catalog_json = "/root/.codex/model_catalog.json"\n' > "$tmp/home/.codex/config.toml"
   printf '{"OPENAI_API_KEY":"sk"}\n' > "$tmp/home/.codex/auth.json"
 
   (
@@ -581,11 +618,12 @@ test_resume_refresh_current_profile_updates_current_third_party_profile() {
   assert_file_contains "$profile_dir/enabled-models.txt" "deepseek-old"
   assert_file_not_contains "$profile_dir/enabled-models.txt" "legacy-only"
   [ "$(sed -n '1p' "$profile_dir/default-model")" = "deepseek-old" ] || fail "default model should be preserved when still available"
-  assert_file_contains "$profile_dir/model-catalog.json" '"slug": "gpt-5.5"'
+  assert_file_contains "$profile_dir/model_catalog.json" '"slug": "gpt-5.5"'
   assert_file_contains "$profile_dir/config.toml" 'model = "deepseek-old"'
+  assert_file_contains "$profile_dir/config.toml" '"gpt-5.5" = 4'
   [ "$("$profile_dir/bin/provider-api-key")" = "sk-krill-old" ] || fail "refresh should preserve existing API key"
   assert_file_contains "$tmp/home/.codex/config.toml" 'model = "deepseek-old"'
-  assert_file_contains "$tmp/home/.codex/model-catalog.json" '"slug": "new-only"'
+  assert_file_contains "$tmp/home/.codex/model_catalog.json" '"slug": "new-only"'
   rm -rf "$tmp"
 }
 
@@ -610,7 +648,7 @@ test_resume_refresh_current_profile_noops_for_official_profile() {
   ) || fail "refresh_current_profile should no-op for official profile"
 
   assert_file_contains "$tmp/stdout" "当前配置是官方登录入口"
-  [ ! -e "$tmp/home/.codex/model-catalog.json" ] || fail "official refresh should not generate third-party model catalog"
+  [ ! -e "$tmp/home/.codex/model_catalog.json" ] || fail "official refresh should not generate third-party model catalog"
   rm -rf "$tmp"
 }
 
@@ -645,6 +683,7 @@ run_step test_installer_config_uses_provider_auth_and_model_catalog
 run_step test_resume_migrates_legacy_model_catalog_profile
 run_step test_resume_edit_third_party_profile_updates_provider_config
 run_step test_resume_delete_profile_clears_active_copy
+run_step test_resume_all_done_cleanup_preserves_model_catalog
 run_step test_resume_status_accepts_model_catalog_config
 run_step test_resume_refresh_current_profile_updates_current_third_party_profile
 run_step test_resume_refresh_current_profile_noops_for_official_profile

@@ -26,6 +26,8 @@ STATE_ROOT="${CODEX_FOR_TUI_STATE_DIR:-${HOME:-/root}/.codex-for-tui}"
 DOWNLOAD_METHOD_FILE="$STATE_ROOT/download-method"
 DEPS_CONFIRM_FILE="$STATE_ROOT/deps-confirmed"
 NOTICE_URL="${CODEX_FOR_TUI_NOTICE_URL:-}"
+MODEL_CATALOG_BASENAME="model_catalog.json"
+LEGACY_MODEL_CATALOG_BASENAME="model-catalog.json"
 export PATH="/bin:/sbin:/usr/local/bin:/usr/bin:/usr/sbin:${HOME:-/root}/.local/bin:${PATH:-}"
 
 info() { printf '%s\n' "$*"; }
@@ -49,6 +51,14 @@ toml_escape() {
 
 json_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+model_catalog_path() {
+  printf '%s/%s\n' "$1" "$MODEL_CATALOG_BASENAME"
+}
+
+legacy_model_catalog_path() {
+  printf '%s/%s\n' "$1" "$LEGACY_MODEL_CATALOG_BASENAME"
 }
 
 sha256_file() {
@@ -682,6 +692,110 @@ EOF
   chmod 700 "$helper"
 }
 
+model_display_name() {
+  case "$1" in
+    gpt-5.4-mini) printf '%s' "GPT-5.4-Mini" ;;
+    gpt-5.5) printf '%s' "GPT-5.5" ;;
+    codex-auto-review) printf '%s' "Codex Auto Review" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+model_description() {
+  case "$1" in
+    gpt-5.4) printf '%s' "Strong model for everyday coding." ;;
+    gpt-5.4-mini) printf '%s' "Small, fast, and cost-efficient model for simpler coding tasks." ;;
+    gpt-5.5) printf '%s' "Frontier model for complex coding, research, and real-world work." ;;
+    codex-auto-review) printf '%s' "Automatic approval review model for Codex." ;;
+    gpt-5.3-codex-spark) printf '%s' "Provider API model exposed as gpt-5.3-codex-spark." ;;
+    *) printf '%s' "Third-party provider model exposed by the current API." ;;
+  esac
+}
+
+model_supports_reasoning() {
+  case "$1" in
+    gpt-image-*|*image*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+model_reasoning_levels_json() {
+  if model_supports_reasoning "$1"; then
+    printf '%s' '[{"effort":"low","description":"Fast responses with lighter reasoning"},{"effort":"medium","description":"Balances speed and reasoning depth for everyday tasks"},{"effort":"high","description":"Greater reasoning depth for complex problems"},{"effort":"xhigh","description":"Extra high reasoning depth for complex problems"}]'
+  else
+    printf '%s' '[]'
+  fi
+}
+
+model_default_reasoning_json() {
+  if model_supports_reasoning "$1"; then
+    printf '%s' '"medium"'
+  else
+    printf '%s' 'null'
+  fi
+}
+
+model_default_verbosity() {
+  case "$1" in
+    gpt-5.4-mini|gpt-image-2|deepseek-v4-flash:free) printf '%s' "medium" ;;
+    *) printf '%s' "low" ;;
+  esac
+}
+
+model_web_search_tool_type() {
+  case "$1" in
+    gpt-5.3-codex-spark) printf '%s' "text" ;;
+    *) printf '%s' "text_and_image" ;;
+  esac
+}
+
+model_priority() {
+  case "$1" in
+    gpt-image-2) printf '%s' "2" ;;
+    gpt-5.5|codex-auto-review) printf '%s' "1" ;;
+    *) printf '%s' "0" ;;
+  esac
+}
+
+model_max_context_window() {
+  case "$1" in
+    gpt-5.4|codex-auto-review) printf '%s' "1000000" ;;
+    *) printf '%s' "272000" ;;
+  esac
+}
+
+model_availability_nux_level() {
+  case "$1" in
+    gpt-5.5) printf '%s' "4" ;;
+    *) printf '%s' "3" ;;
+  esac
+}
+
+append_model_availability_nux() {
+  models_file="$1"
+  default_model="$2"
+  tmp_models="${TMPDIR:-/tmp}/codex-model-availability.$$"
+  fallback_file=""
+  source_file="$models_file"
+
+  if [ ! -s "$source_file" ] && [ -n "$default_model" ]; then
+    fallback_file="$tmp_models.default"
+    printf '%s\n' "$default_model" > "$fallback_file"
+    source_file="$fallback_file"
+  fi
+
+  awk 'NF && !seen[$0]++ { print }' "$source_file" > "$tmp_models"
+  if [ -s "$tmp_models" ]; then
+    printf '\n[tui.model_availability_nux]\n'
+    while IFS= read -r model; do
+      [ -n "$model" ] || continue
+      printf '"%s" = %s\n' "$(toml_escape "$model")" "$(model_availability_nux_level "$model")"
+    done < "$tmp_models"
+  fi
+
+  rm -f "$tmp_models" "$fallback_file"
+}
+
 write_model_catalog() {
   models_file="$1"
   default_model="$2"
@@ -707,43 +821,47 @@ write_model_catalog() {
     while IFS= read -r model; do
       [ -n "$model" ] || continue
       model_esc="$(json_escape "$model")"
+      display_name_esc="$(json_escape "$(model_display_name "$model")")"
+      description_esc="$(json_escape "$(model_description "$model")")"
+      default_reasoning_json="$(model_default_reasoning_json "$model")"
+      reasoning_levels_json="$(model_reasoning_levels_json "$model")"
+      default_verbosity="$(model_default_verbosity "$model")"
+      web_search_tool_type="$(model_web_search_tool_type "$model")"
+      priority="$(model_priority "$model")"
+      max_context_window="$(model_max_context_window "$model")"
       [ "$count" -eq 0 ] || printf ',\n'
       cat <<EOF
     {
+      "prefer_websockets": true,
+      "support_verbosity": true,
+      "default_verbosity": "$default_verbosity",
+      "apply_patch_tool_type": "freeform",
+      "web_search_tool_type": "$web_search_tool_type",
+      "input_modalities": ["text", "image"],
+      "supports_image_detail_original": true,
+      "truncation_policy": {"mode": "tokens", "limit": 10000},
+      "supports_parallel_tool_calls": true,
+      "context_window": 272000,
+      "max_context_window": $max_context_window,
+      "auto_compact_token_limit": 120000,
+      "reasoning_summary_format": "experimental",
+      "default_reasoning_summary": "none",
       "slug": "$model_esc",
-      "display_name": "$model_esc",
-      "description": "Third-party API model",
-      "default_reasoning_level": "medium",
-      "supported_reasoning_levels": [
-        {"effort": "low", "description": "Fast responses with lighter reasoning"},
-        {"effort": "medium", "description": "Balances speed and reasoning depth"},
-        {"effort": "high", "description": "Greater reasoning depth"},
-        {"effort": "xhigh", "description": "Extra high reasoning depth"}
-      ],
+      "display_name": "$display_name_esc",
+      "description": "$description_esc",
+      "default_reasoning_level": $default_reasoning_json,
+      "supported_reasoning_levels": $reasoning_levels_json,
       "shell_type": "shell_command",
       "visibility": "list",
+      "minimal_client_version": "0.98.0",
       "supported_in_api": true,
-      "priority": 0,
       "availability_nux": null,
       "upgrade": null,
+      "priority": $priority,
       "base_instructions": "",
       "model_messages": null,
       "supports_reasoning_summaries": true,
-      "default_reasoning_summary": "auto",
-      "support_verbosity": false,
-      "default_verbosity": null,
-      "apply_patch_tool_type": null,
-      "web_search_tool_type": "text",
-      "truncation_policy": {"mode": "tokens", "limit": 10000},
-      "supports_parallel_tool_calls": true,
-      "supports_image_detail_original": false,
-      "context_window": 120000,
-      "max_context_window": 120000,
-      "auto_compact_token_limit": 120000,
-      "effective_context_window_percent": 95,
-      "experimental_supported_tools": [],
-      "input_modalities": ["text"],
-      "supports_search_tool": false,
+      "supports_search_tool": true,
       "use_responses_lite": false
     }
 EOF
@@ -777,7 +895,8 @@ write_codex_config() {
   } > "$auth_file"
   chmod 600 "$auth_file"
   write_provider_auth_helper "$codex_home"
-  write_model_catalog "$models_file" "$default_model" "$codex_home/model-catalog.json"
+  write_model_catalog "$models_file" "$default_model" "$(model_catalog_path "$codex_home")"
+  rm -f "$(legacy_model_catalog_path "$codex_home")"
 
   config_file="$codex_home/config.toml"
 
@@ -787,13 +906,14 @@ write_codex_config() {
   home_esc="$(toml_escape "$HOME")"
   codex_home_esc="$(toml_escape "$codex_home")"
   auth_command_esc="$(toml_escape "$codex_home/bin/provider-api-key")"
-  model_catalog_esc="$(toml_escape "$codex_home/model-catalog.json")"
+  model_catalog_esc="$(toml_escape "$(model_catalog_path "$codex_home")")"
   {
     printf 'model_catalog_json = "%s"\n' "$model_catalog_esc"
     printf 'model_provider = "%s"\n' "$provider_id_esc"
     printf 'model = "%s"\n' "$default_model_esc"
     printf 'model_reasoning_effort = "medium"\n'
     printf 'model_auto_compact_token_limit = 120000\n'
+    printf 'disable_response_storage = true\n'
     printf '\n[features]\n'
     printf 'auto_compaction = true\n'
     printf 'hooks = false\n'
@@ -813,6 +933,9 @@ write_codex_config() {
     printf '\n[tui]\n'
     printf 'status_line = ["model-with-reasoning", "current-dir", "context-remaining"]\n'
     printf 'status_line_use_colors = true\n'
+    append_model_availability_nux "$models_file" "$default_model"
+    printf '\n[notice]\n'
+    printf 'hide_full_access_warning = true\n'
     printf '\n[notice.model_migrations]\n'
     printf '"gpt-5.4mini" = "gpt-5.4-mini"\n'
     printf '"gpt-5.3-codex" = "gpt-5.4"\n'

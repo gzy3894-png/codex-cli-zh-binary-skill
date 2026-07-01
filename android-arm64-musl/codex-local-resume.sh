@@ -15,6 +15,8 @@ RESUME_SCRIPT=""
 LAUNCHER=""
 WRAPPER=""
 SKIP_RUN="${CODEX_ZH_SKIP_RUN:-0}"
+MODEL_CATALOG_BASENAME="model_catalog.json"
+LEGACY_MODEL_CATALOG_BASENAME="model-catalog.json"
 
 info() { printf '%s\n' "$*"; }
 warn() { printf '警告: %s\n' "$*" >&2; }
@@ -98,6 +100,35 @@ profile_default_model() {
   default_model="$(sed -n '1p' "$profile_dir/default-model" 2>/dev/null || true)"
   [ -n "$default_model" ] || default_model="$(sed -n 's/^[[:space:]]*model[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$profile_dir/config.toml" | sed -n '1p')"
   printf '%s' "$default_model"
+}
+
+model_catalog_path() {
+  printf '%s/%s\n' "$1" "$MODEL_CATALOG_BASENAME"
+}
+
+legacy_model_catalog_path() {
+  printf '%s/%s\n' "$1" "$LEGACY_MODEL_CATALOG_BASENAME"
+}
+
+remove_model_catalog_files() {
+  dir="$1"
+  rm -f "$(model_catalog_path "$dir")" "$(legacy_model_catalog_path "$dir")"
+}
+
+copy_model_catalog_file() {
+  src_dir="$1"
+  dst_dir="$2"
+  src_file=""
+
+  if [ -s "$(model_catalog_path "$src_dir")" ]; then
+    src_file="$(model_catalog_path "$src_dir")"
+  elif [ -s "$(legacy_model_catalog_path "$src_dir")" ]; then
+    src_file="$(legacy_model_catalog_path "$src_dir")"
+  fi
+
+  [ -n "$src_file" ] || return 0
+  cp "$src_file" "$(model_catalog_path "$dst_dir")"
+  rm -f "$(legacy_model_catalog_path "$dst_dir")"
 }
 
 current_profile_dir() {
@@ -371,6 +402,110 @@ EOF
   chmod 700 "$helper"
 }
 
+model_display_name() {
+  case "$1" in
+    gpt-5.4-mini) printf '%s' "GPT-5.4-Mini" ;;
+    gpt-5.5) printf '%s' "GPT-5.5" ;;
+    codex-auto-review) printf '%s' "Codex Auto Review" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+model_description() {
+  case "$1" in
+    gpt-5.4) printf '%s' "Strong model for everyday coding." ;;
+    gpt-5.4-mini) printf '%s' "Small, fast, and cost-efficient model for simpler coding tasks." ;;
+    gpt-5.5) printf '%s' "Frontier model for complex coding, research, and real-world work." ;;
+    codex-auto-review) printf '%s' "Automatic approval review model for Codex." ;;
+    gpt-5.3-codex-spark) printf '%s' "Provider API model exposed as gpt-5.3-codex-spark." ;;
+    *) printf '%s' "Third-party provider model exposed by the current API." ;;
+  esac
+}
+
+model_supports_reasoning() {
+  case "$1" in
+    gpt-image-*|*image*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+model_reasoning_levels_json() {
+  if model_supports_reasoning "$1"; then
+    printf '%s' '[{"effort":"low","description":"Fast responses with lighter reasoning"},{"effort":"medium","description":"Balances speed and reasoning depth for everyday tasks"},{"effort":"high","description":"Greater reasoning depth for complex problems"},{"effort":"xhigh","description":"Extra high reasoning depth for complex problems"}]'
+  else
+    printf '%s' '[]'
+  fi
+}
+
+model_default_reasoning_json() {
+  if model_supports_reasoning "$1"; then
+    printf '%s' '"medium"'
+  else
+    printf '%s' 'null'
+  fi
+}
+
+model_default_verbosity() {
+  case "$1" in
+    gpt-5.4-mini|gpt-image-2|deepseek-v4-flash:free) printf '%s' "medium" ;;
+    *) printf '%s' "low" ;;
+  esac
+}
+
+model_web_search_tool_type() {
+  case "$1" in
+    gpt-5.3-codex-spark) printf '%s' "text" ;;
+    *) printf '%s' "text_and_image" ;;
+  esac
+}
+
+model_priority() {
+  case "$1" in
+    gpt-image-2) printf '%s' "2" ;;
+    gpt-5.5|codex-auto-review) printf '%s' "1" ;;
+    *) printf '%s' "0" ;;
+  esac
+}
+
+model_max_context_window() {
+  case "$1" in
+    gpt-5.4|codex-auto-review) printf '%s' "1000000" ;;
+    *) printf '%s' "272000" ;;
+  esac
+}
+
+model_availability_nux_level() {
+  case "$1" in
+    gpt-5.5) printf '%s' "4" ;;
+    *) printf '%s' "3" ;;
+  esac
+}
+
+append_model_availability_nux() {
+  models_file="$1"
+  default_model="$2"
+  tmp_models="${STATE_DIR:-${TMPDIR:-/tmp}}/codex-model-availability.$$"
+  fallback_file=""
+  source_file="$models_file"
+
+  if [ ! -s "$source_file" ] && [ -n "$default_model" ]; then
+    fallback_file="$tmp_models.default"
+    printf '%s\n' "$default_model" > "$fallback_file"
+    source_file="$fallback_file"
+  fi
+
+  awk 'NF && !seen[$0]++ { print }' "$source_file" > "$tmp_models"
+  if [ -s "$tmp_models" ]; then
+    printf '\n[tui.model_availability_nux]\n'
+    while IFS= read -r model; do
+      [ -n "$model" ] || continue
+      printf '"%s" = %s\n' "$(toml_escape "$model")" "$(model_availability_nux_level "$model")"
+    done < "$tmp_models"
+  fi
+
+  rm -f "$tmp_models" "$fallback_file"
+}
+
 write_model_catalog() {
   models_file="$1"
   default_model="$2"
@@ -396,43 +531,47 @@ write_model_catalog() {
     while IFS= read -r model; do
       [ -n "$model" ] || continue
       model_esc="$(json_escape "$model")"
+      display_name_esc="$(json_escape "$(model_display_name "$model")")"
+      description_esc="$(json_escape "$(model_description "$model")")"
+      default_reasoning_json="$(model_default_reasoning_json "$model")"
+      reasoning_levels_json="$(model_reasoning_levels_json "$model")"
+      default_verbosity="$(model_default_verbosity "$model")"
+      web_search_tool_type="$(model_web_search_tool_type "$model")"
+      priority="$(model_priority "$model")"
+      max_context_window="$(model_max_context_window "$model")"
       [ "$count" -eq 0 ] || printf ',\n'
       cat <<EOF
     {
+      "prefer_websockets": true,
+      "support_verbosity": true,
+      "default_verbosity": "$default_verbosity",
+      "apply_patch_tool_type": "freeform",
+      "web_search_tool_type": "$web_search_tool_type",
+      "input_modalities": ["text", "image"],
+      "supports_image_detail_original": true,
+      "truncation_policy": {"mode": "tokens", "limit": 10000},
+      "supports_parallel_tool_calls": true,
+      "context_window": 272000,
+      "max_context_window": $max_context_window,
+      "auto_compact_token_limit": 120000,
+      "reasoning_summary_format": "experimental",
+      "default_reasoning_summary": "none",
       "slug": "$model_esc",
-      "display_name": "$model_esc",
-      "description": "Third-party API model",
-      "default_reasoning_level": "medium",
-      "supported_reasoning_levels": [
-        {"effort": "low", "description": "Fast responses with lighter reasoning"},
-        {"effort": "medium", "description": "Balances speed and reasoning depth"},
-        {"effort": "high", "description": "Greater reasoning depth"},
-        {"effort": "xhigh", "description": "Extra high reasoning depth"}
-      ],
+      "display_name": "$display_name_esc",
+      "description": "$description_esc",
+      "default_reasoning_level": $default_reasoning_json,
+      "supported_reasoning_levels": $reasoning_levels_json,
       "shell_type": "shell_command",
       "visibility": "list",
+      "minimal_client_version": "0.98.0",
       "supported_in_api": true,
-      "priority": 0,
       "availability_nux": null,
       "upgrade": null,
+      "priority": $priority,
       "base_instructions": "",
       "model_messages": null,
       "supports_reasoning_summaries": true,
-      "default_reasoning_summary": "auto",
-      "support_verbosity": false,
-      "default_verbosity": null,
-      "apply_patch_tool_type": null,
-      "web_search_tool_type": "text",
-      "truncation_policy": {"mode": "tokens", "limit": 10000},
-      "supports_parallel_tool_calls": true,
-      "supports_image_detail_original": false,
-      "context_window": 120000,
-      "max_context_window": 120000,
-      "auto_compact_token_limit": 120000,
-      "effective_context_window_percent": 95,
-      "experimental_supported_tools": [],
-      "input_modalities": ["text"],
-      "supports_search_tool": false,
+      "supports_search_tool": true,
       "use_responses_lite": false
     }
 EOF
@@ -466,7 +605,8 @@ write_codex_config() {
   } > "$auth_file"
   chmod 600 "$auth_file"
   write_provider_auth_helper "$out_home"
-  write_model_catalog "$models_file" "$default_model" "$out_home/model-catalog.json"
+  write_model_catalog "$models_file" "$default_model" "$(model_catalog_path "$out_home")"
+  rm -f "$(legacy_model_catalog_path "$out_home")"
 
   config_file="$out_home/config.toml"
   provider_id_esc="$(toml_escape "$PROVIDER_ID")"
@@ -475,13 +615,14 @@ write_codex_config() {
   home_esc="$(toml_escape "$HOME")"
   out_home_esc="$(toml_escape "$out_home")"
   auth_command_esc="$(toml_escape "$out_home/bin/provider-api-key")"
-  model_catalog_esc="$(toml_escape "$out_home/model-catalog.json")"
+  model_catalog_esc="$(toml_escape "$(model_catalog_path "$out_home")")"
   {
     printf 'model_catalog_json = "%s"\n' "$model_catalog_esc"
     printf 'model_provider = "%s"\n' "$provider_id_esc"
     printf 'model = "%s"\n' "$default_model_esc"
     printf 'model_reasoning_effort = "medium"\n'
     printf 'model_auto_compact_token_limit = 120000\n'
+    printf 'disable_response_storage = true\n'
     printf '\n[features]\n'
     printf 'auto_compaction = true\n'
     printf 'hooks = false\n'
@@ -501,6 +642,9 @@ write_codex_config() {
     printf '\n[tui]\n'
     printf 'status_line = ["model-with-reasoning", "current-dir", "context-remaining"]\n'
     printf 'status_line_use_colors = true\n'
+    append_model_availability_nux "$models_file" "$default_model"
+    printf '\n[notice]\n'
+    printf 'hide_full_access_warning = true\n'
     printf '\n[notice.model_migrations]\n'
     printf '"gpt-5.4mini" = "gpt-5.4-mini"\n'
     printf '"gpt-5.3-codex" = "gpt-5.4"\n'
@@ -576,7 +720,7 @@ migrate_third_party_profile_if_needed() {
   needs_migration=0
   grep -F 'model_catalog_json' "$profile_dir/config.toml" >/dev/null 2>&1 || needs_migration=1
   grep -F "[model_providers.$PROVIDER_ID.auth]" "$profile_dir/config.toml" >/dev/null 2>&1 || needs_migration=1
-  [ -s "$profile_dir/model-catalog.json" ] || needs_migration=1
+  [ -s "$(model_catalog_path "$profile_dir")" ] || needs_migration=1
   [ "$needs_migration" = "1" ] || return 0
 
   api_base="$(sed -n '1p' "$profile_dir/api-base" 2>/dev/null || true)"
@@ -616,12 +760,13 @@ apply_profile() {
       printf '%s\n' "third_party" > "$backup_dir/setup-mode"
       [ ! -s "$CODEX_HOME/config.toml" ] || cp "$CODEX_HOME/config.toml" "$backup_dir/config.toml"
       [ ! -s "$CODEX_HOME/auth.json" ] || cp "$CODEX_HOME/auth.json" "$backup_dir/auth.json"
-      [ ! -s "$CODEX_HOME/model-catalog.json" ] || cp "$CODEX_HOME/model-catalog.json" "$backup_dir/model-catalog.json"
+      copy_model_catalog_file "$CODEX_HOME" "$backup_dir"
       chmod 700 "$backup_dir" 2>/dev/null || true
-      chmod 600 "$backup_dir/config.toml" "$backup_dir/auth.json" "$backup_dir/model-catalog.json" 2>/dev/null || true
+      chmod 600 "$backup_dir/config.toml" "$backup_dir/auth.json" "$(model_catalog_path "$backup_dir")" 2>/dev/null || true
       warn "已先把当前 ~/.codex 配置备份为：$backup_dir"
     fi
-    rm -f "$CODEX_HOME/config.toml" "$CODEX_HOME/auth.json" "$CODEX_HOME/model-catalog.json"
+    rm -f "$CODEX_HOME/config.toml" "$CODEX_HOME/auth.json"
+    remove_model_catalog_files "$CODEX_HOME"
     [ ! -s "$profile_dir/config.toml" ] || cp "$profile_dir/config.toml" "$CODEX_HOME/config.toml"
     [ ! -s "$profile_dir/auth.json" ] || cp "$profile_dir/auth.json" "$CODEX_HOME/auth.json"
     chmod 600 "$CODEX_HOME/config.toml" "$CODEX_HOME/auth.json" 2>/dev/null || true
@@ -631,13 +776,13 @@ apply_profile() {
     [ -s "$profile_dir/auth.json" ] || die "配置缺少 auth.json：$profile_dir"
     cp "$profile_dir/config.toml" "$CODEX_HOME/config.toml"
     cp "$profile_dir/auth.json" "$CODEX_HOME/auth.json"
-    [ ! -s "$profile_dir/model-catalog.json" ] || cp "$profile_dir/model-catalog.json" "$CODEX_HOME/model-catalog.json"
+    copy_model_catalog_file "$profile_dir" "$CODEX_HOME"
     if [ -x "$profile_dir/bin/provider-api-key" ]; then
       mkdir -p "$CODEX_HOME/bin"
       cp "$profile_dir/bin/provider-api-key" "$CODEX_HOME/bin/provider-api-key"
       chmod 700 "$CODEX_HOME/bin" "$CODEX_HOME/bin/provider-api-key" 2>/dev/null || true
     fi
-    chmod 600 "$CODEX_HOME/config.toml" "$CODEX_HOME/auth.json" "$CODEX_HOME/model-catalog.json" 2>/dev/null || true
+    chmod 600 "$CODEX_HOME/config.toml" "$CODEX_HOME/auth.json" "$(model_catalog_path "$CODEX_HOME")" 2>/dev/null || true
   fi
   basename "$profile_dir" > "$LAST_PROFILE_FILE"
   profile_label "$profile_dir" > "$STATE_DIR/active-profile-label"
@@ -647,9 +792,9 @@ clear_active_profile_state() {
   rm -f \
     "$CODEX_HOME/config.toml" \
     "$CODEX_HOME/auth.json" \
-    "$CODEX_HOME/model-catalog.json" \
     "$CODEX_HOME/bin/provider-api-key" \
     "$STATE_DIR/active-profile-label"
+  remove_model_catalog_files "$CODEX_HOME"
   rmdir "$CODEX_HOME/bin" 2>/dev/null || true
 }
 
@@ -671,7 +816,7 @@ sync_current_profile() {
     third_party)
       [ ! -s "$CODEX_HOME/config.toml" ] || cp "$CODEX_HOME/config.toml" "$profile_dir/config.toml"
       [ ! -s "$CODEX_HOME/auth.json" ] || cp "$CODEX_HOME/auth.json" "$profile_dir/auth.json"
-      [ ! -s "$CODEX_HOME/model-catalog.json" ] || cp "$CODEX_HOME/model-catalog.json" "$profile_dir/model-catalog.json"
+      copy_model_catalog_file "$CODEX_HOME" "$profile_dir"
       if [ -x "$CODEX_HOME/bin/provider-api-key" ]; then
         mkdir -p "$profile_dir/bin"
         cp "$CODEX_HOME/bin/provider-api-key" "$profile_dir/bin/provider-api-key"
@@ -679,7 +824,7 @@ sync_current_profile() {
       fi
       ;;
   esac
-  chmod 600 "$profile_dir/config.toml" "$profile_dir/auth.json" "$profile_dir/model-catalog.json" 2>/dev/null || true
+  chmod 600 "$profile_dir/config.toml" "$profile_dir/auth.json" "$(model_catalog_path "$profile_dir")" 2>/dev/null || true
 }
 
 fetch_models_or_prompt() {
@@ -1343,14 +1488,14 @@ all_done_menu() {
   case "$choice" in
     1)
       rm -rf "$STATE_DIR" "$RESUME_SCRIPT" 2>/dev/null || true
-      rm -f "$CODEX_HOME/model-catalog.json" 2>/dev/null || true
       write_real_wrapper
       ln -sf "$WRAPPER" "$LAUNCHER"
       install_case_variants "$INSTALL_DIR" "$LAUNCHER"
       ;;
     2)
       rm -rf "$STATE_DIR"
-      rm -f "$CODEX_HOME/config.toml" "$CODEX_HOME/auth.json" "$CODEX_HOME/model-catalog.json"
+      rm -f "$CODEX_HOME/config.toml" "$CODEX_HOME/auth.json"
+      remove_model_catalog_files "$CODEX_HOME"
       run_local_setup
       ;;
     *) ;;
