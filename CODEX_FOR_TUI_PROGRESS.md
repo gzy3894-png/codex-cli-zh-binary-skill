@@ -66,3 +66,31 @@
   - `android-app/core/main/src/main/assets/codex-local-resume.sh`
   - `android-app/core/main/src/main/assets/codex-for-tui-bootstrap.sh`
 - Re-ran keyword scan for `id -u`, `coreutils`, `findutils`, hardcoded `v3.24`, notice URL, and repo raw URL. Remaining matches are expected: `REPO_RAW` is still the Codex archive source, and `NOTICE_URL` is blank by default.
+
+## 2026-07-01 Remote Build `4230c10`
+
+- Committed fix as `4230c10 Fix Codex for TUI first-run recovery path`.
+- Pushed branch `android-arm64-musl-installer` to GitHub.
+- GitHub Actions run `28491354419` completed successfully; artifact name is `codex-for-tui-debug-apk`, artifact ID `7999383674`, uploaded zip size `25455373` bytes, uploaded zip SHA256 `23e4be191a73ef949063aa707a83704d1601c5e9cd9eb5109da103f7ae7cadf9`.
+- First local artifact download attempt was interrupted while writing `/workspace/apks/codex-for-tui-4230c10/artifact.zip`; it was incomplete and should not be used.
+- Restarting artifact download from run `28491354419` into `/workspace/apks/codex-for-tui-4230c10`.
+- `gh run download 28491354419 --name codex-for-tui-debug-apk` failed locally because the HTTPS read connection was aborted before the artifact finished downloading; remote artifact remains valid.
+- After the user changed networks, retried with the previous successful `/tmp` download pattern plus a `60s` timeout. Download completed in about `9.5s`.
+- Current APK: `/workspace/apks/Codex-for-TUI-debug-4230c10.apk`
+- APK sha256: `b09fe6cddd6b34a6d77985a85991745d1e30071d1aac562fd67f289a55559112`
+- APK contents verified to include `assets/codex-for-tui-bootstrap.sh`, `assets/install-reterminal-alpine.sh`, `assets/codex-local-resume.sh`, and `assets/init.sh`.
+
+## 2026-07-01 User Test Failure After Environment Check
+
+- User tested `4230c10` APK and reported that after entering `1`, the app printed the `Codex for TUI 环境检查` download plan and then returned to `root@codex-tui` without continuing.
+- Reproduced with a local stdin/fake-apk harness: `print_download_plan` ended with `[ -n "$NOTICE_URL" ] && ...`; because `NOTICE_URL` is blank by default and the script runs with `set -e`, the function returned `1` and the installer exited immediately after printing the plan.
+- The outer `init.sh` runs `codex-for-tui-bootstrap.sh || true`, so the installer failure was swallowed and appeared as a silent return to shell.
+- Fixed `print_download_plan` to return `0` when `NOTICE_URL` is blank.
+- Changed `init.sh` to show a warning if bootstrap fails instead of silently swallowing the failure.
+- Added isolated smoke tests in `tests/codex-for-tui-installer-smoke.sh` and wired them into GitHub Actions before the APK build. The test extracts pre-main shell functions into a temporary harness, uses temporary HOME/STATE/PATH, fake `apk`, no network, and verifies the first-install prompt plus dependency choice flow.
+- Fixed `tty_read` automation behavior so `CODEX_ZH_FORCE_STDIN=1` uses stdin, and non-tty prompts go to stderr rather than contaminating command-substitution output.
+- Local verification passed:
+  - `timeout 40s sh tests/codex-for-tui-installer-smoke.sh`
+  - `timeout 40s sh tests/codex-for-tui-installer-smoke.sh android-app/core/main/src/main/assets/install-reterminal-alpine.sh android-app/core/main/src/main/assets/codex-for-tui-bootstrap.sh`
+  - `sh -n` for installer/bootstrap/init/resume scripts and test script
+  - `git diff --check`

@@ -116,6 +116,7 @@ Codex for TUI 环境检查
 - 所有下载会尽量使用断点续传和重试。
 EOF
   [ -n "$NOTICE_URL" ] && printf '%s\n' "公告地址：$NOTICE_URL" >&2
+  return 0
 }
 
 confirm_deps_install() {
@@ -423,7 +424,7 @@ ensure_bubblewrap_alias() {
 tty_read() {
   prompt="$1"
   default="${2:-}"
-  if [ -r /dev/tty ]; then
+  if tty_available; then
     if [ -n "$default" ]; then
       printf '%s [%s]: ' "$prompt" "$default" > /dev/tty
     else
@@ -432,9 +433,9 @@ tty_read() {
     IFS= read -r ans < /dev/tty || ans=""
   else
     if [ -n "$default" ]; then
-      printf '%s [%s]: ' "$prompt" "$default"
+      printf '%s [%s]: ' "$prompt" "$default" >&2
     else
-      printf '%s: ' "$prompt"
+      printf '%s: ' "$prompt" >&2
     fi
     IFS= read -r ans || ans=""
   fi

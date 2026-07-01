@@ -20,7 +20,7 @@ clear_screen() {
 tty_read() {
   prompt="$1"
   default="${2:-}"
-  if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+  if [ "${CODEX_ZH_FORCE_STDIN:-0}" != "1" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
     if [ -n "$default" ]; then
       printf '%s [%s]: ' "$prompt" "$default" > /dev/tty
     else
@@ -29,9 +29,9 @@ tty_read() {
     IFS= read -r ans < /dev/tty || ans=""
   else
     if [ -n "$default" ]; then
-      printf '%s [%s]: ' "$prompt" "$default"
+      printf '%s [%s]: ' "$prompt" "$default" >&2
     else
-      printf '%s: ' "$prompt"
+      printf '%s: ' "$prompt" >&2
     fi
     IFS= read -r ans || ans=""
   fi

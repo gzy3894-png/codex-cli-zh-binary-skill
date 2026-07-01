@@ -23,7 +23,7 @@ if [ "$#" -eq 0 ]; then
     export PS1='\[\033[01;32m\]\u@codex-tui\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
     cd $HOME
     if [ -s "$PREFIX/local/bin/codex-for-tui-bootstrap.sh" ]; then
-        sh "$PREFIX/local/bin/codex-for-tui-bootstrap.sh" || true
+        sh "$PREFIX/local/bin/codex-for-tui-bootstrap.sh" || echo "警告: Codex for TUI 自动安装/启动失败，已回到 shell。"
     fi
     /bin/ash
 else
