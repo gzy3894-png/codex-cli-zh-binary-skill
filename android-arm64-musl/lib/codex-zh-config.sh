@@ -90,6 +90,17 @@ EOF
   printf '%s\n' "$helper"
 }
 
+codex_config_validate_default_model() {
+  default_model="$1"
+  models_file="$2"
+  [ -n "$default_model" ] || codex_die "默认模型为空，未写入 config.toml"
+  if [ "$(printf '%s' "$default_model" | wc -l | tr -d ' ')" != "0" ]; then
+    codex_die "默认模型包含换行，未写入 config.toml"
+  fi
+  grep -F -x -- "$default_model" "$models_file" >/dev/null 2>&1 ||
+    codex_die "默认模型不在模型列表中，未写入 config.toml：$default_model"
+}
+
 codex_config_fetch_models() {
   api_base="$1"
   api_key="$2"
@@ -240,6 +251,7 @@ codex_config_write_third_party_config() {
   home_dir="$(codex_home)"
   cfg="$home_dir/config.toml"
   catalog="$home_dir/model_catalog.json"
+  codex_config_validate_default_model "$default_model" "$models_file"
   helper="$(codex_config_write_auth_helper)"
   codex_config_write_auth_json "$api_key"
   codex_config_write_model_catalog "$models_file" "$default_model" "$catalog"
@@ -297,7 +309,7 @@ codex_config_choose_model() {
   models_file="$1"
   count="$(wc -l < "$models_file" | tr -d ' ')"
   [ "$count" -gt 0 ] || codex_die "模型列表为空"
-  codex_info "可用模型："
+  printf '%s\n' "可用模型：" >&2
   awk '{ printf "%2d. %s\n", NR, $0 }' "$models_file" >&2
   choice="$(codex_config_tty_read "请选择默认模型编号" "1")"
   case "$choice" in *[!0-9]*|"") choice=1 ;; esac

@@ -136,7 +136,13 @@ else
 fi
 
 if [ -s "$codex_home/config.toml" ]; then
-  pass "检测到 Codex 配置文件：$codex_home/config.toml"
+  config_file="$codex_home/config.toml"
+  pass "检测到 Codex 配置文件：$config_file"
+  if grep -F "可用模型" "$config_file" >/dev/null 2>&1; then
+    fail "config.toml 的 model 值被菜单文字污染；请运行：codex 配置模式"
+  elif grep '^[[:space:]]*model[[:space:]]*=' "$config_file" >/dev/null 2>&1; then
+    pass "config.toml 默认模型字段未被菜单文字污染"
+  fi
 elif [ -s "$codex_home/auth.json" ]; then
   pass "检测到 Codex 登录文件：$codex_home/auth.json"
 elif [ -s "$codex_home/install-state/official-login-mode" ]; then

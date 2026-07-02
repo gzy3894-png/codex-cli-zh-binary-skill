@@ -215,6 +215,42 @@ EOF
   rm -rf "$tmp"
 }
 
+test_interactive_model_choice_writes_only_model_id() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-interactive-model-choice.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-config.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_FORCE_STDIN=1
+    codex_config_fetch_models() {
+      cat > "$3" <<'EOF'
+{
+  "data": [
+    {"id":"gpt-5.4"},
+    {"id":"gpt-5.5"}
+  ]
+}
+EOF
+      : > "$4"
+      return 0
+    }
+    printf '%s\n%s\n%s\n' "https://api.example.test" "sk-test" "2" |
+      codex_config_prompt_third_party >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || {
+    sed -n '1,200p' "$tmp/stderr" >&2 || true
+    fail "interactive third-party setup should complete"
+  }
+
+  assert_file_contains "$tmp/home/.codex/config.toml" 'model = "gpt-5.5"'
+  assert_file_not_contains "$tmp/home/.codex/config.toml" "可用模型"
+  assert_file_contains "$tmp/stderr" "可用模型"
+  rm -rf "$tmp"
+}
+
 test_proot_launcher_preserves_codex_args() {
   tmp="${TMPDIR:-/tmp}/codex-tui-test-proot-launcher.$$"
   rm -rf "$tmp"
@@ -301,6 +337,65 @@ EOF
   rm -rf "$tmp"
 }
 
+test_self_test_fails_on_polluted_model_config() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-self-test-polluted-model.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.codex" "$tmp/bin"
+
+  cat > "$tmp/bin/codex" <<'EOF'
+#!/usr/bin/env sh
+# 配置模式
+# 更新
+printf 'codex-stub\n'
+EOF
+  chmod +x "$tmp/bin/codex"
+
+  cat > "$tmp/bin/codex-update" <<'EOF'
+#!/usr/bin/env sh
+exit 0
+EOF
+  chmod +x "$tmp/bin/codex-update"
+
+  cat > "$tmp/bin/codex-local" <<'EOF'
+#!/usr/bin/env sh
+exit 0
+EOF
+  chmod +x "$tmp/bin/codex-local"
+
+  cat > "$tmp/bin/codex-zh-bin" <<'EOF'
+#!/usr/bin/env sh
+printf 'codex-zh 0.142.4\n'
+EOF
+  chmod +x "$tmp/bin/codex-zh-bin"
+
+  cat > "$tmp/bin/curl" <<'EOF'
+#!/usr/bin/env sh
+exit 0
+EOF
+  chmod +x "$tmp/bin/curl"
+
+  cat > "$tmp/home/.codex/config.toml" <<'EOF'
+model_provider = "custom"
+model = "可用模型：
+gpt-5.5"
+EOF
+
+  set +e
+  HOME="$tmp/home" \
+  CODEX_HOME="$tmp/home/.codex" \
+  CODEX_FOR_TUI_SELF_TEST_EXPECT_HOME="$tmp/home" \
+  CODEX_FOR_TUI_SELF_TEST_EXPECT_CODEX_HOME="$tmp/home/.codex" \
+  CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR" \
+  PATH="$tmp/bin:/bin:/usr/bin" \
+    sh "$SCRIPT_DIR/codex-for-tui-self-test.sh" >"$tmp/stdout" 2>"$tmp/stderr"
+  rc=$?
+  set -e
+
+  [ "$rc" -ne 0 ] || fail "self-test should fail when config model is polluted by menu text"
+  assert_file_contains "$tmp/stderr" "model 值被菜单文字污染"
+  rm -rf "$tmp"
+}
+
 test_no_startup_auto_refresh_symbols_remain() {
   if grep -R "auto_refresh_current_profile_on_start" "$SCRIPT_DIR" >/dev/null 2>&1; then
     fail "auto refresh startup symbol still exists"
@@ -321,8 +416,10 @@ run_step test_bootstrap_normal_start_does_not_fetch_when_codex_exists
 run_step test_bootstrap_explicit_update_fetches_scripts
 run_step test_generated_launcher_has_no_preflight_or_profile_refresh
 run_step test_refresh_models_preserves_current_model_fields
+run_step test_interactive_model_choice_writes_only_model_id
 run_step test_proot_launcher_preserves_codex_args
 run_step test_update_download_failure_is_error
 run_step test_partial_download_failure_is_not_accepted
+run_step test_self_test_fails_on_polluted_model_config
 run_step test_no_startup_auto_refresh_symbols_remain
 printf 'OK: Codex for TUI refactor smoke tests passed\n'
