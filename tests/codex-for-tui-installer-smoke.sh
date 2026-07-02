@@ -42,6 +42,7 @@ run_step() {
 test_syntax_and_asset_sync() {
   for file in \
     "$SCRIPT_DIR/codex-for-tui-bootstrap.sh" \
+    "$SCRIPT_DIR/codex-for-tui-self-test.sh" \
     "$SCRIPT_DIR/codex-local-resume.sh" \
     "$SCRIPT_DIR/codex-update.sh" \
     "$SCRIPT_DIR/install-reterminal-alpine.sh" \
@@ -136,8 +137,11 @@ EOF
 
   [ -s "$tmp/home/.codex-for-tui/remote/install-reterminal-alpine.sh" ] || fail "installer was not fetched"
   [ -s "$tmp/home/.codex-for-tui/remote/codex-update.sh" ] || fail "update command was not fetched"
+  [ -s "$tmp/home/.codex-for-tui/remote/codex-for-tui-self-test.sh" ] || fail "self-test script was not fetched"
   [ -s "$tmp/home/.codex-for-tui/remote/lib/codex-zh-common.sh" ] || fail "lib was not fetched"
   [ -x "$tmp/home/.local/bin/codex-update" ] || fail "codex-update command was not installed"
+  [ -x "$tmp/home/.local/bin/codex-self-test" ] || fail "codex-self-test command was not installed"
+  [ -x "$tmp/home/.local/bin/codex-test" ] || fail "codex-test command was not installed"
   assert_file_contains "$tmp/stdout" "已更新：install-reterminal-alpine.sh"
   rm -rf "$tmp"
 }

@@ -47,6 +47,24 @@ load_lib() {
     export CODEX_ZH_ACTIVE_SCRIPT_DIR="$SCRIPT_DIR/../share/codex-zh/scripts"
     return
   fi
+  if [ -n "${CODEX_ZH_SCRIPT_INSTALL_ROOT:-}" ] && [ -r "$CODEX_ZH_SCRIPT_INSTALL_ROOT/$rel" ]; then
+    # shellcheck disable=SC1090
+    . "$CODEX_ZH_SCRIPT_INSTALL_ROOT/$rel"
+    export CODEX_ZH_ACTIVE_SCRIPT_DIR="$CODEX_ZH_SCRIPT_INSTALL_ROOT"
+    return
+  fi
+  if [ -r "$HOME/.local/share/codex-zh/scripts/$rel" ]; then
+    # shellcheck disable=SC1090
+    . "$HOME/.local/share/codex-zh/scripts/$rel"
+    export CODEX_ZH_ACTIVE_SCRIPT_DIR="$HOME/.local/share/codex-zh/scripts"
+    return
+  fi
+  if [ -r "/usr/local/share/codex-zh/scripts/$rel" ]; then
+    # shellcheck disable=SC1090
+    . "/usr/local/share/codex-zh/scripts/$rel"
+    export CODEX_ZH_ACTIVE_SCRIPT_DIR="/usr/local/share/codex-zh/scripts"
+    return
+  fi
   [ -r "$CACHE_DIR/$rel" ] || mini_fetch "$SCRIPT_BASE_URL/$rel" "$CACHE_DIR/$rel"
   # shellcheck disable=SC1090
   . "$CACHE_DIR/$rel"
@@ -64,12 +82,16 @@ case "${1:-apply}" in
   apply|update|"")
     codex_update_apply 0
     ;;
+  self-test|test|doctor|自检)
+    shift
+    codex_update_run_self_test "$@"
+    ;;
   help|--help|-h)
-    printf '%s\n' "用法: codex-update [check|apply]" >&2
+    printf '%s\n' "用法: codex-update [check|apply|self-test|自检]" >&2
     ;;
   *)
     printf '%s\n' "错误: 未知命令：$1" >&2
-    printf '%s\n' "用法: codex-update [check|apply]" >&2
+    printf '%s\n' "用法: codex-update [check|apply|self-test|自检]" >&2
     exit 2
     ;;
 esac

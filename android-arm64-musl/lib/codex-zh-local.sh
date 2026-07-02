@@ -214,7 +214,7 @@ codex_local_install_support_scripts() {
       cp "$file" "$dest_root/lib/$(basename "$file")"
       chmod 644 "$dest_root/lib/$(basename "$file")" 2>/dev/null || true
     done
-    for name in codex-local-resume.sh codex-update.sh codex-for-tui-bootstrap.sh install-reterminal-alpine.sh install-alpine-proot.sh install.sh; do
+    for name in codex-local-resume.sh codex-update.sh codex-for-tui-bootstrap.sh codex-for-tui-self-test.sh install-reterminal-alpine.sh install-alpine-proot.sh install.sh; do
       [ -f "$root/$name" ] || continue
       cp "$root/$name" "$dest_root/$name"
       chmod 755 "$dest_root/$name" 2>/dev/null || true
@@ -226,6 +226,8 @@ codex_local_install_support_scripts() {
   [ -s "$dest_root/codex-local-resume.sh" ] && cp "$dest_root/codex-local-resume.sh" "$install_dir/codex-local" && chmod 755 "$install_dir/codex-local"
   [ -s "$dest_root/codex-update.sh" ] && cp "$dest_root/codex-update.sh" "$install_dir/codex-update" && chmod 755 "$install_dir/codex-update"
   [ -s "$dest_root/codex-for-tui-bootstrap.sh" ] && cp "$dest_root/codex-for-tui-bootstrap.sh" "$install_dir/codex-for-tui-bootstrap" && chmod 755 "$install_dir/codex-for-tui-bootstrap"
+  [ -s "$dest_root/codex-for-tui-self-test.sh" ] && cp "$dest_root/codex-for-tui-self-test.sh" "$install_dir/codex-self-test" && chmod 755 "$install_dir/codex-self-test"
+  [ -s "$dest_root/codex-for-tui-self-test.sh" ] && cp "$dest_root/codex-for-tui-self-test.sh" "$install_dir/codex-test" && chmod 755 "$install_dir/codex-test"
 }
 
 codex_local_setup_agents() {
@@ -320,6 +322,7 @@ codex_local_materialize_script_tree() {
     codex-local-resume.sh \
     codex-update.sh \
     codex-for-tui-bootstrap.sh \
+    codex-for-tui-self-test.sh \
     install-reterminal-alpine.sh \
     install-alpine-proot.sh \
     install.sh
@@ -350,6 +353,7 @@ codex_local_copy_tree() {
     codex-local-resume.sh \
     codex-update.sh \
     codex-for-tui-bootstrap.sh \
+    codex-for-tui-self-test.sh \
     install-reterminal-alpine.sh \
     install-alpine-proot.sh \
     install.sh

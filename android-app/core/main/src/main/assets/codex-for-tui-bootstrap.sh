@@ -146,6 +146,7 @@ refresh_remote_scripts() {
   refresh_one "安装脚本" "install-reterminal-alpine.sh" "${CODEX_ZH_INSTALLER_URL:-}" || true
   refresh_one "本地命令" "codex-local-resume.sh" "${CODEX_ZH_RESUME_URL:-}" || true
   refresh_one "更新命令" "codex-update.sh" "${CODEX_ZH_UPDATE_URL:-}" || true
+  refresh_one "自检脚本" "codex-for-tui-self-test.sh" "${CODEX_ZH_SELF_TEST_URL:-}" || true
   refresh_one "bootstrap" "codex-for-tui-bootstrap.sh" "${CODEX_ZH_BOOTSTRAP_URL:-}" || true
   for lib in codex-zh-common.sh codex-zh-download.sh codex-zh-config.sh codex-zh-local.sh codex-zh-update.sh; do
     refresh_one "模块" "lib/$lib" "" || true
@@ -153,6 +154,8 @@ refresh_remote_scripts() {
   [ -s "$REMOTE_DIR/codex-local-resume.sh" ] && cp "$REMOTE_DIR/codex-local-resume.sh" "$HOME/.local/bin/codex-local-resume" 2>/dev/null && chmod 755 "$HOME/.local/bin/codex-local-resume" 2>/dev/null || true
   [ -s "$REMOTE_DIR/codex-local-resume.sh" ] && cp "$REMOTE_DIR/codex-local-resume.sh" "$HOME/.local/bin/codex-local" 2>/dev/null && chmod 755 "$HOME/.local/bin/codex-local" 2>/dev/null || true
   [ -s "$REMOTE_DIR/codex-update.sh" ] && cp "$REMOTE_DIR/codex-update.sh" "$HOME/.local/bin/codex-update" 2>/dev/null && chmod 755 "$HOME/.local/bin/codex-update" 2>/dev/null || true
+  [ -s "$REMOTE_DIR/codex-for-tui-self-test.sh" ] && cp "$REMOTE_DIR/codex-for-tui-self-test.sh" "$HOME/.local/bin/codex-self-test" 2>/dev/null && chmod 755 "$HOME/.local/bin/codex-self-test" 2>/dev/null || true
+  [ -s "$REMOTE_DIR/codex-for-tui-self-test.sh" ] && cp "$REMOTE_DIR/codex-for-tui-self-test.sh" "$HOME/.local/bin/codex-test" 2>/dev/null && chmod 755 "$HOME/.local/bin/codex-test" 2>/dev/null || true
 }
 
 has_local_state() {

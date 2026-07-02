@@ -168,8 +168,79 @@ EOF
   rm -rf "$tmp"
 }
 
+test_update_apply_installs_self_test_script_and_aliases() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-static-update-self-test.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home" "$tmp/bin" "$tmp/share"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-download.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-update.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_INSTALL_DIR="$tmp/bin"
+    export CODEX_ZH_SCRIPT_INSTALL_ROOT="$tmp/share"
+    codex_download_first_script() {
+      stub_rel="$1"
+      stub_dest="$2"
+      mkdir -p "$(dirname "$stub_dest")"
+      printf '#!/usr/bin/env sh\nprintf "fetched:%s\\n"\n' "$stub_rel" > "$stub_dest"
+      chmod 755 "$stub_dest"
+      return 0
+    }
+    codex_update_apply 0 >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || {
+    sed -n '1,200p' "$tmp/stderr" >&2 || true
+    fail "codex update apply should install self-test script"
+  }
+
+  [ -s "$tmp/share/codex-for-tui-self-test.sh" ] || fail "self-test script was not installed into script share"
+  [ -x "$tmp/bin/codex-self-test" ] || fail "codex-self-test alias was not installed"
+  [ -x "$tmp/bin/codex-test" ] || fail "codex-test alias was not installed"
+  assert_file_contains "$tmp/stdout" "已更新：codex-for-tui-self-test.sh"
+  rm -rf "$tmp"
+}
+
+test_update_self_test_subcommand_fetches_and_runs_script() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-static-run-self-test.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home" "$tmp/bin" "$tmp/share"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-download.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-update.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_INSTALL_DIR="$tmp/bin"
+    export CODEX_ZH_SCRIPT_INSTALL_ROOT="$tmp/share"
+    codex_download_first_script() {
+      stub_rel="$1"
+      stub_dest="$2"
+      mkdir -p "$(dirname "$stub_dest")"
+      {
+        printf '%s\n' '#!/usr/bin/env sh'
+        printf '%s\n' 'printf "self-test-ran:%s:%s\n" "$HOME" "$1"'
+      } > "$stub_dest"
+      chmod 755 "$stub_dest"
+      return 0
+    }
+    codex_update_run_self_test probe >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || {
+    sed -n '1,200p' "$tmp/stderr" >&2 || true
+    fail "codex update self-test command should fetch and run self-test script"
+  }
+
+  assert_file_contains "$tmp/stdout" "self-test-ran:$tmp/home:probe"
+  [ -x "$tmp/bin/codex-self-test" ] || fail "self-test command alias was not installed after on-demand fetch"
+  rm -rf "$tmp"
+}
+
 run_step test_android_session_uses_root_codex_home
 run_step test_bootstrap_asset_is_synced
 run_step test_generated_launcher_entrypoints_and_normal_path
 run_step test_generated_launcher_first_run_configures_then_runs
+run_step test_update_apply_installs_self_test_script_and_aliases
+run_step test_update_self_test_subcommand_fetches_and_runs_script
 printf 'OK: Codex for TUI static guards passed\n'
