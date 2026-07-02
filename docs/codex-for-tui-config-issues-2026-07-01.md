@@ -4,6 +4,8 @@
 
 本文档记录用户反馈过的问题、前序修复尝试导致或暴露的新问题、以及当时仍未解决的问题。
 
+> 2026-07-02 追加说明：本文档中的“状态更新”是一次失败修复尝试的阶段记录，不再代表当前可信状态。后续又出现了配置值污染、更新链路失败、`model_catalog_json` 生成非法 JSON schema 等问题。完整事故记录见 `codex-for-tui-failure-log-2026-07-02.md`。
+
 ## 2026-07-02 状态更新
 
 这些问题已按“启动不变更配置、更新显式触发”的方向重构：
@@ -13,7 +15,7 @@
 3. 脚本更新改为独立命令：`codex-update check` 和 `codex-update apply`。
 4. 第三方模型目录刷新改为独立命令：`codex-local refresh-models`，只更新 `model_catalog_json`，保留当前 `model` 和 `model_reasoning_effort`。
 5. API Key 写入 `auth.json`，第三方 provider 通过 command auth 读取；不把 key 写入 `config.toml`。
-6. 旧脚本已移入 `backup/legacy-scripts-20260702/`。
+6. 当时将旧脚本移入过 `backup/legacy-scripts-20260702/`；该备份目录已在后续清理中从仓库删除，历史仍保留在 Git 历史和已发布 Release 中。
 
 ## 用户遇到的问题
 

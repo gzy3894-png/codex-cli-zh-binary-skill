@@ -20,7 +20,7 @@
 - `codex-update.sh`：用户手动运行的脚本更新命令。
 - `codex-local-resume.sh`：本地诊断、配置、模型刷新、启动器修复命令。
 
-旧脚本已备份到 `backup/legacy-scripts-20260702/`，不再作为运行逻辑来源。
+旧脚本备份目录已从仓库删除，历史仍保留在 Git 历史和已发布 Release 中。当前 TUI 安装/更新链路的失败记录见 `../docs/codex-for-tui-failure-log-2026-07-02.md`；后续发版前必须重新完成该文档列出的验证。
 
 ## 启动和更新规则
 
