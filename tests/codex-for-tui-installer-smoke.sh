@@ -251,7 +251,7 @@ EOF
   rm -rf "$tmp"
 }
 
-test_model_catalog_uses_current_codex_web_search_enum() {
+test_model_catalog_uses_current_codex_schema_shapes() {
   tmp="${TMPDIR:-/tmp}/codex-tui-test-model-catalog-enum.$$"
   rm -rf "$tmp"
   mkdir -p "$tmp/home"
@@ -267,6 +267,9 @@ test_model_catalog_uses_current_codex_web_search_enum() {
 
   assert_file_not_contains "$tmp/model_catalog.json" '"web_search_tool_type": "web_search"'
   assert_file_contains "$tmp/model_catalog.json" '"web_search_tool_type": "text"'
+  assert_file_not_contains "$tmp/model_catalog.json" '"supported_reasoning_levels": ["minimal"'
+  assert_file_contains "$tmp/model_catalog.json" '"effort": "minimal"'
+  assert_file_contains "$tmp/model_catalog.json" '"description": "minimal"'
   rm -rf "$tmp"
 }
 
@@ -436,7 +439,7 @@ run_step test_bootstrap_explicit_update_fetches_scripts
 run_step test_generated_launcher_has_no_preflight_or_profile_refresh
 run_step test_refresh_models_preserves_current_model_fields
 run_step test_interactive_model_choice_writes_only_model_id
-run_step test_model_catalog_uses_current_codex_web_search_enum
+run_step test_model_catalog_uses_current_codex_schema_shapes
 run_step test_proot_launcher_preserves_codex_args
 run_step test_update_download_failure_is_error
 run_step test_partial_download_failure_is_not_accepted

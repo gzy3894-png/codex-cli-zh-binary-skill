@@ -183,7 +183,12 @@ codex_config_write_model_catalog() {
       "display_name": "$name_esc",
       "description": "$name_esc",
       "default_reasoning_level": "medium",
-      "supported_reasoning_levels": ["minimal", "low", "medium", "high"],
+      "supported_reasoning_levels": [
+        {"effort": "minimal", "description": "minimal"},
+        {"effort": "low", "description": "low"},
+        {"effort": "medium", "description": "medium"},
+        {"effort": "high", "description": "high"}
+      ],
       "shell_type": "shell_command",
       "visibility": "list",
       "minimal_client_version": "0.98.0",
