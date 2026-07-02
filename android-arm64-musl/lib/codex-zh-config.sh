@@ -65,13 +65,13 @@ codex_config_write_auth_json() {
   home_dir="$(codex_home)"
   codex_ensure_private_dir "$home_dir"
   auth_file="$home_dir/auth.json"
-  tmp="$auth_file.tmp"
+  auth_tmp="$auth_file.tmp"
   {
     printf '{\n'
     printf '  "OPENAI_API_KEY": "%s"\n' "$(codex_json_escape "$api_key")"
     printf '}\n'
-  } > "$tmp"
-  mv "$tmp" "$auth_file"
+  } > "$auth_tmp"
+  mv "$auth_tmp" "$auth_file"
   chmod 600 "$auth_file" 2>/dev/null || true
 }
 
@@ -143,13 +143,13 @@ codex_config_write_model_catalog() {
   models_file="$1"
   default_model="${2:-}"
   out_json="$3"
-  tmp="$out_json.tmp"
-  dedup="$out_json.models.tmp"
+  catalog_tmp="$out_json.tmp"
+  catalog_dedup="$out_json.models.tmp"
   mkdir -p "$(dirname "$out_json")"
   if [ -s "$models_file" ]; then
-    awk 'NF && !seen[$0]++ { print }' "$models_file" > "$dedup"
+    awk 'NF && !seen[$0]++ { print }' "$models_file" > "$catalog_dedup"
   elif [ -n "$default_model" ]; then
-    printf '%s\n' "$default_model" > "$dedup"
+    printf '%s\n' "$default_model" > "$catalog_dedup"
   else
     codex_die "没有可写入 model_catalog_json 的模型名"
   fi
@@ -167,7 +167,7 @@ codex_config_write_model_catalog() {
     {
       "prefer_websockets": true,
       "support_verbosity": true,
-      "default_verbosity": "medium",
+      "default_verbosity": "low",
       "apply_patch_tool_type": "freeform",
       "web_search_tool_type": "text",
       "input_modalities": ["text", "image"],
@@ -184,10 +184,10 @@ codex_config_write_model_catalog() {
       "description": "$name_esc",
       "default_reasoning_level": "medium",
       "supported_reasoning_levels": [
-        {"effort": "minimal", "description": "minimal"},
-        {"effort": "low", "description": "low"},
-        {"effort": "medium", "description": "medium"},
-        {"effort": "high", "description": "high"}
+        {"effort": "low", "description": "响应更快，推理较轻"},
+        {"effort": "medium", "description": "在日常任务中平衡速度和推理深度"},
+        {"effort": "high", "description": "为复杂问题提供更深推理"},
+        {"effort": "xhigh", "description": "为复杂问题提供极高推理深度"}
       ],
       "shell_type": "shell_command",
       "visibility": "list",
@@ -206,14 +206,14 @@ codex_config_write_model_catalog() {
     }
 EOF
       count=$((count + 1))
-    done < "$dedup"
+    done < "$catalog_dedup"
     printf '\n'
     printf '  ]\n'
     printf '}\n'
-  } > "$tmp"
-  mv "$tmp" "$out_json"
+  } > "$catalog_tmp"
+  mv "$catalog_tmp" "$out_json"
   chmod 600 "$out_json" 2>/dev/null || true
-  rm -f "$dedup"
+  rm -f "$catalog_dedup"
 }
 
 codex_config_current_model() {
@@ -236,15 +236,15 @@ codex_config_current_catalog_path() {
 codex_config_set_catalog_path() {
   cfg="$1"
   catalog="$2"
-  tmp="$cfg.tmp"
+  cfg_tmp="$cfg.tmp"
   catalog_esc="$(codex_toml_escape "$catalog")"
   if [ -s "$cfg" ] && grep -q '^[[:space:]]*model_catalog_json[[:space:]]*=' "$cfg"; then
-    sed "s#^[[:space:]]*model_catalog_json[[:space:]]*=.*#model_catalog_json = \"$catalog_esc\"#" "$cfg" > "$tmp"
+    sed "s#^[[:space:]]*model_catalog_json[[:space:]]*=.*#model_catalog_json = \"$catalog_esc\"#" "$cfg" > "$cfg_tmp"
   else
-    [ -s "$cfg" ] && cat "$cfg" > "$tmp" || : > "$tmp"
-    printf '\nmodel_catalog_json = "%s"\n' "$catalog_esc" >> "$tmp"
+    [ -s "$cfg" ] && cat "$cfg" > "$cfg_tmp" || : > "$cfg_tmp"
+    printf '\nmodel_catalog_json = "%s"\n' "$catalog_esc" >> "$cfg_tmp"
   fi
-  mv "$tmp" "$cfg"
+  mv "$cfg_tmp" "$cfg"
   chmod 600 "$cfg" 2>/dev/null || true
 }
 
@@ -265,9 +265,9 @@ codex_config_write_third_party_config() {
   helper_esc="$(codex_toml_escape "$helper")"
   home_esc="$(codex_toml_escape "$home_dir")"
   catalog_esc="$(codex_toml_escape "$catalog")"
-  tmp="$cfg.tmp"
+  config_tmp="$cfg.tmp"
   codex_config_clear_official_mode
-  cat > "$tmp" <<EOF
+  cat > "$config_tmp" <<EOF
 model_provider = "$CODEX_ZH_PROVIDER_ID"
 model = "$model_esc"
 model_reasoning_effort = "medium"
@@ -292,7 +292,7 @@ timeout_ms = 5000
 refresh_interval_ms = 300000
 cwd = "$home_esc"
 EOF
-  mv "$tmp" "$cfg"
+  mv "$config_tmp" "$cfg"
   chmod 600 "$cfg" 2>/dev/null || true
 }
 
@@ -376,4 +376,88 @@ codex_config_refresh_models() {
   codex_config_write_model_catalog "$models_file" "$default_model" "$catalog"
   codex_config_set_catalog_path "$cfg" "$catalog"
   codex_info "已刷新 model_catalog_json；保留当前 model 和 model_reasoning_effort"
+}
+
+codex_config_profiles_root() {
+  printf '%s/config-profiles\n' "$(codex_home)"
+}
+
+codex_config_profile_valid_name() {
+  name="$1"
+  [ -n "$name" ] || return 1
+  case "$name" in
+    "."|".."|*/*|*\\*|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  return 0
+}
+
+codex_config_profile_dir() {
+  name="$1"
+  codex_config_profile_valid_name "$name" || codex_die "配置名称无效，只能使用字母、数字、点、下划线和短横线：$name"
+  printf '%s/%s\n' "$(codex_config_profiles_root)" "$name"
+}
+
+codex_config_profile_save() {
+  name="$1"
+  cfg="$(codex_config_file)"
+  [ -s "$cfg" ] || codex_die "缺少当前 config.toml，无法保存配置：$name"
+  root="$(codex_config_profiles_root)"
+  dest="$(codex_config_profile_dir "$name")"
+  profile_tmp="$root/.tmp-$name-$$"
+  rm -rf "$profile_tmp"
+  mkdir -p "$profile_tmp"
+  cp "$cfg" "$profile_tmp/config.toml"
+  auth="$(codex_config_auth_file)"
+  [ ! -s "$auth" ] || cp "$auth" "$profile_tmp/auth.json"
+  catalog="$(codex_config_current_catalog_path "$cfg")"
+  [ ! -s "$catalog" ] || cp "$catalog" "$profile_tmp/model_catalog.json"
+  chmod 600 "$profile_tmp"/* 2>/dev/null || true
+  rm -rf "$dest"
+  mv "$profile_tmp" "$dest"
+  chmod 700 "$dest" 2>/dev/null || true
+  codex_info "已保存配置：$name"
+}
+
+codex_config_profile_use() {
+  name="$1"
+  dir="$(codex_config_profile_dir "$name")"
+  [ -s "$dir/config.toml" ] || codex_die "找不到配置：$name"
+  home_dir="$(codex_home)"
+  codex_ensure_private_dir "$home_dir"
+  tmp_cfg="$home_dir/config.toml.tmp.$$"
+  cp "$dir/config.toml" "$tmp_cfg"
+  mv "$tmp_cfg" "$home_dir/config.toml"
+  chmod 600 "$home_dir/config.toml" 2>/dev/null || true
+
+  if [ -s "$dir/auth.json" ]; then
+    tmp_auth="$home_dir/auth.json.tmp.$$"
+    cp "$dir/auth.json" "$tmp_auth"
+    mv "$tmp_auth" "$home_dir/auth.json"
+    chmod 600 "$home_dir/auth.json" 2>/dev/null || true
+  else
+    rm -f "$home_dir/auth.json" 2>/dev/null || true
+  fi
+
+  if [ -s "$dir/model_catalog.json" ]; then
+    tmp_catalog="$home_dir/model_catalog.json.tmp.$$"
+    cp "$dir/model_catalog.json" "$tmp_catalog"
+    mv "$tmp_catalog" "$home_dir/model_catalog.json"
+    chmod 600 "$home_dir/model_catalog.json" 2>/dev/null || true
+  fi
+
+  codex_config_clear_official_mode
+  codex_info "已切换配置：$name"
+}
+
+codex_config_profile_new() {
+  name="$1"
+  codex_config_profile_valid_name "$name" || codex_die "配置名称无效，只能使用字母、数字、点、下划线和短横线：$name"
+  codex_config_prompt_third_party
+  codex_config_profile_save "$name"
+}
+
+codex_config_profile_list() {
+  root="$(codex_config_profiles_root)"
+  [ -d "$root" ] || return 0
+  find "$root" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | sort
 }

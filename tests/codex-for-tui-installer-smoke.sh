@@ -268,8 +268,48 @@ test_model_catalog_uses_current_codex_schema_shapes() {
   assert_file_not_contains "$tmp/model_catalog.json" '"web_search_tool_type": "web_search"'
   assert_file_contains "$tmp/model_catalog.json" '"web_search_tool_type": "text"'
   assert_file_not_contains "$tmp/model_catalog.json" '"supported_reasoning_levels": ["minimal"'
-  assert_file_contains "$tmp/model_catalog.json" '"effort": "minimal"'
-  assert_file_contains "$tmp/model_catalog.json" '"description": "minimal"'
+  assert_file_not_contains "$tmp/model_catalog.json" '"effort": "minimal"'
+  assert_file_contains "$tmp/model_catalog.json" '"default_verbosity": "low"'
+  assert_file_contains "$tmp/model_catalog.json" '"effort": "low"'
+  assert_file_contains "$tmp/model_catalog.json" '"description": "响应更快，推理较轻"'
+  assert_file_contains "$tmp/model_catalog.json" '"effort": "medium"'
+  assert_file_contains "$tmp/model_catalog.json" '"description": "在日常任务中平衡速度和推理深度"'
+  assert_file_contains "$tmp/model_catalog.json" '"effort": "high"'
+  assert_file_contains "$tmp/model_catalog.json" '"description": "为复杂问题提供更深推理"'
+  assert_file_contains "$tmp/model_catalog.json" '"effort": "xhigh"'
+  assert_file_contains "$tmp/model_catalog.json" '"description": "为复杂问题提供极高推理深度"'
+  rm -rf "$tmp"
+}
+
+test_profile_save_and_use_switches_only_runtime_config() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-profile-switch.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home"
+  printf '%s\n' "gpt-5.5" > "$tmp/models-a.txt"
+  printf '%s\n' "gpt-5.4" > "$tmp/models-b.txt"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-config.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    codex_config_write_third_party_config "https://api-a.example.test/v1" "sk-a" "gpt-5.5" "$tmp/models-a.txt"
+    printf '%s\n' "user agents must remain" > "$tmp/home/.codex/AGENTS.md"
+    codex_config_profile_save primary
+    codex_config_write_third_party_config "https://api-b.example.test/v1" "sk-b" "gpt-5.4" "$tmp/models-b.txt"
+    codex_config_profile_save secondary
+    printf '%s\n' "user agents must remain" > "$tmp/home/.codex/AGENTS.md"
+    codex_config_profile_use primary
+    codex_config_profile_list > "$tmp/profiles.txt"
+  )
+
+  assert_file_contains "$tmp/home/.codex/config.toml" 'model = "gpt-5.5"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'base_url = "https://api-a.example.test/v1"'
+  assert_file_contains "$tmp/home/.codex/auth.json" '"OPENAI_API_KEY": "sk-a"'
+  assert_file_contains "$tmp/home/.codex/model_catalog.json" '"slug": "gpt-5.5"'
+  assert_file_contains "$tmp/home/.codex/AGENTS.md" "user agents must remain"
+  assert_file_contains "$tmp/profiles.txt" "primary"
+  assert_file_contains "$tmp/profiles.txt" "secondary"
   rm -rf "$tmp"
 }
 
@@ -440,6 +480,7 @@ run_step test_generated_launcher_has_no_preflight_or_profile_refresh
 run_step test_refresh_models_preserves_current_model_fields
 run_step test_interactive_model_choice_writes_only_model_id
 run_step test_model_catalog_uses_current_codex_schema_shapes
+run_step test_profile_save_and_use_switches_only_runtime_config
 run_step test_proot_launcher_preserves_codex_args
 run_step test_update_download_failure_is_error
 run_step test_partial_download_failure_is_not_accepted

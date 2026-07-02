@@ -38,6 +38,10 @@ usage() {
   codex-local doctor
   codex-local configure
   codex-local refresh-models
+  codex-local profile-new NAME
+  codex-local profile-save NAME
+  codex-local profile-use NAME
+  codex-local profile-list
   codex-local repair-launcher
   codex-local run [args...]
 
@@ -64,6 +68,28 @@ case "$cmd" in
   refresh-models)
     codex_init_env
     codex_config_refresh_models
+    ;;
+  profile-new)
+    shift
+    [ -n "${1:-}" ] || { usage; exit 2; }
+    codex_init_env
+    codex_config_profile_new "$1"
+    ;;
+  profile-save)
+    shift
+    [ -n "${1:-}" ] || { usage; exit 2; }
+    codex_init_env
+    codex_config_profile_save "$1"
+    ;;
+  profile-use)
+    shift
+    [ -n "${1:-}" ] || { usage; exit 2; }
+    codex_init_env
+    codex_config_profile_use "$1"
+    ;;
+  profile-list)
+    codex_init_env
+    codex_config_profile_list
     ;;
   repair-launcher)
     codex_local_repair_launcher

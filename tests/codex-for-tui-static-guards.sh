@@ -237,10 +237,19 @@ test_update_self_test_subcommand_fetches_and_runs_script() {
   rm -rf "$tmp"
 }
 
+test_codex_local_profile_commands_are_explicit_only() {
+  assert_file_contains "$SCRIPT_DIR/codex-local-resume.sh" 'profile-new'
+  assert_file_contains "$SCRIPT_DIR/codex-local-resume.sh" 'profile-save'
+  assert_file_contains "$SCRIPT_DIR/codex-local-resume.sh" 'profile-use'
+  assert_file_contains "$SCRIPT_DIR/codex-local-resume.sh" 'profile-list'
+  assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'profile-use'
+}
+
 run_step test_android_session_uses_root_codex_home
 run_step test_bootstrap_asset_is_synced
 run_step test_generated_launcher_entrypoints_and_normal_path
 run_step test_generated_launcher_first_run_configures_then_runs
 run_step test_update_apply_installs_self_test_script_and_aliases
 run_step test_update_self_test_subcommand_fetches_and_runs_script
+run_step test_codex_local_profile_commands_are_explicit_only
 printf 'OK: Codex for TUI static guards passed\n'
