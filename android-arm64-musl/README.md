@@ -32,6 +32,12 @@
 2. 用户显式运行：
 
 ```sh
+codex 更新
+```
+
+`codex 更新` 只增量更新脚本模块，不重装依赖，不替换 Codex 二进制，不覆盖通用配置。底层维护入口仍可直接使用：
+
+```sh
 codex-update check
 codex-update apply
 ```
@@ -49,6 +55,14 @@ codex-local refresh-models
 ```
 
 它只刷新 `model_catalog_json` 指向的 JSON 文件，并保留当前 `model` 和 `model_reasoning_effort`。
+
+重新填写第三方 API Base、API Key 或默认模型时运行：
+
+```sh
+codex 配置模式
+```
+
+该命令只更新第三方 provider、`auth.json`、默认模型和 `model_catalog_json`，不会重置通用配置。
 
 ## ReTerminal Alpine 安装
 
@@ -71,7 +85,7 @@ curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-ski
 - 写入真实二进制 `codex-zh-bin` 和薄 launcher `codex`。
 - 生成大小写兼容入口，例如 `Codex`、`CODEX`。
 - 安装 `codex-local`、`codex-local-resume`、`codex-update`。
-- 生成默认 `AGENTS.md`。
+- 不生成默认 `AGENTS.md`；需要项目规则时，请在 Codex 里运行 `/init` 后自行编辑。
 - 如果已有 `~/.codex/config.toml`，默认保留，不覆盖。
 - 如果选择第三方 Responses API，写入 `auth.json` 和 `config.toml`。
 
@@ -195,9 +209,19 @@ cwd = "/root/.codex"
 codex-local refresh-models
 ```
 
+需要重新进入第三方配置引导时，推荐执行：
+
+```sh
+codex 配置模式
+```
+
+该命令会重新请求 `/models` 并让你选择默认模型，但保留自动压缩、fast mode、goals、statusline 等通用配置。
+
 ## 本地维护命令
 
 ```sh
+codex 更新
+codex 配置模式
 codex-local status
 codex-local doctor
 codex-local configure
@@ -208,7 +232,11 @@ codex-update check
 codex-update apply
 ```
 
-`codex-local configure` 会显式重写第三方 provider 配置；普通 `codex` 启动不会调用它。
+`codex 配置模式` 是推荐的第三方配置入口；`codex-local configure` 是兼容维护入口。普通 `codex` 启动不会调用它们。
+
+## AGENTS.md
+
+安装器不再创建、复制或覆盖 `AGENTS.md`。如果需要项目级规则，请进入目标工作目录后在 Codex 里运行 `/init`，再编辑该目录下的 `AGENTS.md`。`codex 更新`、`codex 配置模式` 和普通启动都不应该改动用户自己的 AGENTS 文件。
 
 ## 可选环境变量
 
@@ -229,7 +257,7 @@ CODEX_ZH_ALPINE_SHA256=... sh install-alpine-proot.sh
 
 **为什么不是上游推送后自动更新？**
 
-本地 shell 脚本没有可靠的“接收远端推送”能力。自动拉取只能做轮询或启动时检查；这会造成隐藏联网和启动时改配置。当前设计改为显式命令：用户运行 `codex-update check/apply` 才检测和应用脚本更新。
+本地 shell 脚本没有可靠的“接收远端推送”能力。自动拉取只能做轮询或启动时检查；这会造成隐藏联网和启动时改配置。当前设计改为显式命令：用户运行 `codex 更新` 才应用脚本更新；`codex-update check/apply` 作为底层维护入口保留。
 
 **打开 App 后没有进入 Codex，而是回到 shell？**
 

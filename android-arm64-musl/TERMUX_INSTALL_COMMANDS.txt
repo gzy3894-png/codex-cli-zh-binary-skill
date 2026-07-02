@@ -53,11 +53,15 @@ codex
 
 普通 codex 启动不联网更新脚本，不刷新 /models，不覆盖 ~/.codex/config.toml。
 
-检测脚本更新:
-codex-update check
-
 应用脚本更新:
+codex 更新
+
+底层维护入口:
+codex-update check
 codex-update apply
+
+重新进入第三方配置引导:
+codex 配置模式
 
 显式刷新第三方模型目录:
 codex-local refresh-models

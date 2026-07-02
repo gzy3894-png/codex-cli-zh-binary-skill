@@ -165,6 +165,25 @@ test_generated_launcher_has_no_preflight_or_profile_refresh() {
   assert_file_not_contains "$tmp/bin/codex" "--preflight"
   assert_file_not_contains "$tmp/bin/codex" "codex-local-resume"
   assert_file_not_contains "$tmp/bin/codex" "refresh"
+  assert_file_not_contains "$tmp/bin/codex" "AGENTS.md"
+  rm -rf "$tmp"
+}
+
+test_install_scripts_do_not_create_default_agents_md() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-no-default-agents.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-local.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    codex_local_setup_agents
+  )
+
+  [ ! -e "$tmp/home/.codex/AGENTS.md" ] || fail "installer should not create default AGENTS.md"
+  assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" "missing_agents"
   rm -rf "$tmp"
 }
 
@@ -477,6 +496,7 @@ run_step test_syntax_and_asset_sync
 run_step test_bootstrap_normal_start_does_not_fetch_when_codex_exists
 run_step test_bootstrap_explicit_update_fetches_scripts
 run_step test_generated_launcher_has_no_preflight_or_profile_refresh
+run_step test_install_scripts_do_not_create_default_agents_md
 run_step test_refresh_models_preserves_current_model_fields
 run_step test_interactive_model_choice_writes_only_model_id
 run_step test_model_catalog_uses_current_codex_schema_shapes

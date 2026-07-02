@@ -177,10 +177,6 @@ case "${1:-}" in
     ;;
 esac
 
-if [ ! -s "$HOME/AGENTS.md" ] && [ -s "$CODEX_HOME/AGENTS.md" ]; then
-  cp "$CODEX_HOME/AGENTS.md" "$HOME/AGENTS.md" 2>/dev/null || true
-fi
-
 codex_for_tui_configure_if_missing
 exec "$real_bin" "$@"
 EOF
@@ -231,17 +227,8 @@ codex_local_install_support_scripts() {
 }
 
 codex_local_setup_agents() {
-  home_dir="$(codex_home)"
-  codex_ensure_private_dir "$home_dir"
-  [ -s "$home_dir/AGENTS.md" ] && return 0
-  cat > "$home_dir/AGENTS.md" <<'EOF'
-# Codex for TUI
-
-你运行在 Android/Alpine 终端环境中。默认使用用户当前工作目录和 ~/.codex/config.toml。
-普通启动不自动更新脚本，不自动刷新模型，不覆盖用户手写配置。
-需要更新脚本时手动运行 codex-update；需要刷新第三方模型目录时手动运行 codex-local refresh-models。
-EOF
-  chmod 600 "$home_dir/AGENTS.md" 2>/dev/null || true
+  # AGENTS.md is project/user-owned. Users can create it from Codex with /init.
+  return 0
 }
 
 codex_local_configure_if_requested() {
@@ -457,7 +444,6 @@ codex_local_status() {
   missing=0
   [ -x "$(codex_real_bin_path)" ] || { printf '%s\n' "missing_binary"; missing=1; }
   [ -x "$(codex_launcher_path)" ] || { printf '%s\n' "missing_launcher"; missing=1; }
-  [ -s "$(codex_home)/AGENTS.md" ] || { printf '%s\n' "missing_agents"; missing=1; }
   if [ -s "$(codex_config_file)" ]; then
     :
   else

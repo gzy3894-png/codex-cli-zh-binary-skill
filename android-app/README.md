@@ -11,7 +11,7 @@ Codex for TUI 基于 ReTerminal 改造，目标是在 Android 手机上提供一
 - 首次未安装时，用户确认安装后才拉取安装脚本和模块。
 - 支持官方 Codex 登录入口，也支持第三方 Responses API。
 - 第三方 API 模式在显式配置时请求 `/models`，再让用户选择默认模型。
-- 脚本更新由用户手动运行 `codex-update check/apply`。
+- 脚本更新由用户手动运行 `codex 更新`。
 
 ## 关键脚本
 
@@ -28,12 +28,14 @@ APK assets 中的 `codex-for-tui-bootstrap.sh` 必须和 `../android-arm64-musl/
 ## 更新命令
 
 ```sh
+codex 更新
+codex 配置模式
 codex-update check
 codex-update apply
 codex-local refresh-models
 ```
 
-`codex-update` 只更新脚本；`codex-local refresh-models` 只刷新第三方模型目录，并保留当前模型选择。
+`codex 更新` 只增量更新脚本，不重装依赖、不替换 Codex 二进制；`codex 配置模式` 重新进入第三方 API 配置引导。安装器不管理 `AGENTS.md`，需要项目规则时请在 Codex 内运行 `/init`。
 
 ## 构建
 

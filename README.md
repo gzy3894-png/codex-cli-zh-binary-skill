@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v1.0.2-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v1.0.2)
+[![Release](https://img.shields.io/badge/release-v1.0.3-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v1.0.3)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.142.4-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -25,7 +25,7 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `1.0.2` |
+| Android App | `1.0.3` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug 包名 | `com.gzy3894.codexfortui.debug` |
 | Codex CLI | `0.142.4` 中文版 |
@@ -76,14 +76,26 @@ https://api.example.com/v1
 codex
 ```
 
-脚本更新需要手动执行：
+脚本更新需要用户手动执行。推荐直接输入：
+
+```sh
+codex 更新
+```
+
+`codex 更新` 只增量更新安装/配置脚本，不重装 Alpine 依赖，不替换 Codex 二进制，不覆盖通用配置。底层等价维护入口仍然保留：
 
 ```sh
 codex-update check
 codex-update apply
 ```
 
-第三方模型目录刷新也需要手动执行；它只更新 `model_catalog_json` 指向的模型目录文件，保留当前 `model` 和 `model_reasoning_effort`：
+需要重新填写第三方 API Base、API Key 或默认模型时，输入：
+
+```sh
+codex 配置模式
+```
+
+`codex 配置模式` 只更新第三方 provider、`auth.json`、默认模型和 `model_catalog_json`；通用配置如自动压缩、fast mode、goals、statusline 会保留。第三方模型目录刷新也需要手动执行；它只更新 `model_catalog_json` 指向的模型目录文件，保留当前 `model` 和 `model_reasoning_effort`：
 
 ```sh
 codex-local refresh-models
@@ -105,6 +117,16 @@ CODEX
 ```
 
 这对手机软键盘输入很有用。
+
+## AGENTS.md
+
+当前版本不再由安装器创建、复制或覆盖 `AGENTS.md`。如果你需要给某个项目添加 Codex 工作规则，请进入目标目录后在 Codex 里运行：
+
+```text
+/init
+```
+
+然后按 Codex 官方流程编辑该目录下的 `AGENTS.md`。更新脚本、配置模式和普通启动都不应该改动用户自己写的 `AGENTS.md`。
 
 ## 为什么推荐 APK 路线
 
@@ -172,7 +194,7 @@ android-arm64-musl/SHA256SUMS
 codex-local doctor
 ```
 
-如果提示启动器缺失，可以运行 `codex-local repair-launcher`。需要重新配置第三方 API 时运行 `codex-local configure`。
+如果提示启动器缺失，可以运行 `codex-local repair-launcher`。需要重新配置第三方 API 时运行 `codex 配置模式`。
 
 **下载 Codex 压缩包很慢或失败？**
 

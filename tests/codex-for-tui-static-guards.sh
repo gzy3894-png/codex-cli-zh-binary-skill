@@ -78,6 +78,7 @@ EOF
   assert_file_not_contains "$tmp/bin/codex" '--preflight'
   assert_file_not_contains "$tmp/bin/codex" '--refresh-current-profile'
   assert_file_not_contains "$tmp/bin/codex" 'refresh-models'
+  assert_file_not_contains "$tmp/bin/codex" 'AGENTS.md'
 
   if ! output="$(
     HOME="$tmp/home" \
@@ -245,6 +246,24 @@ test_codex_local_profile_commands_are_explicit_only() {
   assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'profile-use'
 }
 
+test_installer_does_not_manage_agents_md() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-static-no-agents.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-local.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    codex_local_setup_agents
+  )
+
+  [ ! -e "$tmp/home/.codex/AGENTS.md" ] || fail "installer should not create AGENTS.md"
+  assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'missing_agents'
+  rm -rf "$tmp"
+}
+
 run_step test_android_session_uses_root_codex_home
 run_step test_bootstrap_asset_is_synced
 run_step test_generated_launcher_entrypoints_and_normal_path
@@ -252,4 +271,5 @@ run_step test_generated_launcher_first_run_configures_then_runs
 run_step test_update_apply_installs_self_test_script_and_aliases
 run_step test_update_self_test_subcommand_fetches_and_runs_script
 run_step test_codex_local_profile_commands_are_explicit_only
+run_step test_installer_does_not_manage_agents_md
 printf 'OK: Codex for TUI static guards passed\n'
