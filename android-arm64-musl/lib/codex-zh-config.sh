@@ -345,6 +345,9 @@ function flush_section_defaults() {
   }
 
   if (skipping) {
+    if ($0 ~ /^[[:space:]]*($|#)/) {
+      print
+    }
     next
   }
 
