@@ -160,13 +160,20 @@ Base URL 会自动规范化：
 model_provider = "custom"
 model = "你选择的默认模型"
 model_reasoning_effort = "medium"
-model_auto_compact_token_limit = 120000
+model_auto_compact_token_limit = 220000
+service_tier = "default"
 model_catalog_json = "/root/.codex/model_catalog.json"
 disable_response_storage = true
 
 [features]
 auto_compaction = true
+fast_mode = true
+goals = true
 hooks = false
+
+[tui]
+status_line = ["model-with-reasoning", "current-dir", "context-remaining", "used-tokens", "total-input-tokens", "total-output-tokens", "fast-mode", "task-progress"]
+status_line_use_colors = true
 
 [model_providers.custom]
 name = "custom"

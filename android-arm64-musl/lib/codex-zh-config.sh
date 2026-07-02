@@ -143,6 +143,7 @@ codex_config_write_model_catalog() {
   models_file="$1"
   default_model="${2:-}"
   out_json="$3"
+  auto_limit="${CODEX_ZH_AUTO_COMPACT_TOKEN_LIMIT:-220000}"
   catalog_tmp="$out_json.tmp"
   catalog_dedup="$out_json.models.tmp"
   mkdir -p "$(dirname "$out_json")"
@@ -176,9 +177,14 @@ codex_config_write_model_catalog() {
       "supports_parallel_tool_calls": true,
       "context_window": 272000,
       "max_context_window": 272000,
-      "auto_compact_token_limit": 120000,
+      "auto_compact_token_limit": $auto_limit,
       "reasoning_summary_format": "experimental",
       "default_reasoning_summary": "none",
+      "additional_speed_tiers": ["fast"],
+      "service_tiers": [
+        {"id": "priority", "name": "Fast", "description": "Priority processing."}
+      ],
+      "default_service_tier": null,
       "slug": "$model_esc",
       "display_name": "$name_esc",
       "description": "$name_esc",
@@ -248,6 +254,162 @@ codex_config_set_catalog_path() {
   chmod 600 "$cfg" 2>/dev/null || true
 }
 
+codex_config_merge_common_and_runtime() {
+  cfg="$1"
+  out="$2"
+  provider_id="$3"
+  model_provider_line="$4"
+  model_line="$5"
+  catalog_line="$6"
+  input="$cfg"
+  [ -e "$input" ] || input="/dev/null"
+  awk \
+    -v provider="$provider_id" \
+    -v model_provider_line="$model_provider_line" \
+    -v model_line="$model_line" \
+    -v catalog_line="$catalog_line" '
+function section_name(line, s) {
+  s = line
+  sub(/^[[:space:]]*\[/, "", s)
+  sub(/\][[:space:]]*($|#.*$)/, "", s)
+  return s
+}
+function is_section(line) {
+  return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*($|#)/
+}
+function emit_root_defaults() {
+  if (root_done) {
+    return
+  }
+  print model_provider_line
+  print model_line
+  if (!root_effort_seen) {
+    print "model_reasoning_effort = \"medium\""
+  }
+  if (!root_compact_seen) {
+    print "model_auto_compact_token_limit = 220000"
+  }
+  if (!root_service_tier_seen) {
+    print "service_tier = \"default\""
+  }
+  print catalog_line
+  if (!root_disable_storage_seen) {
+    print "disable_response_storage = true"
+  }
+  root_done = 1
+}
+function flush_section_defaults() {
+  if (section == "features") {
+    if (!features_auto_seen) {
+      print "auto_compaction = true"
+    }
+    if (!features_fast_seen) {
+      print "fast_mode = true"
+    }
+    if (!features_goals_seen) {
+      print "goals = true"
+    }
+    if (!features_hooks_seen) {
+      print "hooks = false"
+    }
+  } else if (section == "tui") {
+    if (!tui_status_line_seen) {
+      print "status_line = [\"model-with-reasoning\", \"current-dir\", \"context-remaining\", \"used-tokens\", \"total-input-tokens\", \"total-output-tokens\", \"fast-mode\", \"task-progress\"]"
+    }
+    if (!tui_status_colors_seen) {
+      print "status_line_use_colors = true"
+    }
+  }
+}
+{
+  if (is_section($0)) {
+    flush_section_defaults()
+    s = section_name($0)
+    if (s == "model_providers." provider || s == "model_providers." provider ".auth") {
+      skipping = 1
+      section = s
+      next
+    }
+    skipping = 0
+    if (!root_done) {
+      emit_root_defaults()
+    }
+    section = s
+    if (section == "features") {
+      features_seen = 1
+    } else if (section == "tui") {
+      tui_seen = 1
+    }
+    print
+    next
+  }
+
+  if (skipping) {
+    next
+  }
+
+  if (section == "") {
+    if ($0 ~ /^[[:space:]]*model_provider[[:space:]]*=/) {
+      next
+    }
+    if ($0 ~ /^[[:space:]]*model[[:space:]]*=/) {
+      next
+    }
+    if ($0 ~ /^[[:space:]]*model_catalog_json[[:space:]]*=/) {
+      next
+    }
+    if ($0 ~ /^[[:space:]]*model_reasoning_effort[[:space:]]*=/) {
+      root_effort_seen = 1
+    } else if ($0 ~ /^[[:space:]]*model_auto_compact_token_limit[[:space:]]*=/) {
+      root_compact_seen = 1
+    } else if ($0 ~ /^[[:space:]]*service_tier[[:space:]]*=/) {
+      root_service_tier_seen = 1
+    } else if ($0 ~ /^[[:space:]]*disable_response_storage[[:space:]]*=/) {
+      root_disable_storage_seen = 1
+    }
+  } else if (section == "features") {
+    if ($0 ~ /^[[:space:]]*auto_compaction[[:space:]]*=/) {
+      features_auto_seen = 1
+    } else if ($0 ~ /^[[:space:]]*fast_mode[[:space:]]*=/) {
+      features_fast_seen = 1
+    } else if ($0 ~ /^[[:space:]]*goals[[:space:]]*=/) {
+      features_goals_seen = 1
+    } else if ($0 ~ /^[[:space:]]*hooks[[:space:]]*=/) {
+      features_hooks_seen = 1
+    }
+  } else if (section == "tui") {
+    if ($0 ~ /^[[:space:]]*status_line[[:space:]]*=/) {
+      tui_status_line_seen = 1
+    } else if ($0 ~ /^[[:space:]]*status_line_use_colors[[:space:]]*=/) {
+      tui_status_colors_seen = 1
+    }
+  }
+
+  print
+}
+END {
+  flush_section_defaults()
+  if (!root_done) {
+    emit_root_defaults()
+  }
+  if (!features_seen) {
+    print ""
+    print "[features]"
+    print "auto_compaction = true"
+    print "fast_mode = true"
+    print "goals = true"
+    print "hooks = false"
+  }
+  if (!tui_seen) {
+    print ""
+    print "[tui]"
+    print "status_line = [\"model-with-reasoning\", \"current-dir\", \"context-remaining\", \"used-tokens\", \"total-input-tokens\", \"total-output-tokens\", \"fast-mode\", \"task-progress\"]"
+    print "status_line_use_colors = true"
+  }
+}
+' "$input" > "$out"
+}
+
 codex_config_write_third_party_config() {
   api_base="$1"
   api_key="$2"
@@ -267,18 +429,15 @@ codex_config_write_third_party_config() {
   catalog_esc="$(codex_toml_escape "$catalog")"
   config_tmp="$cfg.tmp"
   codex_config_clear_official_mode
-  cat > "$config_tmp" <<EOF
-model_provider = "$CODEX_ZH_PROVIDER_ID"
-model = "$model_esc"
-model_reasoning_effort = "medium"
-model_auto_compact_token_limit = 120000
-model_catalog_json = "$catalog_esc"
-disable_response_storage = true
+  codex_config_merge_common_and_runtime \
+    "$cfg" \
+    "$config_tmp" \
+    "$CODEX_ZH_PROVIDER_ID" \
+    "model_provider = \"$CODEX_ZH_PROVIDER_ID\"" \
+    "model = \"$model_esc\"" \
+    "model_catalog_json = \"$catalog_esc\""
 
-[features]
-auto_compaction = true
-hooks = false
-
+  cat >> "$config_tmp" <<EOF
 [model_providers.$CODEX_ZH_PROVIDER_ID]
 name = "$CODEX_ZH_PROVIDER_ID"
 base_url = "$api_base_esc"
