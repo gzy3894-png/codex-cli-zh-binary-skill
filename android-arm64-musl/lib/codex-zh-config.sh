@@ -169,7 +169,7 @@ codex_config_write_model_catalog() {
       "support_verbosity": true,
       "default_verbosity": "medium",
       "apply_patch_tool_type": "freeform",
-      "web_search_tool_type": "web_search",
+      "web_search_tool_type": "text",
       "input_modalities": ["text", "image"],
       "supports_image_detail_original": true,
       "truncation_policy": {"mode": "tokens", "limit": 10000},
