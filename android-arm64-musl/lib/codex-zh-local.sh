@@ -102,16 +102,89 @@ codex_local_write_launcher() {
   mkdir -p "$install_dir"
   [ -x "$real_bin" ] || codex_die "缺少 Codex 二进制：$real_bin"
   real_q="$(codex_shell_quote "$real_bin")"
-  cat > "$launcher" <<EOF
-#!/usr/bin/env sh
-export HOME="\${HOME:-/root}"
-export CODEX_HOME="\${CODEX_HOME:-\$HOME/.codex}"
-export PATH="\$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:\${PATH:-}"
-if [ ! -s "\$HOME/AGENTS.md" ] && [ -s "\$CODEX_HOME/AGENTS.md" ]; then
-  cp "\$CODEX_HOME/AGENTS.md" "\$HOME/AGENTS.md" 2>/dev/null || true
+  {
+    printf '%s\n' '#!/usr/bin/env sh'
+    printf 'real_bin=%s\n' "$real_q"
+    cat <<'EOF'
+export HOME="${HOME:-/root}"
+export CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
+
+codex_for_tui_find_lib_dir() {
+  for dir in \
+    "${CODEX_ZH_SCRIPT_INSTALL_ROOT:-}/lib" \
+    "$(dirname -- "$0")/../share/codex-zh/scripts/lib" \
+    "$HOME/.local/share/codex-zh/scripts/lib" \
+    "/usr/local/share/codex-zh/scripts/lib" \
+    "$HOME/.cache/codex-zh/scripts/lib"
+  do
+    [ -r "$dir/codex-zh-common.sh" ] && { printf '%s\n' "$dir"; return 0; }
+  done
+  return 1
+}
+
+codex_for_tui_load_config_libs() {
+  lib_dir="$(codex_for_tui_find_lib_dir)" || {
+    printf '%s\n' "错误: 找不到 codex-zh 配置模块。请先运行 codex 更新。" >&2
+    exit 1
+  }
+  # shellcheck disable=SC1090
+  . "$lib_dir/codex-zh-common.sh"
+  # shellcheck disable=SC1090
+  . "$lib_dir/codex-zh-config.sh"
+  # shellcheck disable=SC1090
+  . "$lib_dir/codex-zh-local.sh"
+}
+
+codex_for_tui_has_config() {
+  [ -s "$CODEX_HOME/config.toml" ] && return 0
+  [ -s "$CODEX_HOME/auth.json" ] && return 0
+  [ -s "$CODEX_HOME/install-state/official-login-mode" ] && return 0
+  return 1
+}
+
+codex_for_tui_configure_if_missing() {
+  codex_for_tui_has_config && return 0
+  codex_for_tui_load_config_libs
+  codex_init_env
+  codex_local_configure_if_requested
+}
+
+codex_for_tui_force_configure() {
+  codex_for_tui_load_config_libs
+  codex_init_env
+  codex_config_prompt_third_party
+}
+
+codex_for_tui_update() {
+  if command -v codex-update >/dev/null 2>&1; then
+    [ "$#" -gt 0 ] || set -- apply
+    exec codex-update "$@"
+  fi
+  printf '%s\n' "错误: 找不到 codex-update。请先确认 Codex for TUI 安装完整。" >&2
+  exit 1
+}
+
+case "${1:-}" in
+  配置模式|configure|config)
+    shift
+    codex_for_tui_force_configure
+    exec "$real_bin" "$@"
+    ;;
+  更新|update)
+    shift
+    codex_for_tui_update "$@"
+    ;;
+esac
+
+if [ ! -s "$HOME/AGENTS.md" ] && [ -s "$CODEX_HOME/AGENTS.md" ]; then
+  cp "$CODEX_HOME/AGENTS.md" "$HOME/AGENTS.md" 2>/dev/null || true
 fi
-exec $real_q "\$@"
+
+codex_for_tui_configure_if_missing
+exec "$real_bin" "$@"
 EOF
+  } > "$launcher"
   chmod 755 "$launcher"
   codex_install_case_variants "$install_dir" "$launcher"
   codex_persist_path "$install_dir"
@@ -171,12 +244,13 @@ EOF
 
 codex_local_configure_if_requested() {
   [ "${CODEX_ZH_SKIP_API_SETUP:-0}" = "1" ] && { codex_info "跳过 API 配置：CODEX_ZH_SKIP_API_SETUP=1"; return 0; }
-  if [ -s "$(codex_config_file)" ] && [ "${CODEX_ZH_OVERWRITE_CONFIG:-0}" != "1" ]; then
-    codex_info "保留现有配置：$(codex_config_file)"
+  if codex_config_has_runtime_config && [ "${CODEX_ZH_OVERWRITE_CONFIG:-0}" != "1" ]; then
+    codex_info "检测到已有 Codex 配置或官方登录模式，保留现状。"
     return 0
   fi
   if [ "${CODEX_ZH_SETUP_MODE:-}" = "official" ]; then
     codex_info "使用官方 Codex 登录入口；不写第三方 provider 配置。"
+    codex_config_mark_official_mode
     return 0
   fi
   if [ "${CODEX_ZH_SETUP_MODE:-}" = "third_party" ] || [ -n "${CODEX_ZH_API_BASE:-}" ] || [ -n "${CODEX_ZH_API_KEY:-}" ]; then
@@ -189,7 +263,10 @@ codex_local_configure_if_requested() {
   choice="$(codex_config_tty_read "请输入选项编号" "1")"
   case "$choice" in
     2) codex_config_prompt_third_party ;;
-    *) codex_info "使用官方 Codex 登录入口；不写第三方 provider 配置。" ;;
+    *)
+      codex_info "使用官方 Codex 登录入口；不写第三方 provider 配置。"
+      codex_config_mark_official_mode
+      ;;
   esac
 }
 

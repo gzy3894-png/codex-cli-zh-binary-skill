@@ -6,6 +6,28 @@ codex_config_file() {
   printf '%s/config.toml\n' "$(codex_home)"
 }
 
+codex_config_official_marker_file() {
+  printf '%s/official-login-mode\n' "$(codex_state_root)"
+}
+
+codex_config_mark_official_mode() {
+  marker="$(codex_config_official_marker_file)"
+  mkdir -p "$(dirname "$marker")"
+  printf '%s\n' "official-login" > "$marker"
+  chmod 600 "$marker" 2>/dev/null || true
+}
+
+codex_config_clear_official_mode() {
+  rm -f "$(codex_config_official_marker_file)" 2>/dev/null || true
+}
+
+codex_config_has_runtime_config() {
+  [ -s "$(codex_config_file)" ] && return 0
+  [ -s "$(codex_config_auth_file)" ] && return 0
+  [ -s "$(codex_config_official_marker_file)" ] && return 0
+  return 1
+}
+
 codex_config_auth_file() {
   printf '%s/auth.json\n' "$(codex_home)"
 }
@@ -227,6 +249,7 @@ codex_config_write_third_party_config() {
   home_esc="$(codex_toml_escape "$home_dir")"
   catalog_esc="$(codex_toml_escape "$catalog")"
   tmp="$cfg.tmp"
+  codex_config_clear_official_mode
   cat > "$tmp" <<EOF
 model_provider = "$CODEX_ZH_PROVIDER_ID"
 model = "$model_esc"

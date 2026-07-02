@@ -68,7 +68,8 @@ object MkSession {
 
             val env = mutableListOf(
                 "PATH=${System.getenv("PATH")}:/sbin:${localBinDir().absolutePath}",
-                "HOME=/sdcard",
+                "HOME=/root",
+                "CODEX_HOME=/root/.codex",
                 "PUBLIC_HOME=${getExternalFilesDir(null)?.absolutePath}",
                 "COLORTERM=truecolor",
                 "TERM=xterm-256color",
