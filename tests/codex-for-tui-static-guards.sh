@@ -79,24 +79,28 @@ EOF
   assert_file_not_contains "$tmp/bin/codex" '--refresh-current-profile'
   assert_file_not_contains "$tmp/bin/codex" 'refresh-models'
 
-  output="$(
+  if ! output="$(
     HOME="$tmp/home" \
     CODEX_HOME="$tmp/home/.codex" \
     CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR" \
     PATH="$tmp/bin:/bin:/usr/bin" \
     "$tmp/bin/codex" hello
-  )"
+  )"; then
+    fail "normal codex launcher command failed"
+  fi
   printf '%s\n' "$output" | grep -F 'real-codex:' >/dev/null 2>&1 || fail "normal codex did not run real binary"
   printf '%s\n' "$output" | grep -F 'update-ran' >/dev/null 2>&1 && fail "normal codex invoked update path"
   printf '%s\n' "$output" | grep -F ':/root:' >/dev/null 2>&1 && fail "test did not isolate HOME"
 
-  output="$(
+  if ! output="$(
     HOME="$tmp/home" \
     CODEX_HOME="$tmp/home/.codex" \
     CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR" \
     PATH="$tmp/bin:/bin:/usr/bin" \
     "$tmp/bin/codex" 更新
-  )"
+  )"; then
+    fail "codex update launcher command failed"
+  fi
   printf '%s\n' "$output" | grep -F 'update-ran:apply' >/dev/null 2>&1 || fail "codex 更新 did not invoke codex-update apply"
   rm -rf "$tmp"
 }
@@ -104,7 +108,7 @@ EOF
 test_generated_launcher_first_run_configures_then_runs() {
   tmp="${TMPDIR:-/tmp}/codex-tui-static-first-run.$$"
   rm -rf "$tmp"
-  mkdir -p "$tmp/home" "$tmp/bin"
+  mkdir -p "$tmp/home/.local/bin" "$tmp/bin"
 
   cat > "$tmp/bin/codex-zh-bin" <<'EOF'
 #!/usr/bin/env sh
@@ -112,7 +116,7 @@ printf 'real-codex-after-config:%s\n' "$*"
 EOF
   chmod +x "$tmp/bin/codex-zh-bin"
 
-  cat > "$tmp/bin/curl" <<'EOF'
+  cat > "$tmp/home/.local/bin/curl" <<'EOF'
 #!/usr/bin/env sh
 dest=""
 while [ "$#" -gt 0 ]; do
@@ -130,7 +134,7 @@ done
 mkdir -p "$(dirname "$dest")"
 printf '{"data":[{"id":"codex-test-model"}]}\n' > "$dest"
 EOF
-  chmod +x "$tmp/bin/curl"
+  chmod +x "$tmp/home/.local/bin/curl"
 
   (
     . "$SCRIPT_DIR/lib/codex-zh-common.sh"
@@ -141,7 +145,7 @@ EOF
     codex_local_write_launcher
   )
 
-  output="$(
+  if ! output="$(
     HOME="$tmp/home" \
     CODEX_HOME="$tmp/home/.codex" \
     CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR" \
@@ -152,7 +156,10 @@ EOF
     CODEX_ZH_FORCE_STDIN=1 \
     PATH="$tmp/bin:/bin:/usr/bin" \
     "$tmp/bin/codex" 2>"$tmp/stderr"
-  )"
+  )"; then
+    [ ! -s "$tmp/stderr" ] || sed -n '1,80p' "$tmp/stderr" >&2 || true
+    fail "first run launcher command failed"
+  fi
 
   [ -s "$tmp/home/.codex/config.toml" ] || fail "first run did not write config.toml"
   assert_file_contains "$tmp/home/.codex/config.toml" 'model = "codex-test-model"'
