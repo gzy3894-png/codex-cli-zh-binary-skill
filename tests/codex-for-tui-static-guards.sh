@@ -17,6 +17,7 @@ MEDIA_PREVIEW_PANE="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/termina
 MAIN_ACTIVITY="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/activities/terminal/MainActivity.kt"
 BROWSER_PANEL_PANE="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/BrowserPanelPane.kt"
 TERMINAL_BROWSER_SESSION="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalBrowserSession.kt"
+TERMINAL_VIEW_MODEL="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -73,6 +74,8 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$INIT_ASSET" 'export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"'
   assert_file_contains "$MEDIA_PREVIEW_PANE" 'EmptyPreviewTray'
   assert_file_contains "$MEDIA_PREVIEW_PANE" 'GridCells.Adaptive'
+  assert_file_contains "$MEDIA_PREVIEW_PANE" 'TextComposerTile'
+  assert_file_contains "$MEDIA_PREVIEW_PANE" 'onSendText'
   assert_file_contains "$MEDIA_PREVIEW_PANE" 'text = if (previewCount <= 0) "文件"'
   assert_file_contains "$MEDIA_PREVIEW_PANE" 'Text("发送")'
   assert_file_contains "$MEDIA_PREVIEW_PANE" '附加说明（可选）'
@@ -86,8 +89,21 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'fun closeTabFromUi'
   assert_file_contains "$MAIN_ACTIVITY" 'codex-preview path'
   assert_file_contains "$MAIN_ACTIVITY" 'writePreviewReference'
+  assert_file_contains "$MAIN_ACTIVITY" 'sendComposerTextToAi'
+  assert_file_contains "$MAIN_ACTIVITY" 'writeAgentPanelEvent'
+  assert_file_contains "$MAIN_ACTIVITY" 'user_sent_text'
+  assert_file_contains "$MAIN_ACTIVITY" 'visible='
+  assert_file_contains "$MAIN_ACTIVITY" 'collapsed='
   assert_file_contains "$PREVIEW_ASSET" 'codex-preview path FILE_ID'
+  assert_file_contains "$PREVIEW_ASSET" 'codex-preview [--present|--background] text --stdin'
+  assert_file_contains "$PREVIEW_ASSET" 'codex-preview status|events|wait|close'
+  assert_file_contains "$PREVIEW_ASSET" 'present=%s'
   assert_file_contains "$INIT_ASSET" 'codex-preview path FILE_ID'
+  assert_file_contains "$INIT_ASSET" '[ -x "$bin_dir/codex-preview" ]'
+  assert_file_contains "$INIT_ASSET" 'codex-preview [--present|--background] text --stdin'
+  assert_file_contains "$TERMINAL_VIEW_MODEL" 'fun addMediaPreview'
+  assert_file_not_contains "$TERMINAL_VIEW_MODEL" 'mediaPreviewExpanded = true'
+  assert_file_not_contains "$TERMINAL_VIEW_MODEL" 'browserPanelExpanded = true'
   assert_file_not_contains "$TERMINAL_TOP_BAR" 'onPickFileClick'
   assert_file_not_contains "$MEDIA_PREVIEW_PANE" '预览托盘'
   assert_file_not_contains "$MEDIA_PREVIEW_PANE" 'Text("AI")'
@@ -133,10 +149,11 @@ test_image_preview_bridge_asset() {
   fallback_resolved_path="$(PREFIX="$tmp/prefix" "$tmp/prefix/local/bin/codex-preview" path "$image_stamp")" || fail "fallback codex-preview path should resolve image ref"
   [ "$fallback_resolved_path" = "$image_path" ] || fail "fallback codex-preview path resolved wrong image path: $fallback_resolved_path"
   assert_file_contains "$tmp/prefix/local/media-preview/request" "action=show"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "present=1"
   assert_file_contains "$tmp/prefix/local/media-preview/request" "kind=image"
   printf '%s\n' "$output" | grep -F '已发送到 Codex for TUI 文件面板' >/dev/null 2>&1 || fail "preview command did not report success"
 
-  if ! output="$(PREFIX="$tmp/prefix" "$tmp/prefix/local/bin/codex-push-media" "$tmp/source/clip.mp4")"; then
+  if ! output="$(PREFIX="$tmp/prefix" "$tmp/prefix/local/bin/codex-push-media" --background "$tmp/source/clip.mp4")"; then
     fail "codex-push-media should copy a video into preview bridge"
   fi
 
@@ -147,6 +164,7 @@ test_image_preview_bridge_asset() {
     *) fail "preview video path should use a unique mp4 file: $video_path" ;;
   esac
   assert_file_contains "$tmp/prefix/local/media-preview/request" "kind=video"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "present=0"
 
   if ! output="$(PREFIX="$tmp/prefix" sh "$PREVIEW_ASSET" "$tmp/source/notes.md")"; then
     fail "codex-preview should copy a text file into preview bridge"
@@ -160,6 +178,19 @@ test_image_preview_bridge_asset() {
   esac
   assert_file_contains "$tmp/prefix/local/media-preview/request" "kind=text"
   printf '%s\n' "$output" | grep -F 'long text line' >/dev/null 2>&1 && fail "codex-preview dumped text file content"
+
+  if ! output="$(printf 'stdin long text line\nsecond line\n' | PREFIX="$tmp/prefix" sh "$PREVIEW_ASSET" --background text --stdin --name user-note.txt)"; then
+    fail "codex-preview should accept stdin text into preview bridge"
+  fi
+  stdin_text_path="$(sed -n 's/^path=//p' "$tmp/prefix/local/media-preview/request")"
+  [ -s "$stdin_text_path" ] || fail "stdin text copy missing"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "kind=text"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "present=0"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "name=user-note.txt"
+  stdin_text_stamp="$(sed -n 's/^stamp=//p' "$tmp/prefix/local/media-preview/request")"
+  stdin_resolved_path="$(PREFIX="$tmp/prefix" sh "$PREVIEW_ASSET" path "$stdin_text_stamp")" || fail "codex-preview path should resolve stdin text ref"
+  [ "$stdin_resolved_path" = "$stdin_text_path" ] || fail "stdin text ref resolved wrong path: $stdin_resolved_path"
+  printf '%s\n' "$output" | grep -F 'stdin long text line' >/dev/null 2>&1 && fail "codex-preview stdin dumped text content"
 
   if ! output="$(PREFIX="$tmp/prefix" sh "$PREVIEW_ASSET" close)"; then
     fail "codex-preview close should write a clear request"
@@ -179,8 +210,22 @@ test_browser_bridge_asset() {
   fi
   [ -s "$tmp/prefix/local/browser/request" ] || fail "browser request file missing"
   assert_file_contains "$tmp/prefix/local/browser/request" "action=navigate"
+  assert_file_contains "$tmp/prefix/local/browser/request" "present=0"
   assert_file_contains "$tmp/prefix/local/browser/request" "url=https://example.test"
   printf '%s\n' "$output" | grep -F '已发送到 Codex for TUI 浏览器' >/dev/null 2>&1 || fail "browser command did not report success"
+
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait open --present https://visible.example.test >/dev/null; then
+    fail "codex-browser open --present should write a visible open request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=navigate"
+  assert_file_contains "$tmp/prefix/local/browser/request" "present=1"
+  assert_file_contains "$tmp/prefix/local/browser/request" "url=https://visible.example.test"
+
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait present user_review >/dev/null; then
+    fail "codex-browser present should write a present request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=present"
+  assert_file_contains "$tmp/prefix/local/browser/request" "reason=user_review"
 
   if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait auth https://login.example.test >/dev/null; then
     fail "codex-browser should write an auth request"
@@ -205,10 +250,18 @@ test_browser_bridge_asset() {
     fail "codex-browser should write a user wait request"
   fi
   assert_file_contains "$tmp/prefix/local/browser/request" "action=user_wait"
+  assert_file_contains "$tmp/prefix/local/browser/request" "present=1"
   assert_file_contains "$tmp/prefix/local/browser/request" "message=请完成验证"
+  PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" status >/dev/null || fail "codex-browser status should be safe without status file"
+  PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" events >/dev/null || fail "codex-browser events should be safe without events file"
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'CustomTabsIntent.Builder'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'shouldHandleOutsideWebView'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'onShowFileChooser'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" '"present" -> present'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'activeUserRequestId'
+  assert_file_contains "$MAIN_ACTIVITY" 'action == "present"'
+  assert_file_contains "$MAIN_ACTIVITY" 'snapshot?.optBoolean("needsUser") == true'
+  assert_file_contains "$MAIN_ACTIVITY" 'markBrowserUserDone(reason = "user_collapsed")'
   rm -rf "$tmp"
 }
 

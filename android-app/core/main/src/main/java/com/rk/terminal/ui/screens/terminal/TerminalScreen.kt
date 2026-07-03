@@ -135,16 +135,10 @@ fun TerminalScreen(
                         previewCount = terminalViewModel.mediaPreviews.size,
                         latestPreview = terminalViewModel.mediaPreviews.lastOrNull(),
                         previewExpanded = terminalViewModel.mediaPreviewExpanded,
-                        onPreviewClick = {
-                            terminalViewModel.mediaPreviewExpanded =
-                                !terminalViewModel.mediaPreviewExpanded
-                        },
+                        onPreviewClick = mainActivity::toggleMediaPreviewPanel,
                         browserSnapshot = terminalViewModel.browserSnapshot,
                         browserExpanded = terminalViewModel.browserPanelExpanded,
-                        onBrowserClick = {
-                            terminalViewModel.browserPanelExpanded =
-                                !terminalViewModel.browserPanelExpanded
-                        }
+                        onBrowserClick = mainActivity::toggleBrowserPanel
                     )
                 }
 
@@ -166,9 +160,9 @@ fun TerminalScreen(
                 TerminalBrowserTray(
                     snapshot = terminalViewModel.browserSnapshot,
                     browserSessionManager = mainActivity.browserSessionManager,
-                    onCollapse = { terminalViewModel.browserPanelExpanded = false },
+                    onCollapse = mainActivity::collapseBrowserPanel,
                     onClose = mainActivity::closeBrowserSession,
-                    onUserDone = mainActivity::markBrowserUserDone,
+                    onUserDone = { mainActivity.markBrowserUserDone() },
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .padding(top = previewTrayTopPadding)
@@ -182,11 +176,12 @@ fun TerminalScreen(
             ) {
                 TerminalMediaPreviewTray(
                     previews = terminalViewModel.mediaPreviews,
-                    onCollapse = { terminalViewModel.mediaPreviewExpanded = false },
+                    onCollapse = mainActivity::collapseMediaPreviewPanel,
                     onPickFile = mainActivity::openPreviewFilePicker,
                     onClear = mainActivity::dismissMediaPreview,
                     onRemove = mainActivity::removeMediaPreview,
                     onSendToAi = mainActivity::sendPreviewToAi,
+                    onSendText = mainActivity::sendComposerTextToAi,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .padding(top = previewTrayTopPadding)

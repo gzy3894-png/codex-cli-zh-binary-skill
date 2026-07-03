@@ -44,7 +44,6 @@ class TerminalViewModel : ViewModel() {
     fun addMediaPreview(preview: TerminalMediaPreview) {
         mediaPreviews.removeAll { it.stamp == preview.stamp || it.path == preview.path }
         mediaPreviews.add(preview)
-        mediaPreviewExpanded = true
         while (mediaPreviews.size > MAX_MEDIA_PREVIEWS) {
             mediaPreviews.removeAt(0)
         }
@@ -64,9 +63,6 @@ class TerminalViewModel : ViewModel() {
 
     fun updateBrowserSnapshot(snapshot: TerminalBrowserSnapshot) {
         browserSnapshot = snapshot
-        if (snapshot.available && snapshot.status != "closed") {
-            browserPanelExpanded = true
-        }
         if (!snapshot.available) {
             browserPanelExpanded = false
         }

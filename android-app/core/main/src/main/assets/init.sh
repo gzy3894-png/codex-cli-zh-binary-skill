@@ -21,14 +21,37 @@ fi
 ensure_codex_preview() {
   bin_dir="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin"
   mkdir -p "$bin_dir" 2>/dev/null || return 0
+  if [ -x "$bin_dir/codex-preview" ]; then
+    cat > "$bin_dir/codex-push-image" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+if command -v codex-preview >/dev/null 2>&1; then
+  exec codex-preview "$@"
+fi
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+exec "$script_dir/codex-preview" "$@"
+EOF
+    cat > "$bin_dir/codex-push-media" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+if command -v codex-preview >/dev/null 2>&1; then
+  exec codex-preview "$@"
+fi
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+exec "$script_dir/codex-preview" "$@"
+EOF
+    chmod 755 "$bin_dir/codex-push-image" "$bin_dir/codex-push-media" 2>/dev/null || true
+    return 0
+  fi
   cat > "$bin_dir/codex-preview" <<'EOF'
 #!/usr/bin/env sh
 set -eu
 
 usage() {
-  printf '%s\n' "用法: codex-preview /path/to/image-video-or-text"
+  printf '%s\n' "用法: codex-preview [--present|--background] /path/to/image-video-or-text"
+  printf '%s\n' "      codex-preview [--present|--background] text --stdin [--name NAME]"
   printf '%s\n' "      codex-preview path FILE_ID"
-  printf '%s\n' "      codex-preview close"
+  printf '%s\n' "      codex-preview status|events|wait|close"
 }
 
 find_prefix() {
@@ -104,6 +127,37 @@ print_ref_path() {
   printf '%s\n' "$path"
 }
 
+print_file_if_readable() {
+  file="$1"
+  if [ -r "$file" ]; then
+    cat "$file"
+    return 0
+  fi
+  return 1
+}
+
+wait_events() {
+  panel_dir="$1/local/agent-panel"
+  events_file="$panel_dir/events"
+  wait_seconds="${CODEX_PREVIEW_WAIT_SECONDS:-120}"
+  start_size=0
+  [ ! -f "$events_file" ] || start_size="$(wc -c < "$events_file" 2>/dev/null || printf 0)"
+  elapsed=0
+  while [ "$elapsed" -lt "$wait_seconds" ]; do
+    if [ -s "$events_file" ]; then
+      size="$(wc -c < "$events_file" 2>/dev/null || printf 0)"
+      if [ "$size" != "$start_size" ]; then
+        tail -n 40 "$events_file"
+        return 0
+      fi
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  printf '等待文件面板事件超时\n' >&2
+  return 1
+}
+
 detect_kind() {
   ext="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
   case "$ext" in
@@ -114,19 +168,45 @@ detect_kind() {
   esac
 }
 
-if [ "$#" -ne 1 ] && [ "$#" -ne 2 ]; then
-  usage >&2
-  exit 2
-fi
-
 prefix="$(find_prefix)" || {
   printf '%s\n' "找不到 App 数据目录: 请在 Codex for TUI 终端内运行。" >&2
   exit 1
 }
 
+[ "$#" -ge 1 ] || { usage >&2; exit 2; }
+
+present=1
+case "${1:-}" in
+  --background|--collapsed)
+    present=0
+    shift
+    ;;
+  --present|--show)
+    present=1
+    shift
+    ;;
+esac
+
+[ "$#" -ge 1 ] || { usage >&2; exit 2; }
+
 if [ "$1" = "close" ] || [ "$1" = "--close" ]; then
   write_clear_request "$prefix"
   exit 0
+fi
+
+if [ "$1" = "status" ]; then
+  print_file_if_readable "$prefix/local/media-preview/status" || print_file_if_readable "$prefix/local/agent-panel/status" || true
+  exit 0
+fi
+
+if [ "$1" = "events" ]; then
+  print_file_if_readable "$prefix/local/agent-panel/events" || true
+  exit 0
+fi
+
+if [ "$1" = "wait" ]; then
+  wait_events "$prefix"
+  exit $?
 fi
 
 if [ "$#" -eq 2 ] && [ "$1" = "path" ]; then
@@ -134,44 +214,61 @@ if [ "$#" -eq 2 ] && [ "$1" = "path" ]; then
   exit $?
 fi
 
-if [ "$#" -ne 1 ]; then
-  usage >&2
-  exit 2
-fi
-
-src="$1"
-if [ ! -f "$src" ] || [ ! -r "$src" ]; then
-  printf '文件不可读: %s\n' "$src" >&2
-  exit 1
-fi
-
-base="$(basename "$src")"
-case "$base" in
-  *.*) ext="${base##*.}" ;;
-  *) ext="bin" ;;
-esac
-
-kind="$(detect_kind "$ext")" || {
-  printf '暂不支持预览此文件类型: %s\n' "$base" >&2
-  exit 2
-}
-
 bridge_dir="$prefix/local/media-preview"
 media_dir="$bridge_dir/files"
 request_file="$bridge_dir/request"
 mkdir -p "$media_dir"
 
 stamp="$(date +%s 2>/dev/null || printf 0).$$"
-dest="$media_dir/$stamp.$ext"
-tmp="$dest.tmp.$$"
+if [ "$1" = "text" ] && [ "${2:-}" = "--stdin" ]; then
+  shift 2
+  base="codex-text-$stamp.txt"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --name)
+        [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+        base="$(basename "$2")"
+        shift 2
+        ;;
+      *)
+        usage >&2
+        exit 2
+        ;;
+    esac
+  done
+  ext="txt"
+  kind="text"
+  dest="$media_dir/$stamp.$ext"
+  tmp="$dest.tmp.$$"
+  cat > "$tmp"
+else
+  [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+  src="$1"
+  if [ ! -f "$src" ] || [ ! -r "$src" ]; then
+    printf '文件不可读: %s\n' "$src" >&2
+    exit 1
+  fi
+  base="$(basename "$src")"
+  case "$base" in
+    *.*) ext="${base##*.}" ;;
+    *) ext="bin" ;;
+  esac
+  kind="$(detect_kind "$ext")" || {
+    printf '暂不支持预览此文件类型: %s\n' "$base" >&2
+    exit 2
+  }
+  dest="$media_dir/$stamp.$ext"
+  tmp="$dest.tmp.$$"
+  cp "$src" "$tmp"
+fi
 req_tmp="$request_file.tmp.$$"
 
-cp "$src" "$tmp"
 mv "$tmp" "$dest"
 chmod 600 "$dest" 2>/dev/null || true
 
 {
   printf 'action=show\n'
+  printf 'present=%s\n' "$present"
   printf 'kind=%s\n' "$kind"
   printf 'path=%s\n' "$dest"
   printf 'name=%s\n' "$base"
@@ -180,7 +277,7 @@ chmod 600 "$dest" 2>/dev/null || true
 mv "$req_tmp" "$request_file"
 write_ref_file "$prefix" "$stamp" "$dest" "$base" "$kind"
 
-printf '已发送到 Codex for TUI 文件面板: %s\n' "$src"
+printf '已发送到 Codex for TUI 文件面板: %s\n' "$base"
 EOF
   cat > "$bin_dir/codex-push-image" <<'EOF'
 #!/usr/bin/env sh

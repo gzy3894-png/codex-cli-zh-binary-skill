@@ -47,14 +47,18 @@ codex-local refresh-models
 ```sh
 codex-preview /path/to/image.png
 codex-preview /path/to/notes.md
+codex-preview --background /path/to/video.mp4
+printf '很长的文本\n' | codex-preview text --stdin --name notes.txt
 codex-push-image /path/to/image.png
 codex-push-media /path/to/video.mp4
 codex-preview path 1783070528.24966
+codex-preview status
+codex-preview events
 codex-preview close
 ```
 
-命令会把图片、视频或文本复制到 App 私有目录，并通知前台终端界面在内嵌文件容器中展示。
-多次推送会累积为缩略图文件面板；图片点击后进入全屏缩放预览，多张图片可左右滑动查看，视频使用系统级 Media3 控件播放，文本文件只展示摘要，不把全文刷到终端。文件面板内也可以通过系统文件管理器选择文本、图片或视频。发送文件时可以附加一句话，终端只显示短文件编号；AI 需要真实路径时可运行 `codex-preview path <编号>` 解析。
+命令会把图片、视频或文本复制到 App 私有目录。默认展示内嵌文件容器；带 `--background` 时只加入托盘不展开。
+多次推送会累积为缩略图文件面板；面板第一格常驻文本框，用户发送后会保存为文本引用并清空输入框。图片点击后进入全屏缩放预览，多张图片可左右滑动查看，视频使用系统级 Media3 控件播放，文本文件只展示摘要，不把全文刷到终端。文件面板内也可以通过系统文件管理器选择文本、图片或视频。发送文件时可以附加一句话，终端只显示短文件编号；AI 需要真实路径时可运行 `codex-preview path <编号>` 解析。折叠、删除、清空、发送等用户动作会写入 `status/events`，供终端侧继续协作。
 
 ## 浏览器
 
@@ -62,11 +66,15 @@ codex-preview close
 
 ```sh
 codex-browser open https://example.com
+codex-browser present 页面已就绪
+codex-browser user-wait 请完成验证
+codex-browser status
+codex-browser events
 codex-browser auth https://chatgpt.com
 codex-browser external https://example.com/login
 ```
 
-`open` 使用 App 内嵌 WebView，适合展示页面、读取 DOM、点击、输入和截图。`auth` / `external` 使用 Chrome Custom Tabs 或系统浏览器，适合登录、授权、验证码和风控场景；该模式不向 App 暴露用户浏览器 Cookie。
+`open` 使用 App 内嵌 WebView，默认后台加载，适合读取 DOM、点击、输入和截图；需要展示给用户时调用 `present`，需要用户协作时调用 `user-wait`。`auth` / `external` 使用 Chrome Custom Tabs 或系统浏览器，适合登录、授权、验证码和风控场景；该模式不向 App 暴露用户浏览器 Cookie。
 浏览器托盘支持多标签，顶部标签条可以切换或关闭标签；文件和浏览器托盘都采用更紧凑的入口按钮和更轻的半透明容器，减少对终端内容的遮挡。
 
 ## 构建

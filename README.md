@@ -30,9 +30,9 @@ codex 配置模式
 
 ## 2.0 新功能
 
-- 文件托盘：终端可以推送图片、视频和文本到顶部托盘，用户也可以从系统文件管理器添加文件，再带一句附加说明发送给当前会话。
+- 文件托盘：终端可以推送图片、视频和文本到顶部托盘，用户也可以从系统文件管理器添加文件，第一格常驻文本框可发送长文本。
 - 隐私友好的文件引用：发送到终端时只展示短编号和 `codex-preview path <编号>`，不再把应用私有目录完整刷到屏幕里。
-- 协作浏览器：内置 WebView 浏览器托盘支持 Agent 读取页面、点击、输入、执行 JS、截图、文件上传、用户接管和多标签切换。
+- 协作浏览器：内置 WebView 默认后台运行，只有 `present` / `wait-user` 或用户点顶栏时才展示；支持 Agent 读取页面、点击、输入、执行 JS、截图、文件上传、用户接管和多标签切换。
 - 登录/验证场景：需要真实浏览器能力时支持跳转 Custom Tabs 或系统浏览器，由用户完成登录、授权或验证后再回到 TUI。
 - 移动端体验：文件和浏览器入口更紧凑，托盘容器更轻，减少遮挡终端内容。
 
@@ -139,21 +139,38 @@ codex-local doctor
 codex-local repair-launcher
 ```
 
-文件托盘可以由终端命令唤起，用来把本地图片、视频或文本放到顶部容器里预览：
+文件托盘可以由终端命令唤起，用来把本地图片、视频或文本放到顶部容器里预览。默认会展示托盘；需要只放入后台托盘时使用 `--background`：
 
 ```sh
-codex-preview image /path/to/image.png
-codex-preview video /path/to/video.mp4
-codex-preview text /path/to/notes.md
+codex-preview /path/to/image.png
+codex-preview --background /path/to/video.mp4
+printf '很长的文本\n' | codex-preview text --stdin --name notes.txt
 ```
 
-用户也可以在托盘里点“添加”，用 Android 系统文件管理器选择文件。点文件卡片的“发送”时，可以附加一句说明一起送入当前 Codex 会话。终端提示只会展示短文件编号；需要在 shell 中解析真实路径时使用：
+用户也可以在托盘里点“添加”，用 Android 系统文件管理器选择文件。托盘第一格是常驻文本框，发送后会保存为文本引用并清空输入框；文件卡片发送时可以附加一句说明。终端提示只会展示短文件编号；需要在 shell 中解析真实路径时使用：
 
 ```sh
 codex-preview path <编号>
 ```
 
-协作浏览器由应用内桥接驱动。Agent 可以打开网页、读 DOM、点击、输入、执行 JS、截图；遇到登录、授权、验证码或风控时，可以切到 Custom Tabs/系统浏览器让用户处理，再回到当前会话继续。
+托盘和浏览器都会写入统一事件流，Agent 可以读取用户折叠、完成、取消、删除、清空、发送等状态：
+
+```sh
+codex-preview status
+codex-preview events
+```
+
+协作浏览器由应用内桥接驱动。`open` 默认后台加载，不会立刻弹出；需要展示给用户时再调用 `present`，需要用户协作时用 `user-wait`：
+
+```sh
+codex-browser open https://www.baidu.com/s?wd=codex
+codex-browser present 搜索结果已就绪
+codex-browser user-wait 请完成登录或验证
+codex-browser status
+codex-browser events
+```
+
+Agent 可以打开网页、读 DOM、点击、输入、执行 JS、截图；遇到登录、授权、验证码或风控时，可以切到 Custom Tabs/系统浏览器让用户处理，再回到当前会话继续。
 
 安装器还会创建多种大小写入口，例如：
 

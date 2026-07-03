@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.item
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -187,6 +188,7 @@ fun TerminalMediaPreviewTray(
     onClear: () -> Unit,
     onRemove: (TerminalMediaPreview) -> Unit,
     onSendToAi: (TerminalMediaPreview, String) -> Unit,
+    onSendText: (String) -> Boolean,
     modifier: Modifier = Modifier
 ) {
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
@@ -216,28 +218,27 @@ fun TerminalMediaPreviewTray(
                 color = DividerDefaults.color.copy(alpha = 0.7f),
                 thickness = 0.5.dp
             )
-            if (previews.isEmpty()) {
-                EmptyPreviewTray(onPickFile = onPickFile)
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(108.dp),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(
-                        items = previews,
-                        key = { item -> item.stamp }
-                    ) { preview ->
-                        PreviewThumbTile(
-                            preview = preview,
-                            imagePreviews = imagePreviews,
-                            onOpen = { dialogState = it },
-                            onRemove = { onRemove(preview) },
-                            onSendToAi = { sendTarget = preview }
-                        )
-                    }
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(108.dp),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                item(key = "text-composer") {
+                    TextComposerTile(onSendText = onSendText)
+                }
+                items(
+                    items = previews,
+                    key = { item -> item.stamp }
+                ) { preview ->
+                    PreviewThumbTile(
+                        preview = preview,
+                        imagePreviews = imagePreviews,
+                        onOpen = { dialogState = it },
+                        onRemove = { onRemove(preview) },
+                        onSendToAi = { sendTarget = preview }
+                    )
                 }
             }
         }
@@ -259,6 +260,64 @@ fun TerminalMediaPreviewTray(
                 sendTarget = null
             }
         )
+    }
+}
+
+@Composable
+private fun TextComposerTile(onSendText: (String) -> Boolean) {
+    var text by remember { mutableStateOf("") }
+    val send = {
+        if (onSendText(text)) {
+            text = ""
+        }
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(154.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+        tonalElevation = 1.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.18f))
+    ) {
+        Column(
+            modifier = Modifier.padding(6.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Text(
+                text = "文本",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(84.dp),
+                placeholder = { Text("输入后发送") },
+                textStyle = MaterialTheme.typography.labelSmall,
+                minLines = 2,
+                maxLines = 3,
+                keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Default)
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(
+                    onClick = send,
+                    enabled = text.isNotBlank(),
+                    modifier = Modifier.height(30.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp)
+                ) {
+                    Text("发送", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
     }
 }
 

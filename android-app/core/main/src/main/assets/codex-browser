@@ -2,14 +2,15 @@
 set -eu
 
 usage() {
-  printf '%s\n' "用法: codex-browser open URL"
+  printf '%s\n' "用法: codex-browser open [--present] URL"
+  printf '%s\n' "      codex-browser present [REASON]"
   printf '%s\n' "      codex-browser auth URL"
   printf '%s\n' "      codex-browser external URL"
   printf '%s\n' "      codex-browser click CSS_SELECTOR"
   printf '%s\n' "      codex-browser type CSS_SELECTOR TEXT"
   printf '%s\n' "      codex-browser scroll [up|down] [amount]"
   printf '%s\n' "      codex-browser get-text [CSS_SELECTOR]"
-  printf '%s\n' "      codex-browser screenshot|snapshot|reload|back|forward|user-done|close"
+  printf '%s\n' "      codex-browser screenshot|snapshot|reload|back|forward|user-done|status|events|wait|close"
 }
 
 find_prefix() {
@@ -53,9 +54,17 @@ wait_status() {
     if [ -s "$status_file" ] && grep -F "request_id=$request_id" "$status_file" >/dev/null 2>&1; then
       state="$(sed -n 's/^state=//p' "$status_file" | sed -n '1p')"
       case "$state" in
-        done|closed|waiting_for_user)
+        done|closed|ready)
           cat "$status_file"
           return 0
+          ;;
+        waiting_for_user)
+          if [ "${CODEX_BROWSER_WAIT_USER_DONE:-0}" = "1" ]; then
+            :
+          else
+            cat "$status_file"
+            return 0
+          fi
           ;;
         error)
           cat "$status_file" >&2
@@ -67,6 +76,37 @@ wait_status() {
     elapsed=$((elapsed + 1))
   done
   printf '等待浏览器动作超时: request_id=%s\n' "$request_id" >&2
+  return 1
+}
+
+print_file_if_readable() {
+  file="$1"
+  if [ -r "$file" ]; then
+    cat "$file"
+    return 0
+  fi
+  return 1
+}
+
+wait_events() {
+  panel_dir="$1/local/agent-panel"
+  events_file="$panel_dir/events"
+  wait_seconds="${CODEX_BROWSER_EVENT_WAIT_SECONDS:-120}"
+  start_size=0
+  [ ! -f "$events_file" ] || start_size="$(wc -c < "$events_file" 2>/dev/null || printf 0)"
+  elapsed=0
+  while [ "$elapsed" -lt "$wait_seconds" ]; do
+    if [ -s "$events_file" ]; then
+      size="$(wc -c < "$events_file" 2>/dev/null || printf 0)"
+      if [ "$size" != "$start_size" ]; then
+        tail -n 40 "$events_file"
+        return 0
+      fi
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  printf '等待浏览器事件超时\n' >&2
   return 1
 }
 
@@ -88,8 +128,17 @@ shift
 
 case "$cmd" in
   open|navigate)
+    present=0
+    if [ "${1:-}" = "--present" ]; then
+      present=1
+      shift
+    fi
     [ "$#" -eq 1 ] || { usage >&2; exit 2; }
-    request_id="$(write_request "$prefix" action navigate url "$1")"
+    request_id="$(write_request "$prefix" action navigate present "$present" url "$1")"
+    ;;
+  present|show)
+    reason="${*:-present}"
+    request_id="$(write_request "$prefix" action present present 1 reason "$reason")"
     ;;
   auth|external|custom-tab)
     [ "$#" -eq 1 ] || { usage >&2; exit 2; }
@@ -101,6 +150,18 @@ case "$cmd" in
     action="$cmd"
     [ "$cmd" = "user-done" ] && action="user_done"
     request_id="$(write_request "$prefix" action "$action")"
+    ;;
+  status)
+    print_file_if_readable "$prefix/local/browser/status" || true
+    exit 0
+    ;;
+  events)
+    print_file_if_readable "$prefix/local/agent-panel/events" || true
+    exit 0
+    ;;
+  wait)
+    wait_events "$prefix"
+    exit $?
     ;;
   back)
     request_id="$(write_request "$prefix" action back)"
@@ -157,7 +218,9 @@ case "$cmd" in
     ;;
   user-wait)
     message="${*:-请在浏览器中手动处理后继续}"
-    request_id="$(write_request "$prefix" action user_wait message "$message")"
+    request_id="$(write_request "$prefix" action user_wait present 1 message "$message")"
+    CODEX_BROWSER_WAIT_USER_DONE=1
+    CODEX_BROWSER_WAIT_SECONDS="${CODEX_BROWSER_WAIT_SECONDS:-300}"
     ;;
   *)
     usage >&2

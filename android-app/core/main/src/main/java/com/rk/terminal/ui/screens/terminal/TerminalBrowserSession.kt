@@ -51,6 +51,7 @@ data class TerminalBrowserTabSnapshot(
 
 data class TerminalBrowserSnapshot(
     val available: Boolean = false,
+    val requestId: String = "",
     val activeTabId: Int? = null,
     val title: String = "",
     val currentUrl: String = "",
@@ -87,6 +88,8 @@ class TerminalBrowserSessionManager(
     private var latestSnapshot = TerminalBrowserSnapshot()
     private var needsUser = false
     private var userMessage = ""
+    private var currentRequestId = ""
+    private var activeUserRequestId = ""
 
     fun snapshot(): TerminalBrowserSnapshot = latestSnapshot
 
@@ -130,9 +133,11 @@ class TerminalBrowserSessionManager(
     ): JSONObject = withContext(Dispatchers.Main.immediate) {
         val action = request["action"]?.trim().orEmpty().ifBlank { "snapshot" }
         val requestId = request["request_id"] ?: request["stamp"] ?: System.currentTimeMillis().toString()
+        currentRequestId = requestId
         val result = runCatching {
             when (action) {
                 "open", "navigate" -> navigate(request.requireValue("url"))
+                "present" -> present(request["reason"].orEmpty().ifBlank { "present" })
                 "reload" -> {
                     activeTab().webView.reload()
                     publish("running", "刷新中")
@@ -151,8 +156,12 @@ class TerminalBrowserSessionManager(
                 "execute_js", "js" -> executeJs(request.requireValue("script"))
                 "screenshot" -> screenshot(browserDir, requestId)
                 "external", "auth", "custom_tab" -> openExternalBrowser(request.requireValue("url"))
-                "user_wait" -> userWait(request["message"].orEmpty().ifBlank { "请在浏览器中手动处理后继续" })
+                "user_wait" -> userWait(
+                    message = request["message"].orEmpty().ifBlank { "请在浏览器中手动处理后继续" },
+                    requestId = requestId
+                )
                 "user_done" -> userDone()
+                "user_cancelled" -> userCancelled()
                 "close" -> closeSession()
                 "snapshot" -> JSONObject()
                 else -> throw IllegalArgumentException("unsupported action: $action")
@@ -161,7 +170,7 @@ class TerminalBrowserSessionManager(
         val ok = result.isSuccess
         if (!ok) {
             publish("error", result.exceptionOrNull()?.message.orEmpty())
-        } else if (action !in setOf("open", "navigate", "reload", "user_wait", "close")) {
+        } else if (action !in setOf("open", "navigate", "reload", "user_wait", "present", "close")) {
             publish("done", action)
         }
         JSONObject()
@@ -225,8 +234,14 @@ class TerminalBrowserSessionManager(
         attachedContainer = null
         needsUser = false
         userMessage = ""
+        activeUserRequestId = ""
         publish("closed", "浏览器已关闭")
         return JSONObject().put("closed", true)
+    }
+
+    private fun present(reason: String): JSONObject {
+        publish("ready", reason)
+        return JSONObject().put("presented", true).put("reason", reason)
     }
 
     private suspend fun navigate(rawUrl: String): JSONObject {
@@ -427,9 +442,10 @@ class TerminalBrowserSessionManager(
             .put("external", true)
     }
 
-    private fun userWait(message: String): JSONObject {
+    private fun userWait(message: String, requestId: String): JSONObject {
         needsUser = true
         userMessage = message
+        activeUserRequestId = requestId
         publish("waiting_for_user", message)
         return JSONObject().put("message", message)
     }
@@ -437,8 +453,17 @@ class TerminalBrowserSessionManager(
     private fun userDone(): JSONObject {
         needsUser = false
         userMessage = ""
+        activeUserRequestId = ""
         publish("done", "用户已完成接管")
         return JSONObject().put("userDone", true)
+    }
+
+    private fun userCancelled(): JSONObject {
+        needsUser = false
+        userMessage = ""
+        activeUserRequestId = ""
+        publish("cancelled", "用户已取消接管")
+        return JSONObject().put("userCancelled", true)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -752,6 +777,7 @@ class TerminalBrowserSessionManager(
         val active = activeTabId?.let { tabs[it] }
         latestSnapshot = TerminalBrowserSnapshot(
             available = tabs.isNotEmpty(),
+            requestId = activeUserRequestId.ifBlank { currentRequestId },
             activeTabId = active?.id,
             title = active?.title.orEmpty(),
             currentUrl = active?.currentUrl.orEmpty(),
@@ -835,6 +861,7 @@ class TerminalBrowserSessionManager(
     private fun snapshotJson(snapshot: TerminalBrowserSnapshot): JSONObject {
         return JSONObject()
             .put("available", snapshot.available)
+            .put("requestId", snapshot.requestId)
             .put("activeTabId", snapshot.activeTabId)
             .put("title", snapshot.title)
             .put("currentUrl", snapshot.currentUrl)
