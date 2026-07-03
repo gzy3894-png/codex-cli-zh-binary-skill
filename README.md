@@ -1,13 +1,21 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v1.0.3-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v1.0.3)
+[![Release](https://img.shields.io/badge/release-v2.0.0-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.0.0)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.142.4-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
 
-Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基于 ReTerminal 改造，内置 Alpine/proot 终端环境和 Codex 中文版 ARM64 musl 安装流程，让用户不必先手动折腾 Termux、rootfs、依赖、PATH、API 配置和本地维护命令。
+Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基于 ReTerminal 改造，内置 Alpine/proot 终端环境、Codex 中文版 ARM64 musl 安装流程、文件托盘和协作浏览器，让用户不必先手动折腾 Termux、rootfs、依赖、PATH、API 配置、本地维护命令和移动端预览工具。
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
+
+## 2.0 新功能
+
+- 文件托盘：终端可以推送图片、视频和文本到顶部托盘，用户也可以从系统文件管理器添加文件，再带一句附加说明发送给当前会话。
+- 隐私友好的文件引用：发送到终端时只展示短编号和 `codex-preview path <编号>`，不再把应用私有目录完整刷到屏幕里。
+- 协作浏览器：内置 WebView 浏览器托盘支持 Agent 读取页面、点击、输入、执行 JS、截图、文件上传、用户接管和多标签切换。
+- 登录/验证场景：需要真实浏览器能力时支持跳转 Custom Tabs 或系统浏览器，由用户完成登录、授权或验证后再回到 TUI。
+- 移动端体验：文件和浏览器入口更紧凑，托盘容器更轻，减少遮挡终端内容。
 
 ## 项目定位
 
@@ -17,6 +25,8 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 - 运行环境：使用 Alpine/proot 路线承载 `aarch64-unknown-linux-musl` 构建。
 - 安装流程：自动准备依赖、下载 Codex 中文版二进制、写入 PATH 和大小写命令入口。
 - 配置流程：支持官方 Codex 初始化，也支持兼容 OpenAI Responses API 的第三方服务。
+- 文件协作：支持图片、视频、文本预览、用户选文件、长按分享和带说明发送。
+- 浏览器协作：支持内置 WebView、Custom Tabs/系统浏览器接管、多标签和页面自动化桥接。
 - 本地维护：普通启动不改配置；脚本更新和模型目录刷新都由用户显式命令触发。
 
 它不是 OpenAI 官方发布渠道，也不是一个泛用 Linux 发行版 App；它的目标很明确：让 Android 用户更稳地进入 Codex TUI。
@@ -25,7 +35,7 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `1.0.3` |
+| Android App | `2.0.0` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug 包名 | `com.gzy3894.codexfortui.debug` |
 | Codex CLI | `0.142.4` 中文版 |
@@ -107,6 +117,22 @@ codex-local refresh-models
 codex-local doctor
 codex-local repair-launcher
 ```
+
+文件托盘可以由终端命令唤起，用来把本地图片、视频或文本放到顶部容器里预览：
+
+```sh
+codex-preview image /path/to/image.png
+codex-preview video /path/to/video.mp4
+codex-preview text /path/to/notes.md
+```
+
+用户也可以在托盘里点“添加”，用 Android 系统文件管理器选择文件。点文件卡片的“发送”时，可以附加一句说明一起送入当前 Codex 会话。终端提示只会展示短文件编号；需要在 shell 中解析真实路径时使用：
+
+```sh
+codex-preview path <编号>
+```
+
+协作浏览器由应用内桥接驱动。Agent 可以打开网页、读 DOM、点击、输入、执行 JS、截图；遇到登录、授权、验证码或风控时，可以切到 Custom Tabs/系统浏览器让用户处理，再回到当前会话继续。
 
 安装器还会创建多种大小写入口，例如：
 

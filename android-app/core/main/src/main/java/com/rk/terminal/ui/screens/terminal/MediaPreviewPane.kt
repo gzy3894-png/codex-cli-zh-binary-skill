@@ -90,30 +90,30 @@ fun TerminalMediaPreviewTopBarButton(
 ) {
     Surface(
         modifier = modifier
-            .padding(end = 6.dp)
-            .height(32.dp)
-            .widthIn(min = 64.dp, max = 104.dp)
+            .padding(end = 4.dp)
+            .height(28.dp)
+            .widthIn(min = 52.dp, max = 82.dp)
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         color = if (expanded) {
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
         } else {
-            MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.62f)
         },
         border = BorderStroke(1.dp, color.copy(alpha = 0.34f))
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 6.dp),
+            modifier = Modifier.padding(horizontal = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             if (latestPreview != null) {
                 TopBarPreviewThumb(preview = latestPreview)
             } else {
                 Box(
                     modifier = Modifier
-                        .size(20.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .size(18.dp)
+                        .clip(RoundedCornerShape(9.dp))
                         .background(Color.Black.copy(alpha = 0.18f)),
                     contentAlignment = Alignment.Center
                 ) {
@@ -129,7 +129,7 @@ fun TerminalMediaPreviewTopBarButton(
             Text(
                 text = if (previewCount <= 0) "文件" else if (previewCount > 99) "99+" else previewCount.toString(),
                 color = color,
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1
             )
@@ -141,8 +141,8 @@ fun TerminalMediaPreviewTopBarButton(
 private fun TopBarPreviewThumb(preview: TerminalMediaPreview) {
     Box(
         modifier = Modifier
-            .size(20.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .size(18.dp)
+            .clip(RoundedCornerShape(9.dp))
             .background(Color.Black.copy(alpha = 0.18f)),
         contentAlignment = Alignment.Center
     ) {
@@ -201,7 +201,7 @@ fun TerminalMediaPreviewTray(
             .height(trayHeight)
             .padding(horizontal = 10.dp, vertical = 6.dp),
         shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
         tonalElevation = 3.dp,
         shadowElevation = 2.dp
     ) {

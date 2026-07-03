@@ -116,6 +116,14 @@ class TerminalBrowserSessionManager(
         tab?.contextWrapper?.baseContext = appContext
     }
 
+    fun selectTabFromUi(tabId: Int) {
+        runCatching { selectTab(tabId) }
+    }
+
+    fun closeTabFromUi(tabId: Int) {
+        runCatching { closeTab(tabId) }
+    }
+
     suspend fun handleRequest(
         request: Map<String, String>,
         browserDir: File

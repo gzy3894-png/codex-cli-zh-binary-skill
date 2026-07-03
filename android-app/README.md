@@ -67,6 +67,7 @@ codex-browser external https://example.com/login
 ```
 
 `open` 使用 App 内嵌 WebView，适合展示页面、读取 DOM、点击、输入和截图。`auth` / `external` 使用 Chrome Custom Tabs 或系统浏览器，适合登录、授权、验证码和风控场景；该模式不向 App 暴露用户浏览器 Cookie。
+浏览器托盘支持多标签，顶部标签条可以切换或关闭标签；文件和浏览器托盘都采用更紧凑的入口按钮和更轻的半透明容器，减少对终端内容的遮挡。
 
 ## 构建
 

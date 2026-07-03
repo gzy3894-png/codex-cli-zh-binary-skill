@@ -48,26 +48,26 @@ fun TerminalBrowserTopBarButton(
 
     Surface(
         modifier = modifier
-            .padding(end = 6.dp)
-            .height(32.dp)
-            .widthIn(min = 72.dp, max = 112.dp)
+            .padding(end = 4.dp)
+            .height(28.dp)
+            .widthIn(min = 62.dp, max = 92.dp)
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         color = if (expanded) {
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
         } else {
-            MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.62f)
         },
         border = BorderStroke(1.dp, color.copy(alpha = 0.34f))
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 7.dp),
+            modifier = Modifier.padding(horizontal = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .size(9.dp)
+                    .size(7.dp)
                     .background(
                         if (snapshot.needsUser) {
                             Color(0xFFE09A21)
@@ -82,7 +82,7 @@ fun TerminalBrowserTopBarButton(
             Text(
                 text = "浏览器",
                 color = color,
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1
             )
@@ -110,7 +110,7 @@ fun TerminalBrowserTray(
             .height(trayHeight)
             .padding(horizontal = 10.dp, vertical = 6.dp),
         shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
         tonalElevation = 3.dp,
         shadowElevation = 2.dp
     ) {
@@ -119,7 +119,9 @@ fun TerminalBrowserTray(
                 snapshot = snapshot,
                 onCollapse = onCollapse,
                 onClose = onClose,
-                onUserDone = onUserDone
+                onUserDone = onUserDone,
+                onSelectTab = browserSessionManager::selectTabFromUi,
+                onCloseTab = browserSessionManager::closeTabFromUi
             )
             HorizontalDivider(thickness = 0.5.dp)
             BrowserWebViewHost(
@@ -138,7 +140,9 @@ private fun BrowserTrayHeader(
     snapshot: TerminalBrowserSnapshot,
     onCollapse: () -> Unit,
     onClose: () -> Unit,
-    onUserDone: () -> Unit
+    onUserDone: () -> Unit,
+    onSelectTab: (Int) -> Unit,
+    onCloseTab: (Int) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -185,6 +189,88 @@ private fun BrowserTrayHeader(
                         Text("继续")
                     }
                 }
+            }
+        }
+        if (snapshot.tabs.size > 1) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                snapshot.tabs.forEach { tab ->
+                    BrowserTabChip(
+                        tab = tab,
+                        active = tab.id == snapshot.activeTabId,
+                        onSelect = { onSelectTab(tab.id) },
+                        onClose = { onCloseTab(tab.id) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BrowserTabChip(
+    tab: TerminalBrowserTabSnapshot,
+    active: Boolean,
+    onSelect: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .height(30.dp)
+            .clickable(onClick = onSelect),
+        shape = RoundedCornerShape(7.dp),
+        color = if (active) {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f)
+        },
+        border = BorderStroke(
+            1.dp,
+            if (active) {
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.32f)
+            } else {
+                MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)
+            }
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 7.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .background(
+                        if (tab.isLoading) MaterialTheme.colorScheme.primary else Color(0xFF2EAD5B),
+                        RoundedCornerShape(3.dp)
+                    )
+            )
+            Text(
+                text = tab.title.ifBlank { tab.url.ifBlank { "标签 ${tab.id}" } },
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Box(
+                modifier = Modifier
+                    .size(20.dp)
+                    .clickable(onClick = onClose),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = "关闭标签",
+                    modifier = Modifier.size(13.dp)
+                )
             }
         }
     }

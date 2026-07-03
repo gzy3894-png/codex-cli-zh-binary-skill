@@ -59,6 +59,8 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 20'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.0"'
 }
 
 test_image_preview_bridge_asset() {
@@ -74,7 +76,14 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$MEDIA_PREVIEW_PANE" 'text = if (previewCount <= 0) "文件"'
   assert_file_contains "$MEDIA_PREVIEW_PANE" 'Text("发送")'
   assert_file_contains "$MEDIA_PREVIEW_PANE" '附加说明（可选）'
-  assert_file_contains "$BROWSER_PANEL_PANE" '.height(32.dp)'
+  assert_file_contains "$MEDIA_PREVIEW_PANE" '.height(28.dp)'
+  assert_file_contains "$MEDIA_PREVIEW_PANE" 'color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f)'
+  assert_file_contains "$BROWSER_PANEL_PANE" '.height(28.dp)'
+  assert_file_contains "$BROWSER_PANEL_PANE" 'BrowserTabChip'
+  assert_file_contains "$BROWSER_PANEL_PANE" 'onSelectTab = browserSessionManager::selectTabFromUi'
+  assert_file_contains "$BROWSER_PANEL_PANE" 'color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f)'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'fun selectTabFromUi'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'fun closeTabFromUi'
   assert_file_contains "$MAIN_ACTIVITY" 'codex-preview path'
   assert_file_contains "$MAIN_ACTIVITY" 'writePreviewReference'
   assert_file_contains "$PREVIEW_ASSET" 'codex-preview path FILE_ID'
