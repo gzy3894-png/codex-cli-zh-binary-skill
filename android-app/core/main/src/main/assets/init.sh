@@ -86,6 +86,7 @@ export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH
 
 if [ "$#" -eq 0 ]; then
   [ ! -r /etc/profile ] || . /etc/profile
+  export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"
   cd "$HOME" 2>/dev/null || true
   if [ -s "${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin/codex-for-tui-bootstrap.sh" ]; then
     sh "${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin/codex-for-tui-bootstrap.sh" || echo "警告: Codex for TUI 启动失败，已回到 shell。"

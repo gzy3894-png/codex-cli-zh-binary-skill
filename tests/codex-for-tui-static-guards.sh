@@ -56,6 +56,8 @@ test_debug_build_uses_test_package_name() {
 test_image_preview_bridge_asset() {
   assert_file_contains "$MKSESSION" '"codex-push-image" to "codex-push-image"'
   assert_file_contains "$INIT_ASSET" 'ensure_codex_push_image'
+  assert_file_contains "$INIT_ASSET" '[ ! -r /etc/profile ] || . /etc/profile'
+  assert_file_contains "$INIT_ASSET" 'export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"'
   sh -n "$PUSH_IMAGE_ASSET" || fail "codex-push-image shell syntax failed"
   sh -n "$INIT_ASSET" || fail "init.sh shell syntax failed"
 
