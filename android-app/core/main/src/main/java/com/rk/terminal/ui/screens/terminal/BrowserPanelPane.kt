@@ -1,6 +1,5 @@
 package com.rk.terminal.ui.screens.terminal
 
-import android.widget.FrameLayout
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -27,10 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -127,6 +123,7 @@ fun TerminalBrowserTray(
             )
             HorizontalDivider(thickness = 0.5.dp)
             BrowserWebViewHost(
+                activeTabId = snapshot.activeTabId,
                 browserSessionManager = browserSessionManager,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -195,28 +192,26 @@ private fun BrowserTrayHeader(
 
 @Composable
 private fun BrowserWebViewHost(
+    activeTabId: Int?,
     browserSessionManager: TerminalBrowserSessionManager,
     modifier: Modifier = Modifier
 ) {
-    var container by remember { mutableStateOf<FrameLayout?>(null) }
-    DisposableEffect(container, browserSessionManager) {
-        val attachedContainer = container
+    DisposableEffect(activeTabId, browserSessionManager) {
         onDispose {
-            attachedContainer?.let { browserSessionManager.detachFrom(it) }
+            browserSessionManager.releaseHostedTab(activeTabId)
         }
     }
-    AndroidView(
-        factory = { context ->
-            FrameLayout(context).also {
-                container = it
-                browserSessionManager.attachTo(it)
-            }
-        },
-        update = {
-            browserSessionManager.attachTo(it)
-        },
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color.White)
-    )
+    key(activeTabId) {
+        AndroidView(
+            factory = { context ->
+                browserSessionManager.hostWebView(context)
+            },
+            update = {
+                browserSessionManager.updateHostedWebView(it)
+            },
+            modifier = modifier
+                .fillMaxSize()
+                .background(Color.White)
+        )
+    }
 }

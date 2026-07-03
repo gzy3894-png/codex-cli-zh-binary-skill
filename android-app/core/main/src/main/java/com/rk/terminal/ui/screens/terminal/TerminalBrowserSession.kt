@@ -76,6 +76,32 @@ class TerminalBrowserSessionManager(
 
     fun snapshot(): TerminalBrowserSnapshot = latestSnapshot
 
+    fun hostWebView(context: Context): WebView {
+        val tab = tabs[activeTabId] ?: tabs.values.lastOrNull() ?: createTab()
+        activeTabId = tab.id
+        tab.contextWrapper.baseContext = context
+        (tab.webView.parent as? ViewGroup)?.removeView(tab.webView)
+        tab.webView.layoutParams = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        )
+        resumeHostedWebView(tab.webView)
+        return tab.webView
+    }
+
+    fun updateHostedWebView(webView: WebView) {
+        resumeHostedWebView(webView)
+    }
+
+    fun releaseHostedWebView(webView: WebView) {
+        tabs.values.firstOrNull { it.webView === webView }?.contextWrapper?.baseContext = appContext
+    }
+
+    fun releaseHostedTab(tabId: Int?) {
+        val tab = tabId?.let { tabs[it] } ?: activeTabId?.let { tabs[it] }
+        tab?.contextWrapper?.baseContext = appContext
+    }
+
     suspend fun handleRequest(
         request: Map<String, String>,
         browserDir: File
@@ -191,6 +217,7 @@ class TerminalBrowserSessionManager(
         needsUser = false
         userMessage = ""
         publish("running", "打开网页")
+        waitForHostLayout(tab)
         tab.webView.loadUrl(url)
         withTimeoutOrNull(15000) {
             tab.loadWaiter?.await()
@@ -501,6 +528,26 @@ class TerminalBrowserSessionManager(
         val heightSpec = View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
         webView.measure(widthSpec, heightSpec)
         webView.layout(0, 0, width, height)
+    }
+
+    private suspend fun waitForHostLayout(tab: BrowserTab) {
+        repeat(12) {
+            val parent = tab.webView.parent as? View
+            if (parent != null && parent.width > 0 && parent.height > 0) return
+            delay(50)
+        }
+    }
+
+    private fun resumeHostedWebView(webView: WebView) {
+        focusWebView(webView)
+        webView.onResume()
+        webView.resumeTimers()
+        webView.requestLayout()
+        webView.invalidate()
+        webView.post {
+            webView.requestLayout()
+            webView.invalidate()
+        }
     }
 
     private fun focusWebView(webView: WebView) {
