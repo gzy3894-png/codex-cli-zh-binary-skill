@@ -55,12 +55,17 @@ test_debug_build_uses_test_package_name() {
 
 test_image_preview_bridge_asset() {
   assert_file_contains "$MKSESSION" '"codex-push-image" to "codex-push-image"'
+  assert_file_contains "$INIT_ASSET" 'ensure_codex_push_image'
   sh -n "$PUSH_IMAGE_ASSET" || fail "codex-push-image shell syntax failed"
+  sh -n "$INIT_ASSET" || fail "init.sh shell syntax failed"
 
   tmp="${TMPDIR:-/tmp}/codex-tui-static-image-preview.$$"
   rm -rf "$tmp"
   mkdir -p "$tmp/prefix" "$tmp/source"
   printf 'fake-image\n' > "$tmp/source/pic.png"
+
+  PREFIX="$tmp/prefix" sh "$INIT_ASSET" true || fail "init.sh should create codex-push-image before exec"
+  [ -x "$tmp/prefix/local/bin/codex-push-image" ] || fail "init.sh did not create codex-push-image fallback"
 
   if ! output="$(PREFIX="$tmp/prefix" sh "$PUSH_IMAGE_ASSET" "$tmp/source/pic.png")"; then
     fail "codex-push-image should copy an image into preview bridge"
