@@ -1,0 +1,161 @@
+#!/usr/bin/env sh
+set -eu
+
+usage() {
+  printf '%s\n' "用法: codex-browser open URL"
+  printf '%s\n' "      codex-browser click CSS_SELECTOR"
+  printf '%s\n' "      codex-browser type CSS_SELECTOR TEXT"
+  printf '%s\n' "      codex-browser scroll [up|down] [amount]"
+  printf '%s\n' "      codex-browser get-text [CSS_SELECTOR]"
+  printf '%s\n' "      codex-browser screenshot|snapshot|reload|back|forward|user-done|close"
+}
+
+find_prefix() {
+  if [ -n "${PREFIX:-}" ]; then
+    printf '%s\n' "$PREFIX"
+    return 0
+  fi
+  if [ -n "${PKG:-}" ]; then
+    [ -d "/data/user/0/$PKG" ] && { printf '%s\n' "/data/user/0/$PKG"; return 0; }
+    [ -d "/data/data/$PKG" ] && { printf '%s\n' "/data/data/$PKG"; return 0; }
+  fi
+  return 1
+}
+
+write_request() {
+  bridge_dir="$1/local/browser"
+  shift
+  request_file="$bridge_dir/request"
+  mkdir -p "$bridge_dir"
+  req_tmp="$request_file.tmp.$$"
+  request_id="$(date +%s 2>/dev/null || printf 0).$$"
+  {
+    printf 'request_id=%s\n' "$request_id"
+    printf 'stamp=%s\n' "$request_id"
+    while [ "$#" -gt 0 ]; do
+      printf '%s=%s\n' "$1" "$2"
+      shift 2
+    done
+  } > "$req_tmp"
+  mv "$req_tmp" "$request_file"
+  printf '%s\n' "$request_id"
+}
+
+wait_status() {
+  bridge_dir="$1/local/browser"
+  request_id="$2"
+  status_file="$bridge_dir/status"
+  wait_seconds="${CODEX_BROWSER_WAIT_SECONDS:-25}"
+  elapsed=0
+  while [ "$elapsed" -lt "$wait_seconds" ]; do
+    if [ -s "$status_file" ] && grep -F "request_id=$request_id" "$status_file" >/dev/null 2>&1; then
+      state="$(sed -n 's/^state=//p' "$status_file" | sed -n '1p')"
+      case "$state" in
+        done|closed|waiting_for_user)
+          cat "$status_file"
+          return 0
+          ;;
+        error)
+          cat "$status_file" >&2
+          return 1
+          ;;
+      esac
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  printf '等待浏览器动作超时: request_id=%s\n' "$request_id" >&2
+  return 1
+}
+
+wait=1
+if [ "${1:-}" = "--no-wait" ]; then
+  wait=0
+  shift
+fi
+
+[ "$#" -ge 1 ] || { usage >&2; exit 2; }
+
+prefix="$(find_prefix)" || {
+  printf '%s\n' "找不到 App 数据目录: 请在 Codex for TUI 终端内运行。" >&2
+  exit 1
+}
+
+cmd="$1"
+shift
+
+case "$cmd" in
+  open|navigate)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    request_id="$(write_request "$prefix" action navigate url "$1")"
+    ;;
+  reload|snapshot|screenshot|user-done|close)
+    action="$cmd"
+    [ "$cmd" = "user-done" ] && action="user_done"
+    request_id="$(write_request "$prefix" action "$action")"
+    ;;
+  back)
+    request_id="$(write_request "$prefix" action back)"
+    ;;
+  forward)
+    request_id="$(write_request "$prefix" action forward)"
+    ;;
+  new-tab)
+    if [ "$#" -gt 0 ]; then
+      request_id="$(write_request "$prefix" action new_tab url "$1")"
+    else
+      request_id="$(write_request "$prefix" action new_tab)"
+    fi
+    ;;
+  select-tab)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    request_id="$(write_request "$prefix" action select_tab tab_id "$1")"
+    ;;
+  close-tab)
+    if [ "$#" -gt 0 ]; then
+      request_id="$(write_request "$prefix" action close_tab tab_id "$1")"
+    else
+      request_id="$(write_request "$prefix" action close_tab)"
+    fi
+    ;;
+  click)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    request_id="$(write_request "$prefix" action click selector "$1")"
+    ;;
+  type)
+    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+    selector="$1"
+    shift
+    request_id="$(write_request "$prefix" action type selector "$selector" text "$*")"
+    ;;
+  scroll)
+    direction="${1:-down}"
+    amount="${2:-600}"
+    request_id="$(write_request "$prefix" action scroll direction "$direction" amount "$amount")"
+    ;;
+  get-text)
+    if [ "$#" -gt 0 ]; then
+      request_id="$(write_request "$prefix" action get_text selector "$1")"
+    else
+      request_id="$(write_request "$prefix" action get_text)"
+    fi
+    ;;
+  get-readable)
+    request_id="$(write_request "$prefix" action get_readable)"
+    ;;
+  js|execute-js)
+    [ "$#" -ge 1 ] || { usage >&2; exit 2; }
+    request_id="$(write_request "$prefix" action execute_js script "$*")"
+    ;;
+  user-wait)
+    message="${*:-请在浏览器中手动处理后继续}"
+    request_id="$(write_request "$prefix" action user_wait message "$message")"
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
+
+printf '已发送到 Codex for TUI 浏览器: %s\n' "$request_id"
+[ "$wait" -eq 0 ] || wait_status "$prefix" "$request_id"

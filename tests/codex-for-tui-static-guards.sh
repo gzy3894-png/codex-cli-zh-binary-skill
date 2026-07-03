@@ -11,6 +11,7 @@ BOOTSTRAP_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-for-tui-b
 PREVIEW_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-preview"
 PUSH_IMAGE_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-push-image"
 PUSH_MEDIA_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-push-media"
+BROWSER_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-browser"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -59,12 +60,14 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$MKSESSION" '"codex-preview" to "codex-preview"'
   assert_file_contains "$MKSESSION" '"codex-push-image" to "codex-push-image"'
   assert_file_contains "$MKSESSION" '"codex-push-media" to "codex-push-media"'
+  assert_file_contains "$MKSESSION" '"codex-browser" to "codex-browser"'
   assert_file_contains "$INIT_ASSET" 'ensure_codex_preview'
   assert_file_contains "$INIT_ASSET" '[ ! -r /etc/profile ] || . /etc/profile'
   assert_file_contains "$INIT_ASSET" 'export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"'
   sh -n "$PREVIEW_ASSET" || fail "codex-preview shell syntax failed"
   sh -n "$PUSH_IMAGE_ASSET" || fail "codex-push-image shell syntax failed"
   sh -n "$PUSH_MEDIA_ASSET" || fail "codex-push-media shell syntax failed"
+  sh -n "$BROWSER_ASSET" || fail "codex-browser shell syntax failed"
   sh -n "$INIT_ASSET" || fail "init.sh shell syntax failed"
 
   tmp="${TMPDIR:-/tmp}/codex-tui-static-image-preview.$$"
@@ -110,6 +113,34 @@ test_image_preview_bridge_asset() {
   fi
   assert_file_contains "$tmp/prefix/local/media-preview/request" "action=clear"
   printf '%s\n' "$output" | grep -F '已清空 Codex for TUI 预览流' >/dev/null 2>&1 || fail "preview close did not report success"
+  rm -rf "$tmp"
+}
+
+test_browser_bridge_asset() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-static-browser.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/prefix"
+
+  if ! output="$(PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait open https://example.test)"; then
+    fail "codex-browser should write an open request"
+  fi
+  [ -s "$tmp/prefix/local/browser/request" ] || fail "browser request file missing"
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=navigate"
+  assert_file_contains "$tmp/prefix/local/browser/request" "url=https://example.test"
+  printf '%s\n' "$output" | grep -F '已发送到 Codex for TUI 浏览器' >/dev/null 2>&1 || fail "browser command did not report success"
+
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait type '#q' 'hello world' >/dev/null; then
+    fail "codex-browser should write a type request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=type"
+  assert_file_contains "$tmp/prefix/local/browser/request" "selector=#q"
+  assert_file_contains "$tmp/prefix/local/browser/request" "text=hello world"
+
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait user-wait '请完成验证' >/dev/null; then
+    fail "codex-browser should write a user wait request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=user_wait"
+  assert_file_contains "$tmp/prefix/local/browser/request" "message=请完成验证"
   rm -rf "$tmp"
 }
 
@@ -337,6 +368,7 @@ run_step test_android_session_uses_root_codex_home
 run_step test_bootstrap_asset_is_synced
 run_step test_debug_build_uses_test_package_name
 run_step test_image_preview_bridge_asset
+run_step test_browser_bridge_asset
 run_step test_generated_launcher_entrypoints_and_normal_path
 run_step test_generated_launcher_first_run_configures_then_runs
 run_step test_update_apply_installs_self_test_script_and_aliases

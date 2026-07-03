@@ -138,6 +138,12 @@ fun TerminalScreen(
                         onPreviewClick = {
                             terminalViewModel.mediaPreviewExpanded =
                                 !terminalViewModel.mediaPreviewExpanded
+                        },
+                        browserSnapshot = terminalViewModel.browserSnapshot,
+                        browserExpanded = terminalViewModel.browserPanelExpanded,
+                        onBrowserClick = {
+                            terminalViewModel.browserPanelExpanded =
+                                !terminalViewModel.browserPanelExpanded
                         }
                     )
                 }
@@ -156,7 +162,25 @@ fun TerminalScreen(
                 }
             }
 
-            if (terminalViewModel.mediaPreviewExpanded && terminalViewModel.mediaPreviews.isNotEmpty()) {
+            if (terminalViewModel.browserPanelExpanded && terminalViewModel.browserSnapshot.available) {
+                TerminalBrowserTray(
+                    snapshot = terminalViewModel.browserSnapshot,
+                    browserSessionManager = mainActivity.browserSessionManager,
+                    onCollapse = { terminalViewModel.browserPanelExpanded = false },
+                    onClose = mainActivity::closeBrowserSession,
+                    onUserDone = mainActivity::markBrowserUserDone,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = previewTrayTopPadding)
+                        .zIndex(3f)
+                )
+            }
+
+            if (
+                terminalViewModel.mediaPreviewExpanded &&
+                !terminalViewModel.browserPanelExpanded &&
+                terminalViewModel.mediaPreviews.isNotEmpty()
+            ) {
                 TerminalMediaPreviewTray(
                     previews = terminalViewModel.mediaPreviews,
                     onCollapse = { terminalViewModel.mediaPreviewExpanded = false },

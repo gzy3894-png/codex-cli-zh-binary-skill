@@ -38,6 +38,8 @@ class TerminalViewModel : ViewModel() {
     var showHorizontalToolbar by mutableStateOf(Settings.toolbar)
     val mediaPreviews = mutableStateListOf<TerminalMediaPreview>()
     var mediaPreviewExpanded by mutableStateOf(false)
+    var browserSnapshot by mutableStateOf(TerminalBrowserSnapshot())
+    var browserPanelExpanded by mutableStateOf(false)
 
     fun addMediaPreview(preview: TerminalMediaPreview) {
         mediaPreviews.removeAll { it.stamp == preview.stamp || it.path == preview.path }
@@ -57,6 +59,16 @@ class TerminalViewModel : ViewModel() {
         mediaPreviews.removeAll { it.stamp == stamp }
         if (mediaPreviews.isEmpty()) {
             mediaPreviewExpanded = false
+        }
+    }
+
+    fun updateBrowserSnapshot(snapshot: TerminalBrowserSnapshot) {
+        browserSnapshot = snapshot
+        if (snapshot.available && snapshot.status != "closed") {
+            browserPanelExpanded = true
+        }
+        if (!snapshot.available) {
+            browserPanelExpanded = false
         }
     }
 

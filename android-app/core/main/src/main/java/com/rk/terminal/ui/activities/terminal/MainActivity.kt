@@ -28,6 +28,7 @@ import com.rk.libcommons.child
 import com.rk.libcommons.localDir
 import com.rk.terminal.ui.navHosts.MainActivityNavHost
 import com.rk.terminal.ui.routes.MainActivityRoutes
+import com.rk.terminal.ui.screens.terminal.TerminalBrowserSessionManager
 import com.rk.terminal.ui.screens.terminal.TerminalMediaPreview
 import com.rk.terminal.ui.screens.terminal.TerminalMediaPreviewKind
 import com.rk.terminal.ui.screens.terminal.TerminalViewModel
@@ -39,14 +40,19 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
     val viewModel: MainViewModel by viewModels()
+    lateinit var browserSessionManager: TerminalBrowserSessionManager
+        private set
     private val terminalViewModel: TerminalViewModel by viewModels()
     private var isKeyboardVisible = false
     private var wasKeyboardOpen = false
     private var mediaPreviewJob: Job? = null
+    private var browserBridgeJob: Job? = null
     private var lastMediaPreviewRequest = ""
+    private var lastBrowserRequest = ""
 
     private val requestNotificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
@@ -59,6 +65,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         requestPermission()
+        browserSessionManager = TerminalBrowserSessionManager(this) { snapshot ->
+            terminalViewModel.updateBrowserSnapshot(snapshot)
+        }
 
         if (intent.hasExtra("awake_intent")) {
             moveTaskToBack(true)
@@ -91,6 +100,7 @@ class MainActivity : ComponentActivity() {
         }
         
         primeMediaPreviewRequestCache()
+        primeBrowserRequestCache()
         setupKeyboardListener()
     }
 
@@ -98,12 +108,15 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         viewModel.startAndBindService(this)
         startMediaPreviewBridge()
+        startBrowserBridge()
     }
 
     override fun onStop() {
         super.onStop()
         mediaPreviewJob?.cancel()
         mediaPreviewJob = null
+        browserBridgeJob?.cancel()
+        browserBridgeJob = null
         viewModel.unbindService(this)
     }
 
@@ -122,6 +135,7 @@ class MainActivity : ComponentActivity() {
         }
         lifecycleScope.launch {
             pollMediaPreviewRequest()
+            pollBrowserRequest()
         }
     }
 
@@ -184,9 +198,41 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    fun closeBrowserSession() {
+        terminalViewModel.browserPanelExpanded = false
+        lifecycleScope.launch {
+            val browserDir = localDir().child("browser")
+            val result = browserSessionManager.handleRequest(
+                mapOf("action" to "close", "request_id" to "manual-close-${System.currentTimeMillis()}"),
+                browserDir
+            )
+            writeBrowserResult(browserDir, result)
+        }
+    }
+
+    fun markBrowserUserDone() {
+        lifecycleScope.launch {
+            val browserDir = localDir().child("browser")
+            val result = browserSessionManager.handleRequest(
+                mapOf("action" to "user_done", "request_id" to "manual-user-done-${System.currentTimeMillis()}"),
+                browserDir
+            )
+            writeBrowserResult(browserDir, result)
+        }
+    }
+
     private fun primeMediaPreviewRequestCache() {
         lastMediaPreviewRequest = try {
             val requestFile = localDir().child("media-preview").child("request")
+            if (requestFile.isFile) requestFile.readText().trim() else ""
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun primeBrowserRequestCache() {
+        lastBrowserRequest = try {
+            val requestFile = localDir().child("browser").child("request")
             if (requestFile.isFile) requestFile.readText().trim() else ""
         } catch (_: Exception) {
             ""
@@ -201,6 +247,41 @@ class MainActivity : ComponentActivity() {
                 delay(500)
             }
         }
+    }
+
+    private fun startBrowserBridge() {
+        if (browserBridgeJob?.isActive == true) return
+        browserBridgeJob = lifecycleScope.launch {
+            while (isActive) {
+                pollBrowserRequest()
+                delay(350)
+            }
+        }
+    }
+
+    private suspend fun pollBrowserRequest() {
+        val browserDir = localDir().child("browser")
+        val requestFile = browserDir.child("request")
+        val content = withContext(Dispatchers.IO) {
+            browserDir.mkdirs()
+            if (requestFile.isFile) requestFile.readText() else ""
+        }.trim()
+
+        if (content.isBlank() || content == lastBrowserRequest) return
+        lastBrowserRequest = content
+
+        val request = parseMediaPreviewRequest(content)
+        val result = runCatching {
+            browserSessionManager.handleRequest(request, browserDir)
+        }.getOrElse { error ->
+            JSONObject()
+                .put("ok", false)
+                .put("requestId", request["request_id"] ?: request["stamp"] ?: content.hashCode().toString())
+                .put("action", request["action"] ?: "")
+                .put("error", error.message ?: error::class.java.simpleName)
+                .put("snapshot", JSONObject())
+        }
+        writeBrowserResult(browserDir, result)
     }
 
     private suspend fun pollMediaPreviewRequest() {
@@ -304,6 +385,36 @@ class MainActivity : ComponentActivity() {
             previewDir.child("status").writeText(text)
         } catch (_: Exception) {
             // Best-effort debug marker for terminal-side troubleshooting.
+        }
+    }
+
+    private fun writeBrowserResult(browserDir: File, result: JSONObject) {
+        try {
+            browserDir.mkdirs()
+            browserDir.child("result.json").writeText(result.toString(2))
+            val snapshot = result.optJSONObject("snapshot")
+            val state = if (result.optBoolean("ok")) {
+                snapshot?.optString("status")?.takeIf { it.isNotBlank() } ?: "done"
+            } else {
+                "error"
+            }
+            val text = buildString {
+                append("request_id=").append(result.optString("requestId")).append('\n')
+                append("state=").append(state).append('\n')
+                append("action=").append(result.optString("action")).append('\n')
+                append("ok=").append(if (result.optBoolean("ok")) "1" else "0").append('\n')
+                append("needs_user=").append(if (snapshot?.optBoolean("needsUser") == true) "1" else "0").append('\n')
+                append("url=").append(snapshot?.optString("currentUrl").orEmpty()).append('\n')
+                append("title=").append(snapshot?.optString("title").orEmpty()).append('\n')
+                result.optString("error").takeIf { it.isNotBlank() && it != "null" }?.let {
+                    append("error=").append(it).append('\n')
+                }
+            }
+            browserDir.child("status").writeText(text)
+            browserDir.child("logs").mkdirs()
+            browserDir.child("logs").child("session.log").appendText(text.lines().take(4).joinToString(" ") + "\n")
+        } catch (_: Exception) {
+            // Best-effort bridge result for terminal-side troubleshooting.
         }
     }
 }

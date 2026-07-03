@@ -19,7 +19,10 @@ fun TerminalTopBar(
     previewCount: Int = 0,
     latestPreview: TerminalMediaPreview? = null,
     previewExpanded: Boolean = false,
-    onPreviewClick: () -> Unit = {}
+    onPreviewClick: () -> Unit = {},
+    browserSnapshot: TerminalBrowserSnapshot = TerminalBrowserSnapshot(),
+    browserExpanded: Boolean = false,
+    onBrowserClick: () -> Unit = {}
 ) {
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
@@ -50,6 +53,12 @@ fun TerminalTopBar(
                 expanded = previewExpanded,
                 color = color,
                 onClick = onPreviewClick
+            )
+            TerminalBrowserTopBarButton(
+                snapshot = browserSnapshot,
+                expanded = browserExpanded,
+                color = color,
+                onClick = onBrowserClick
             )
             IconButton(onClick = onAddClick) {
                 Icon(Icons.Default.Add, null, tint = color)
