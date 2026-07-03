@@ -1,11 +1,16 @@
 package com.rk.terminal.ui.screens.terminal
 
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -19,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -55,25 +61,105 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.FileProvider
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil.load
 import com.github.chrisbanes.photoview.PhotoView
+import com.rk.libcommons.toast
 import java.io.File
 
 @Composable
-fun TerminalMediaPreviewFeed(
+fun TerminalMediaPreviewTopBarButton(
+    previewCount: Int,
+    latestPreview: TerminalMediaPreview?,
+    expanded: Boolean,
+    color: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (previewCount <= 0 || latestPreview == null) return
+
+    Surface(
+        modifier = modifier
+            .padding(end = 6.dp)
+            .height(36.dp)
+            .widthIn(min = 74.dp, max = 126.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(18.dp),
+        color = if (expanded) {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+        } else {
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)
+        },
+        border = BorderStroke(1.dp, color.copy(alpha = 0.34f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            TopBarPreviewThumb(preview = latestPreview)
+            Text(
+                text = if (previewCount > 99) "99+" else previewCount.toString(),
+                color = color,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun TopBarPreviewThumb(preview: TerminalMediaPreview) {
+    Box(
+        modifier = Modifier
+            .size(24.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.Black.copy(alpha = 0.18f)),
+        contentAlignment = Alignment.Center
+    ) {
+        if (preview.kind == TerminalMediaPreviewKind.IMAGE) {
+            val mediaFile = remember(preview.path) { File(preview.path) }
+            AndroidView(
+                factory = { viewContext ->
+                    ImageView(viewContext).apply {
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        load(mediaFile) { crossfade(true) }
+                    }
+                },
+                update = { imageView ->
+                    imageView.load(mediaFile) { crossfade(true) }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Text(
+                text = "视频",
+                color = Color.White,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+fun TerminalMediaPreviewTray(
     previews: SnapshotStateList<TerminalMediaPreview>,
+    onCollapse: () -> Unit,
     onClear: () -> Unit,
+    onRemove: (TerminalMediaPreview) -> Unit,
     modifier: Modifier = Modifier
 ) {
     if (previews.isEmpty()) return
 
     val listState = rememberLazyListState()
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
-    val feedHeight = (screenHeight * 0.42f).coerceIn(220.dp, 420.dp)
+    val trayHeight = (screenHeight * 0.46f).coerceIn(240.dp, 460.dp)
     var dialogState by remember { mutableStateOf<PreviewDialogState?>(null) }
     val imagePreviews = previews.filter { it.kind == TerminalMediaPreviewKind.IMAGE }
 
@@ -86,15 +172,19 @@ fun TerminalMediaPreviewFeed(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .height(feedHeight)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .height(trayHeight)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
         tonalElevation = 3.dp,
         shadowElevation = 2.dp
     ) {
         Column {
-            PreviewFeedHeader(count = previews.size, onClear = onClear)
+            PreviewTrayHeader(
+                count = previews.size,
+                onCollapse = onCollapse,
+                onClear = onClear
+            )
             HorizontalDivider(
                 color = DividerDefaults.color.copy(alpha = 0.7f),
                 thickness = 0.5.dp
@@ -112,7 +202,8 @@ fun TerminalMediaPreviewFeed(
                     PreviewFeedCard(
                         preview = preview,
                         imagePreviews = imagePreviews,
-                        onOpen = { dialogState = it }
+                        onOpen = { dialogState = it },
+                        onRemove = { onRemove(preview) }
                     )
                 }
             }
@@ -128,7 +219,11 @@ fun TerminalMediaPreviewFeed(
 }
 
 @Composable
-private fun PreviewFeedHeader(count: Int, onClear: () -> Unit) {
+private fun PreviewTrayHeader(
+    count: Int,
+    onCollapse: () -> Unit,
+    onClear: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -138,18 +233,21 @@ private fun PreviewFeedHeader(count: Int, onClear: () -> Unit) {
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "预览流",
+                text = "预览托盘",
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1
             )
             Text(
-                text = "共 $count 个媒体项，点击可全屏查看",
+                text = "共 $count 个媒体项，长按图片可分享",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+        }
+        TextButton(onClick = onCollapse) {
+            Text("折叠")
         }
         TextButton(onClick = onClear) {
             Text("清空")
@@ -161,7 +259,8 @@ private fun PreviewFeedHeader(count: Int, onClear: () -> Unit) {
 private fun PreviewFeedCard(
     preview: TerminalMediaPreview,
     imagePreviews: List<TerminalMediaPreview>,
-    onOpen: (PreviewDialogState) -> Unit
+    onOpen: (PreviewDialogState) -> Unit,
+    onRemove: () -> Unit
 ) {
     val kindLabel = when (preview.kind) {
         TerminalMediaPreviewKind.IMAGE -> "图片"
@@ -188,6 +287,16 @@ private fun PreviewFeedCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                IconButton(
+                    onClick = onRemove,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "删除预览",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
             Spacer(modifier = Modifier.height(8.dp))
             when (preview.kind) {
@@ -217,8 +326,10 @@ private fun PreviewFeedCard(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ImagePreviewCard(preview: TerminalMediaPreview, onClick: () -> Unit) {
+    val context = LocalContext.current
     val mediaFile = remember(preview.path) { File(preview.path) }
     val ratio = remember(preview.width, preview.height) {
         val width = preview.width ?: 0
@@ -234,7 +345,10 @@ private fun ImagePreviewCard(preview: TerminalMediaPreview, onClick: () -> Unit)
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = { sharePreview(context, preview) }
+            )
             .background(MaterialTheme.colorScheme.surface)
     ) {
         val targetHeight = (maxWidth.value / ratio).dp.coerceIn(140.dp, 300.dp)
@@ -333,6 +447,7 @@ private fun ImagePreviewDialogContent(
         return
     }
 
+    val context = LocalContext.current
     val pagerState = rememberPagerState(
         initialPage = state.initialIndex.coerceIn(0, state.images.lastIndex),
         pageCount = { state.images.size }
@@ -347,8 +462,10 @@ private fun ImagePreviewDialogContent(
             state = pagerState,
             modifier = Modifier.fillMaxSize()
         ) { page ->
+            val preview = state.images[page]
             PhotoViewSurface(
-                preview = state.images[page],
+                preview = preview,
+                onLongPress = { sharePreview(context, preview) },
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -358,6 +475,7 @@ private fun ImagePreviewDialogContent(
             } else {
                 state.images.firstOrNull()?.name ?: "图片"
             },
+            onShare = { sharePreview(context, state.images[pagerState.currentPage]) },
             onDismiss = onDismiss
         )
     }
@@ -368,6 +486,7 @@ private fun VideoPreviewDialogContent(
     preview: TerminalMediaPreview,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -379,13 +498,18 @@ private fun VideoPreviewDialogContent(
         )
         PreviewDialogTopBar(
             title = preview.name,
+            onShare = { sharePreview(context, preview) },
             onDismiss = onDismiss
         )
     }
 }
 
 @Composable
-private fun PreviewDialogTopBar(title: String, onDismiss: () -> Unit) {
+private fun PreviewDialogTopBar(
+    title: String,
+    onDismiss: () -> Unit,
+    onShare: (() -> Unit)? = null
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -402,6 +526,11 @@ private fun PreviewDialogTopBar(title: String, onDismiss: () -> Unit) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+        if (onShare != null) {
+            TextButton(onClick = onShare) {
+                Text("分享", color = Color.White)
+            }
+        }
         IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
             Icon(
                 imageVector = Icons.Filled.Close,
@@ -415,6 +544,7 @@ private fun PreviewDialogTopBar(title: String, onDismiss: () -> Unit) {
 @Composable
 private fun PhotoViewSurface(
     preview: TerminalMediaPreview,
+    onLongPress: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val mediaFile = remember(preview.path) { File(preview.path) }
@@ -429,11 +559,19 @@ private fun PhotoViewSurface(
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 setMaximumScale(8f)
                 setMediumScale(3f)
+                setOnLongClickListener {
+                    onLongPress?.invoke()
+                    onLongPress != null
+                }
                 load(mediaFile) { crossfade(true) }
             }
         },
         update = { photoView ->
             photoView.contentDescription = preview.name
+            photoView.setOnLongClickListener {
+                onLongPress?.invoke()
+                onLongPress != null
+            }
             photoView.load(mediaFile) { crossfade(true) }
         },
         modifier = modifier
@@ -478,6 +616,54 @@ private fun VideoPlayerSurface(
         },
         modifier = modifier
     )
+}
+
+private fun sharePreview(context: Context, preview: TerminalMediaPreview) {
+    try {
+        val source = File(preview.path)
+        if (!source.isFile || !source.canRead()) {
+            toast("文件不可读，无法分享")
+            return
+        }
+        val shareDir = File(context.cacheDir, "media-preview-share").apply { mkdirs() }
+        val fileName = preview.name
+            .replace(Regex("""[\\/:*?"<>|]"""), "_")
+            .ifBlank { source.name.ifBlank { "codex-preview" } }
+        val target = File(shareDir, fileName)
+        source.copyTo(target, overwrite = true)
+
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            target
+        )
+        val intent = Intent(Intent.ACTION_SEND)
+            .setType(preview.mimeType())
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        context.startActivity(Intent.createChooser(intent, "分享预览"))
+    } catch (error: Exception) {
+        toast("分享失败：${error.message}")
+    }
+}
+
+private fun TerminalMediaPreview.mimeType(): String {
+    val lower = name.lowercase()
+    return when (kind) {
+        TerminalMediaPreviewKind.IMAGE -> when {
+            lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
+            lower.endsWith(".webp") -> "image/webp"
+            lower.endsWith(".gif") -> "image/gif"
+            lower.endsWith(".bmp") -> "image/bmp"
+            else -> "image/png"
+        }
+        TerminalMediaPreviewKind.VIDEO -> when {
+            lower.endsWith(".webm") -> "video/webm"
+            lower.endsWith(".mov") -> "video/quicktime"
+            lower.endsWith(".3gp") -> "video/3gpp"
+            else -> "video/mp4"
+        }
+    }
 }
 
 private sealed class PreviewDialogState {

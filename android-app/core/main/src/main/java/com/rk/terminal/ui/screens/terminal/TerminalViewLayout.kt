@@ -91,11 +91,6 @@ fun TerminalViewLayout(
             }
         )
 
-        TerminalMediaPreviewFeed(
-            previews = viewModel.mediaPreviews,
-            onClear = mainActivity::dismissMediaPreview
-        )
-
         if (viewModel.showVirtualKeys) {
             VirtualKeysPager(viewModel)
         }

@@ -82,6 +82,15 @@ fun TerminalScreen(
 
     val isDarkIcons = if (drawerState.isClosed) TerminalUtils.darkText.value else !isDarkMode
     SetStatusBarTextColor(isDarkIcons = isDarkIcons)
+    val density = LocalDensity.current
+    val topPadding = if (terminalViewModel.showToolbar) 0.dp else {
+        with(density) { TopAppBarDefaults.windowInsets.getTop(this).toDp() }
+    }
+    val previewTrayTopPadding = if (terminalViewModel.showToolbar) {
+        with(density) { TopAppBarDefaults.windowInsets.getTop(this).toDp() } + 64.dp
+    } else {
+        topPadding + 8.dp
+    }
 
     if (showAddDialog && sessionBinder != null) {
         AddSessionDialog(
@@ -122,13 +131,15 @@ fun TerminalScreen(
                         sessionBinder = sessionBinder,
                         onMenuClick = { scope.launch { drawerState.open() } },
                         onAddClick = { showAddDialog = true },
-                        color = TerminalUtils.getComposeColor()
+                        color = TerminalUtils.getComposeColor(),
+                        previewCount = terminalViewModel.mediaPreviews.size,
+                        latestPreview = terminalViewModel.mediaPreviews.lastOrNull(),
+                        previewExpanded = terminalViewModel.mediaPreviewExpanded,
+                        onPreviewClick = {
+                            terminalViewModel.mediaPreviewExpanded =
+                                !terminalViewModel.mediaPreviewExpanded
+                        }
                     )
-                }
-
-                val density = LocalDensity.current
-                val topPadding = if (terminalViewModel.showToolbar) 0.dp else {
-                    with(density) { TopAppBarDefaults.windowInsets.getTop(this).toDp() }
                 }
 
                 if (sessionBinder != null) {
@@ -143,6 +154,19 @@ fun TerminalScreen(
                             .fillMaxSize()
                     )
                 }
+            }
+
+            if (terminalViewModel.mediaPreviewExpanded && terminalViewModel.mediaPreviews.isNotEmpty()) {
+                TerminalMediaPreviewTray(
+                    previews = terminalViewModel.mediaPreviews,
+                    onCollapse = { terminalViewModel.mediaPreviewExpanded = false },
+                    onClear = mainActivity::dismissMediaPreview,
+                    onRemove = mainActivity::removeMediaPreview,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = previewTrayTopPadding)
+                        .zIndex(2f)
+                )
             }
         }
     }

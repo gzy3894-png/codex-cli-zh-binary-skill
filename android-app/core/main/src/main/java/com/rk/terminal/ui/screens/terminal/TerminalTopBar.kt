@@ -15,7 +15,11 @@ fun TerminalTopBar(
     sessionBinder: SessionService.SessionBinder?,
     onMenuClick: () -> Unit,
     onAddClick: () -> Unit,
-    color: Color
+    color: Color,
+    previewCount: Int = 0,
+    latestPreview: TerminalMediaPreview? = null,
+    previewExpanded: Boolean = false,
+    onPreviewClick: () -> Unit = {}
 ) {
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
@@ -40,6 +44,13 @@ fun TerminalTopBar(
             }
         },
         actions = {
+            TerminalMediaPreviewTopBarButton(
+                previewCount = previewCount,
+                latestPreview = latestPreview,
+                expanded = previewExpanded,
+                color = color,
+                onClick = onPreviewClick
+            )
             IconButton(onClick = onAddClick) {
                 Icon(Icons.Default.Add, null, tint = color)
             }

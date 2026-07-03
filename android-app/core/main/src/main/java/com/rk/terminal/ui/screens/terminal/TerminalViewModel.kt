@@ -37,10 +37,12 @@ class TerminalViewModel : ViewModel() {
     var showVirtualKeys by mutableStateOf(Settings.virtualKeys)
     var showHorizontalToolbar by mutableStateOf(Settings.toolbar)
     val mediaPreviews = mutableStateListOf<TerminalMediaPreview>()
+    var mediaPreviewExpanded by mutableStateOf(false)
 
     fun addMediaPreview(preview: TerminalMediaPreview) {
         mediaPreviews.removeAll { it.stamp == preview.stamp || it.path == preview.path }
         mediaPreviews.add(preview)
+        mediaPreviewExpanded = true
         while (mediaPreviews.size > MAX_MEDIA_PREVIEWS) {
             mediaPreviews.removeAt(0)
         }
@@ -48,6 +50,14 @@ class TerminalViewModel : ViewModel() {
 
     fun clearMediaPreviews() {
         mediaPreviews.clear()
+        mediaPreviewExpanded = false
+    }
+
+    fun removeMediaPreview(stamp: String) {
+        mediaPreviews.removeAll { it.stamp == stamp }
+        if (mediaPreviews.isEmpty()) {
+            mediaPreviewExpanded = false
+        }
     }
 
     fun setFont(typeface: Typeface) {

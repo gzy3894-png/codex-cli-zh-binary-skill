@@ -1,10 +1,13 @@
 package com.rk.terminal.ui.activities.terminal
 
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.view.View
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
@@ -20,6 +23,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.rk.settings.Settings
 import com.rk.libcommons.child
 import com.rk.libcommons.localDir
 import com.rk.terminal.ui.navHosts.MainActivityNavHost
@@ -86,6 +90,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         
+        primeMediaPreviewRequestCache()
         setupKeyboardListener()
     }
 
@@ -130,6 +135,25 @@ class MainActivity : ComponentActivity() {
                 requestNotificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
             }
         }
+        requestAllFilesAccessIfNeeded()
+    }
+
+    private fun requestAllFilesAccessIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        if (Environment.isExternalStorageManager()) return
+        if (Settings.ignore_storage_permission) return
+
+        val intent = Intent(
+            android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+            Uri.parse("package:$packageName")
+        )
+        runCatching {
+            startActivity(intent)
+        }.onFailure {
+            runCatching {
+                startActivity(Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+            }
+        }
     }
 
     private fun setupKeyboardListener() {
@@ -144,8 +168,29 @@ class MainActivity : ComponentActivity() {
     }
 
     fun dismissMediaPreview() {
+        val paths = terminalViewModel.mediaPreviews.map { it.path }
         terminalViewModel.clearMediaPreviews()
+        lifecycleScope.launch(Dispatchers.IO) {
+            paths.forEach { path -> runCatching { File(path).delete() } }
+            runCatching { localDir().child("media-preview").child("files").deleteRecursively() }
+        }
         writeMediaPreviewStatus(localDir().child("media-preview"), "closed=1\n")
+    }
+
+    fun removeMediaPreview(preview: TerminalMediaPreview) {
+        terminalViewModel.removeMediaPreview(preview.stamp)
+        lifecycleScope.launch(Dispatchers.IO) {
+            runCatching { File(preview.path).delete() }
+        }
+    }
+
+    private fun primeMediaPreviewRequestCache() {
+        lastMediaPreviewRequest = try {
+            val requestFile = localDir().child("media-preview").child("request")
+            if (requestFile.isFile) requestFile.readText().trim() else ""
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     private fun startMediaPreviewBridge() {
@@ -172,6 +217,9 @@ class MainActivity : ComponentActivity() {
         val request = parseMediaPreviewRequest(content)
         if (request["action"] == "clear") {
             terminalViewModel.clearMediaPreviews()
+            withContext(Dispatchers.IO) {
+                runCatching { previewDir.child("files").deleteRecursively() }
+            }
             writeMediaPreviewStatus(previewDir, "cleared=1\n")
             return
         }
