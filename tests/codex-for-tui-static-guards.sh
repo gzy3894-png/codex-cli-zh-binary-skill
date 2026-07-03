@@ -8,7 +8,9 @@ INIT_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/init.sh"
 APP_BUILD_GRADLE="$ROOT_DIR/android-app/app/build.gradle.kts"
 BOOTSTRAP="$SCRIPT_DIR/codex-for-tui-bootstrap.sh"
 BOOTSTRAP_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-for-tui-bootstrap.sh"
+PREVIEW_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-preview"
 PUSH_IMAGE_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-push-image"
+PUSH_MEDIA_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-push-media"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -54,29 +56,52 @@ test_debug_build_uses_test_package_name() {
 }
 
 test_image_preview_bridge_asset() {
+  assert_file_contains "$MKSESSION" '"codex-preview" to "codex-preview"'
   assert_file_contains "$MKSESSION" '"codex-push-image" to "codex-push-image"'
-  assert_file_contains "$INIT_ASSET" 'ensure_codex_push_image'
+  assert_file_contains "$MKSESSION" '"codex-push-media" to "codex-push-media"'
+  assert_file_contains "$INIT_ASSET" 'ensure_codex_preview'
   assert_file_contains "$INIT_ASSET" '[ ! -r /etc/profile ] || . /etc/profile'
   assert_file_contains "$INIT_ASSET" 'export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"'
+  sh -n "$PREVIEW_ASSET" || fail "codex-preview shell syntax failed"
   sh -n "$PUSH_IMAGE_ASSET" || fail "codex-push-image shell syntax failed"
+  sh -n "$PUSH_MEDIA_ASSET" || fail "codex-push-media shell syntax failed"
   sh -n "$INIT_ASSET" || fail "init.sh shell syntax failed"
 
   tmp="${TMPDIR:-/tmp}/codex-tui-static-image-preview.$$"
   rm -rf "$tmp"
   mkdir -p "$tmp/prefix" "$tmp/source"
   printf 'fake-image\n' > "$tmp/source/pic.png"
+  printf 'fake-video\n' > "$tmp/source/clip.mp4"
 
-  PREFIX="$tmp/prefix" sh "$INIT_ASSET" true || fail "init.sh should create codex-push-image before exec"
-  [ -x "$tmp/prefix/local/bin/codex-push-image" ] || fail "init.sh did not create codex-push-image fallback"
+  PREFIX="$tmp/prefix" sh "$INIT_ASSET" true || fail "init.sh should create preview commands before exec"
+  [ -x "$tmp/prefix/local/bin/codex-preview" ] || fail "init.sh did not create codex-preview fallback"
+  [ -x "$tmp/prefix/local/bin/codex-push-image" ] || fail "init.sh did not create codex-push-image wrapper"
+  [ -x "$tmp/prefix/local/bin/codex-push-media" ] || fail "init.sh did not create codex-push-media wrapper"
 
-  if ! output="$(PREFIX="$tmp/prefix" sh "$PUSH_IMAGE_ASSET" "$tmp/source/pic.png")"; then
-    fail "codex-push-image should copy an image into preview bridge"
+  if ! output="$(PREFIX="$tmp/prefix" sh "$PREVIEW_ASSET" "$tmp/source/pic.png")"; then
+    fail "codex-preview should copy an image into preview bridge"
   fi
 
-  [ -s "$tmp/prefix/local/image-preview/images/latest.png" ] || fail "preview image copy missing"
-  [ -s "$tmp/prefix/local/image-preview/request" ] || fail "preview request file missing"
-  assert_file_contains "$tmp/prefix/local/image-preview/request" "path=$tmp/prefix/local/image-preview/images/latest.png"
-  printf '%s\n' "$output" | grep -F '已发送到 Codex for TUI 图片预览' >/dev/null 2>&1 || fail "preview command did not report success"
+  [ -s "$tmp/prefix/local/media-preview/files/latest.png" ] || fail "preview image copy missing"
+  [ -s "$tmp/prefix/local/media-preview/request" ] || fail "preview request file missing"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "action=show"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "kind=image"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "path=$tmp/prefix/local/media-preview/files/latest.png"
+  printf '%s\n' "$output" | grep -F '已发送到 Codex for TUI 媒体预览' >/dev/null 2>&1 || fail "preview command did not report success"
+
+  if ! output="$(PREFIX="$tmp/prefix" "$tmp/prefix/local/bin/codex-push-media" "$tmp/source/clip.mp4")"; then
+    fail "codex-push-media should copy a video into preview bridge"
+  fi
+
+  [ -s "$tmp/prefix/local/media-preview/files/latest.mp4" ] || fail "preview video copy missing"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "kind=video"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "path=$tmp/prefix/local/media-preview/files/latest.mp4"
+
+  if ! output="$(PREFIX="$tmp/prefix" sh "$PREVIEW_ASSET" close)"; then
+    fail "codex-preview close should write a clear request"
+  fi
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "action=clear"
+  printf '%s\n' "$output" | grep -F '已关闭 Codex for TUI 媒体预览' >/dev/null 2>&1 || fail "preview close did not report success"
   rm -rf "$tmp"
 }
 

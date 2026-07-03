@@ -1,17 +1,11 @@
 package com.rk.terminal.ui.activities.terminal
 
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.view.View
-import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
-import android.widget.FrameLayout
-import android.widget.ImageView
-import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -25,11 +19,12 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.rk.libcommons.child
 import com.rk.libcommons.localDir
 import com.rk.terminal.ui.navHosts.MainActivityNavHost
 import com.rk.terminal.ui.routes.MainActivityRoutes
+import com.rk.terminal.ui.screens.terminal.TerminalMediaPreview
+import com.rk.terminal.ui.screens.terminal.TerminalMediaPreviewKind
 import com.rk.terminal.ui.screens.terminal.TerminalViewModel
 import com.rk.terminal.ui.theme.KarbonTheme
 import java.io.File
@@ -45,8 +40,8 @@ class MainActivity : ComponentActivity() {
     private val terminalViewModel: TerminalViewModel by viewModels()
     private var isKeyboardVisible = false
     private var wasKeyboardOpen = false
-    private var imagePreviewJob: Job? = null
-    private var lastImagePreviewRequest = ""
+    private var mediaPreviewJob: Job? = null
+    private var lastMediaPreviewRequest = ""
 
     private val requestNotificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
@@ -96,13 +91,13 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         viewModel.startAndBindService(this)
-        startImagePreviewBridge()
+        startMediaPreviewBridge()
     }
 
     override fun onStop() {
         super.onStop()
-        imagePreviewJob?.cancel()
-        imagePreviewJob = null
+        mediaPreviewJob?.cancel()
+        mediaPreviewJob = null
         viewModel.unbindService(this)
     }
 
@@ -120,7 +115,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         lifecycleScope.launch {
-            pollImagePreviewRequest()
+            pollMediaPreviewRequest()
         }
     }
 
@@ -147,115 +142,92 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun startImagePreviewBridge() {
-        if (imagePreviewJob?.isActive == true) return
-        imagePreviewJob = lifecycleScope.launch {
+    fun dismissMediaPreview() {
+        terminalViewModel.mediaPreview = null
+        writeMediaPreviewStatus(localDir().child("media-preview"), "closed=1\n")
+    }
+
+    private fun startMediaPreviewBridge() {
+        if (mediaPreviewJob?.isActive == true) return
+        mediaPreviewJob = lifecycleScope.launch {
             while (isActive) {
-                pollImagePreviewRequest()
+                pollMediaPreviewRequest()
                 delay(500)
             }
         }
     }
 
-    private suspend fun pollImagePreviewRequest() {
-        val previewDir = localDir().child("image-preview")
+    private suspend fun pollMediaPreviewRequest() {
+        val previewDir = localDir().child("media-preview")
         val requestFile = previewDir.child("request")
         val content = withContext(Dispatchers.IO) {
             previewDir.mkdirs()
             if (requestFile.isFile) requestFile.readText() else ""
         }.trim()
 
-        if (content.isBlank() || content == lastImagePreviewRequest) return
-        lastImagePreviewRequest = content
+        if (content.isBlank() || content == lastMediaPreviewRequest) return
+        lastMediaPreviewRequest = content
 
-        val imagePath = parseImagePreviewPath(content)
-        if (imagePath == null) {
-            writeImagePreviewStatus(previewDir, "error=missing-path\n")
+        val request = parseMediaPreviewRequest(content)
+        if (request["action"] == "clear") {
+            terminalViewModel.mediaPreview = null
+            writeMediaPreviewStatus(previewDir, "cleared=1\n")
             return
         }
 
-        val imageFile = File(imagePath)
+        val mediaPath = request["path"]?.takeIf { it.isNotBlank() }
+        if (mediaPath == null) {
+            writeMediaPreviewStatus(previewDir, "error=missing-path\n")
+            return
+        }
+
+        val mediaFile = File(mediaPath)
         val canRead = withContext(Dispatchers.IO) {
-            imageFile.isFile && imageFile.canRead()
+            mediaFile.isFile && mediaFile.canRead()
         }
         if (!canRead) {
-            writeImagePreviewStatus(previewDir, "error=unreadable\npath=$imagePath\n")
+            writeMediaPreviewStatus(previewDir, "error=unreadable\npath=$mediaPath\n")
             return
         }
 
-        writeImagePreviewStatus(previewDir, "seen=1\npath=$imagePath\n")
-        showImagePreview(imageFile, previewDir)
-    }
-
-    private fun parseImagePreviewPath(content: String): String? {
-        for (line in content.lineSequence()) {
-            if (line.startsWith("path=")) {
-                return line.removePrefix("path=").trim().takeIf { it.isNotEmpty() }
-            }
-        }
-        return content.lineSequence().firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
-    }
-
-    private suspend fun showImagePreview(file: File, previewDir: File) {
-        val bitmap = withContext(Dispatchers.IO) { loadPreviewBitmap(file) }
-        if (isFinishing || isDestroyed) return
-
-        val contentView: View = if (bitmap == null) {
-            TextView(this).apply {
-                text = "无法打开图片"
-                setPadding(dp(24), dp(16), dp(24), dp(8))
-            }
-        } else {
-            ImageView(this).apply {
-                setImageBitmap(bitmap)
-                adjustViewBounds = true
-                scaleType = ImageView.ScaleType.FIT_CENTER
-                setPadding(dp(12), dp(8), dp(12), dp(8))
+        val kind = when (request["kind"]) {
+            "image" -> TerminalMediaPreviewKind.IMAGE
+            "video" -> TerminalMediaPreviewKind.VIDEO
+            else -> {
+                writeMediaPreviewStatus(previewDir, "error=unsupported-kind\npath=$mediaPath\n")
+                return
             }
         }
 
-        val contentHeight = if (bitmap == null) {
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        } else {
-            (resources.displayMetrics.heightPixels * 0.68f).toInt()
-        }
-
-        val container = FrameLayout(this).apply {
-            addView(
-                contentView,
-                FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    contentHeight
-                )
-            )
-        }
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle(file.name)
-            .setView(container)
-            .setPositiveButton("关闭", null)
-            .show()
-
-        writeImagePreviewStatus(previewDir, "shown=1\npath=${file.absolutePath}\n")
-    }
-
-    private fun loadPreviewBitmap(file: File): Bitmap? {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(file.absolutePath, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-
-        var sampleSize = 1
-        while (bounds.outWidth / sampleSize > 2048 || bounds.outHeight / sampleSize > 2048) {
-            sampleSize *= 2
-        }
-
-        return BitmapFactory.decodeFile(
-            file.absolutePath,
-            BitmapFactory.Options().apply { inSampleSize = sampleSize }
+        terminalViewModel.mediaPreview = TerminalMediaPreview(
+            path = mediaFile.absolutePath,
+            name = request["name"]?.takeIf { it.isNotBlank() } ?: mediaFile.name,
+            kind = kind,
+            stamp = request["stamp"] ?: content.hashCode().toString()
+        )
+        writeMediaPreviewStatus(
+            previewDir,
+            "shown=1\nkind=${request["kind"]}\npath=${mediaFile.absolutePath}\n"
         )
     }
 
-    private fun writeImagePreviewStatus(previewDir: File, text: String) {
+    private fun parseMediaPreviewRequest(content: String): Map<String, String> {
+        val values = mutableMapOf<String, String>()
+        for (line in content.lineSequence()) {
+            val idx = line.indexOf('=')
+            if (idx > 0) {
+                values[line.substring(0, idx).trim()] = line.substring(idx + 1).trim()
+            }
+        }
+        if (!values.containsKey("path")) {
+            content.lineSequence().firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }?.let {
+                values["path"] = it
+            }
+        }
+        return values
+    }
+
+    private fun writeMediaPreviewStatus(previewDir: File, text: String) {
         try {
             previewDir.mkdirs()
             previewDir.child("status").writeText(text)
@@ -263,6 +235,4 @@ class MainActivity : ComponentActivity() {
             // Best-effort debug marker for terminal-side troubleshooting.
         }
     }
-
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 }

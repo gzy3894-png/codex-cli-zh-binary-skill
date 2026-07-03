@@ -35,6 +35,7 @@ class TerminalViewModel : ViewModel() {
     var showToolbar by mutableStateOf(Settings.toolbar)
     var showVirtualKeys by mutableStateOf(Settings.virtualKeys)
     var showHorizontalToolbar by mutableStateOf(Settings.toolbar)
+    var mediaPreview by mutableStateOf<TerminalMediaPreview?>(null)
 
     fun setFont(typeface: Typeface) {
         TerminalUtils.typeface = typeface
@@ -78,3 +79,15 @@ class TerminalViewModel : ViewModel() {
         sessionBinder.getService().currentSession.value = Pair(sessionId, sessionBinder.getService().sessionList[sessionId]!!)
     }
 }
+
+enum class TerminalMediaPreviewKind {
+    IMAGE,
+    VIDEO
+}
+
+data class TerminalMediaPreview(
+    val path: String,
+    val name: String,
+    val kind: TerminalMediaPreviewKind,
+    val stamp: String
+)

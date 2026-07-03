@@ -18,7 +18,9 @@ Codex for TUI 基于 ReTerminal 改造，目标是在 Android 手机上提供一
 - `core/main/src/main/assets/init.sh`
 - `core/main/src/main/assets/init-host.sh`
 - `core/main/src/main/assets/codex-for-tui-bootstrap.sh`
+- `core/main/src/main/assets/codex-preview`
 - `core/main/src/main/assets/codex-push-image`
+- `core/main/src/main/assets/codex-push-media`
 - `../android-arm64-musl/lib/*.sh`
 - `../android-arm64-musl/codex-update.sh`
 - `../android-arm64-musl/codex-local-resume.sh`
@@ -38,15 +40,18 @@ codex-local refresh-models
 
 `codex 更新` 只增量更新脚本，不重装依赖、不替换 Codex 二进制；`codex 配置模式` 重新进入第三方 API 配置引导。安装器不管理 `AGENTS.md`，需要项目规则时请在 Codex 内运行 `/init`。
 
-## 图片预览
+## 媒体预览
 
-测试包内置原生图片预览桥。终端内运行：
+测试包内置原生媒体预览桥。终端内运行：
 
 ```sh
+codex-preview /path/to/image.png
 codex-push-image /path/to/image.png
+codex-push-media /path/to/video.mp4
+codex-preview close
 ```
 
-命令会把图片复制到 App 私有目录，并通知前台终端界面弹出 Android 原生预览。
+命令会把图片或视频复制到 App 私有目录，并通知前台终端界面在内嵌预览容器中展示。
 
 ## 构建
 

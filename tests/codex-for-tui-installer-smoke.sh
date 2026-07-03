@@ -50,6 +50,9 @@ test_syntax_and_asset_sync() {
     "$SCRIPT_DIR/install.sh" \
     "$ROOT_DIR/android-app/core/main/src/main/assets/init.sh" \
     "$ROOT_DIR/android-app/core/main/src/main/assets/init-host.sh" \
+    "$ROOT_DIR/android-app/core/main/src/main/assets/codex-preview" \
+    "$ROOT_DIR/android-app/core/main/src/main/assets/codex-push-image" \
+    "$ROOT_DIR/android-app/core/main/src/main/assets/codex-push-media" \
     "$ROOT_DIR/android-app/core/main/src/main/assets/codex-for-tui-bootstrap.sh" \
     "$SCRIPT_DIR/lib/codex-zh-common.sh" \
     "$SCRIPT_DIR/lib/codex-zh-download.sh" \
