@@ -141,6 +141,7 @@ class TerminalBrowserSessionManager(
             )
         }
         layoutWebView(tab.webView)
+        focusWebView(tab.webView)
     }
 
     fun detachFrom(container: FrameLayout) {
@@ -238,6 +239,7 @@ class TerminalBrowserSessionManager(
     }
 
     private suspend fun click(request: Map<String, String>): JSONObject {
+        focusWebView(activeTab().webView)
         val selector = request["selector"]
         val x = request["x"]?.toIntOrNull()
         val y = request["y"]?.toIntOrNull()
@@ -358,6 +360,8 @@ class TerminalBrowserSessionManager(
         val contextWrapper = MutableContextWrapper(appContext)
         val webView = WebView(contextWrapper).apply {
             setBackgroundColor(Color.WHITE)
+            isFocusable = true
+            isFocusableInTouchMode = true
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.databaseEnabled = true
@@ -479,6 +483,13 @@ class TerminalBrowserSessionManager(
         webView.measure(widthSpec, heightSpec)
         webView.layout(0, 0, width, height)
         return width to height
+    }
+
+    private fun focusWebView(webView: WebView) {
+        webView.isFocusable = true
+        webView.isFocusableInTouchMode = true
+        webView.requestFocusFromTouch()
+        webView.requestFocus()
     }
 
     private suspend fun WebView.evaluate(script: String): String? =
