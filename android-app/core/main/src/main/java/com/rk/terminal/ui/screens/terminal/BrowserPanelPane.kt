@@ -128,7 +128,9 @@ fun TerminalBrowserTray(
             HorizontalDivider(thickness = 0.5.dp)
             BrowserWebViewHost(
                 browserSessionManager = browserSessionManager,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
             )
         }
     }
