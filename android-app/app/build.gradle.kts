@@ -68,9 +68,9 @@ android {
             resValue("string","app_name","Codex for TUI")
         }
         debug{
-            applicationIdSuffix = ".debug"
-            versionNameSuffix = "-DEBUG"
-            resValue("string","app_name","Codex for TUI Debug")
+            applicationIdSuffix = ".test"
+            versionNameSuffix = "-TEST"
+            resValue("string","app_name","Codex for TUI Test")
         }
     }
 

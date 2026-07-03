@@ -1,0 +1,59 @@
+#!/usr/bin/env sh
+set -eu
+
+usage() {
+  printf '%s\n' "用法: codex-push-image /path/to/image" >&2
+}
+
+if [ "$#" -ne 1 ]; then
+  usage
+  exit 2
+fi
+
+src="$1"
+if [ ! -f "$src" ] || [ ! -r "$src" ]; then
+  printf '图片不可读: %s\n' "$src" >&2
+  exit 1
+fi
+
+prefix="${PREFIX:-}"
+if [ -z "$prefix" ] && [ -n "${PKG:-}" ]; then
+  if [ -d "/data/user/0/$PKG" ]; then
+    prefix="/data/user/0/$PKG"
+  elif [ -d "/data/data/$PKG" ]; then
+    prefix="/data/data/$PKG"
+  fi
+fi
+
+if [ -z "$prefix" ]; then
+  printf '%s\n' "找不到 App 数据目录: 请在 Codex for TUI 终端内运行。" >&2
+  exit 1
+fi
+
+bridge_dir="$prefix/local/image-preview"
+image_dir="$bridge_dir/images"
+request_file="$bridge_dir/request"
+mkdir -p "$image_dir"
+
+base="$(basename "$src")"
+case "$base" in
+  *.*) ext=".${base##*.}" ;;
+  *) ext=".img" ;;
+esac
+
+dest="$image_dir/latest$ext"
+tmp="$dest.tmp.$$"
+req_tmp="$request_file.tmp.$$"
+
+cp "$src" "$tmp"
+mv "$tmp" "$dest"
+chmod 600 "$dest" 2>/dev/null || true
+
+{
+  printf 'path=%s\n' "$dest"
+  printf 'name=%s\n' "$base"
+  printf 'stamp=%s.%s\n' "$(date +%s 2>/dev/null || printf 0)" "$$"
+} > "$req_tmp"
+mv "$req_tmp" "$request_file"
+
+printf '已发送到 Codex for TUI 图片预览: %s\n' "$src"

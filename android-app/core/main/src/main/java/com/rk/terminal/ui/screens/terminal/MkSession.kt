@@ -20,6 +20,7 @@ object MkSession {
         "init-host.sh" to "init-host",
         "init.sh" to "init",
         "codex-for-tui-bootstrap.sh" to "codex-for-tui-bootstrap.sh",
+        "codex-push-image" to "codex-push-image",
     )
     private val obsoleteScripts = listOf(
         "install-reterminal-alpine.sh",

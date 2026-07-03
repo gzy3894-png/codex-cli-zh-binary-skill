@@ -5,8 +5,10 @@ ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 SCRIPT_DIR="$ROOT_DIR/android-arm64-musl"
 MKSESSION="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MkSession.kt"
 INIT_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/init.sh"
+APP_BUILD_GRADLE="$ROOT_DIR/android-app/app/build.gradle.kts"
 BOOTSTRAP="$SCRIPT_DIR/codex-for-tui-bootstrap.sh"
 BOOTSTRAP_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-for-tui-bootstrap.sh"
+PUSH_IMAGE_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-push-image"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -45,10 +47,36 @@ test_bootstrap_asset_is_synced() {
   cmp "$BOOTSTRAP" "$BOOTSTRAP_ASSET" >/dev/null 2>&1 || fail "bootstrap source and APK asset differ"
 }
 
+test_debug_build_uses_test_package_name() {
+  assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
+}
+
+test_image_preview_bridge_asset() {
+  assert_file_contains "$MKSESSION" '"codex-push-image" to "codex-push-image"'
+  sh -n "$PUSH_IMAGE_ASSET" || fail "codex-push-image shell syntax failed"
+
+  tmp="${TMPDIR:-/tmp}/codex-tui-static-image-preview.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/prefix" "$tmp/source"
+  printf 'fake-image\n' > "$tmp/source/pic.png"
+
+  if ! output="$(PREFIX="$tmp/prefix" sh "$PUSH_IMAGE_ASSET" "$tmp/source/pic.png")"; then
+    fail "codex-push-image should copy an image into preview bridge"
+  fi
+
+  [ -s "$tmp/prefix/local/image-preview/images/latest.png" ] || fail "preview image copy missing"
+  [ -s "$tmp/prefix/local/image-preview/request" ] || fail "preview request file missing"
+  assert_file_contains "$tmp/prefix/local/image-preview/request" "path=$tmp/prefix/local/image-preview/images/latest.png"
+  printf '%s\n' "$output" | grep -F '已发送到 Codex for TUI 图片预览' >/dev/null 2>&1 || fail "preview command did not report success"
+  rm -rf "$tmp"
+}
+
 test_generated_launcher_entrypoints_and_normal_path() {
   tmp="${TMPDIR:-/tmp}/codex-tui-static-launcher.$$"
   rm -rf "$tmp"
-  mkdir -p "$tmp/home/.codex" "$tmp/bin" "$tmp/state" "$tmp/curl"
+  mkdir -p "$tmp/home/.codex" "$tmp/home/.local/bin" "$tmp/bin" "$tmp/state" "$tmp/curl"
   printf 'configured = true\n' > "$tmp/home/.codex/config.toml"
 
   cat > "$tmp/bin/codex-zh-bin" <<'EOF'
@@ -62,6 +90,7 @@ EOF
 printf 'update-ran:%s\n' "$*"
 EOF
   chmod +x "$tmp/bin/codex-update"
+  cp "$tmp/bin/codex-update" "$tmp/home/.local/bin/codex-update"
 
   (
     . "$SCRIPT_DIR/lib/codex-zh-common.sh"
@@ -266,6 +295,8 @@ test_installer_does_not_manage_agents_md() {
 
 run_step test_android_session_uses_root_codex_home
 run_step test_bootstrap_asset_is_synced
+run_step test_debug_build_uses_test_package_name
+run_step test_image_preview_bridge_asset
 run_step test_generated_launcher_entrypoints_and_normal_path
 run_step test_generated_launcher_first_run_configures_then_runs
 run_step test_update_apply_installs_self_test_script_and_aliases

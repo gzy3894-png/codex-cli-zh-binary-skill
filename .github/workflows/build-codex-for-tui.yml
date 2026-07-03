@@ -38,7 +38,7 @@ jobs:
         run: sh -n tests/codex-for-tui-device-smoke.sh
 
   android-debug-build:
-    name: Build debug APK
+    name: Build test APK
     runs-on: ubuntu-latest
     needs: script-smoke
     defaults:
@@ -76,13 +76,13 @@ jobs:
       - name: Grant Gradle wrapper permission
         run: chmod +x ./gradlew
 
-      - name: Build debug APK
+      - name: Build test APK
         run: ./gradlew --no-daemon :app:assembleDebug
 
-      - name: Upload debug APK
+      - name: Upload test APK
         uses: actions/upload-artifact@v4
         with:
-          name: codex-for-tui-debug-apk
+          name: codex-for-tui-test-apk
           path: android-app/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
