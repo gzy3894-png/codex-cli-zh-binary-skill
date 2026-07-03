@@ -40,20 +40,21 @@ codex-local refresh-models
 
 `codex 更新` 只增量更新脚本，不重装依赖、不替换 Codex 二进制；`codex 配置模式` 重新进入第三方 API 配置引导。安装器不管理 `AGENTS.md`，需要项目规则时请在 Codex 内运行 `/init`。
 
-## 媒体预览
+## 文件面板
 
-测试包内置原生预览托盘。终端内运行：
+测试包内置原生文件面板。终端内运行：
 
 ```sh
 codex-preview /path/to/image.png
 codex-preview /path/to/notes.md
 codex-push-image /path/to/image.png
 codex-push-media /path/to/video.mp4
+codex-preview path 1783070528.24966
 codex-preview close
 ```
 
-命令会把图片或视频复制到 App 私有目录，并通知前台终端界面在内嵌预览容器中展示。
-多次推送会累积为缩略图托盘；图片点击后进入全屏缩放预览，多张图片可左右滑动查看，视频使用系统级 Media3 控件播放，文本文件只展示摘要，不把全文刷到终端。托盘内也可以通过系统文件管理器选择文本、图片或视频，再把文件路径发送给当前 AI 会话读取。
+命令会把图片、视频或文本复制到 App 私有目录，并通知前台终端界面在内嵌文件容器中展示。
+多次推送会累积为缩略图文件面板；图片点击后进入全屏缩放预览，多张图片可左右滑动查看，视频使用系统级 Media3 控件播放，文本文件只展示摘要，不把全文刷到终端。文件面板内也可以通过系统文件管理器选择文本、图片或视频。发送文件时可以附加一句话，终端只显示短文件编号；AI 需要真实路径时可运行 `codex-preview path <编号>` 解析。
 
 ## 浏览器
 

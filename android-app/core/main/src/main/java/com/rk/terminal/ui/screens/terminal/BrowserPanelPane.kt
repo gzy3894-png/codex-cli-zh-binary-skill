@@ -49,10 +49,10 @@ fun TerminalBrowserTopBarButton(
     Surface(
         modifier = modifier
             .padding(end = 6.dp)
-            .height(36.dp)
-            .widthIn(min = 82.dp, max = 136.dp)
+            .height(32.dp)
+            .widthIn(min = 72.dp, max = 112.dp)
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(16.dp),
         color = if (expanded) {
             MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
         } else {
@@ -61,13 +61,13 @@ fun TerminalBrowserTopBarButton(
         border = BorderStroke(1.dp, color.copy(alpha = 0.34f))
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 9.dp),
+            modifier = Modifier.padding(horizontal = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .size(11.dp)
+                    .size(9.dp)
                     .background(
                         if (snapshot.needsUser) {
                             Color(0xFFE09A21)
@@ -82,7 +82,7 @@ fun TerminalBrowserTopBarButton(
             Text(
                 text = "浏览器",
                 color = color,
-                style = MaterialTheme.typography.labelLarge,
+                style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1
             )

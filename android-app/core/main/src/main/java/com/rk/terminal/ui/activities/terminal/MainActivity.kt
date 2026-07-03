@@ -228,6 +228,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             paths.forEach { path -> runCatching { File(path).delete() } }
             runCatching { localDir().child("media-preview").child("files").deleteRecursively() }
+            runCatching { localDir().child("media-preview").child("refs").deleteRecursively() }
         }
         writeMediaPreviewStatus(localDir().child("media-preview"), "closed=1\n")
     }
@@ -236,6 +237,7 @@ class MainActivity : ComponentActivity() {
         terminalViewModel.removeMediaPreview(preview.stamp)
         lifecycleScope.launch(Dispatchers.IO) {
             runCatching { File(preview.path).delete() }
+            runCatching { removePreviewReference(preview) }
         }
     }
 
@@ -256,28 +258,85 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    fun sendPreviewToAi(preview: TerminalMediaPreview) {
+    fun sendPreviewToAi(preview: TerminalMediaPreview, userMessage: String) {
         val session = terminalViewModel.terminalView?.currentSession
         if (session == null) {
             toast("当前终端会话不可用")
             return
         }
 
-        val kindText = when (preview.kind) {
-            TerminalMediaPreviewKind.IMAGE -> "图片"
-            TerminalMediaPreviewKind.VIDEO -> "视频"
-            TerminalMediaPreviewKind.TEXT -> "文本文件"
-        }
+        val refId = previewReferenceId(preview)
+        val refWritten = runCatching {
+            writePreviewReference(preview, refId)
+        }.onFailure { error ->
+            toast("无法创建文件引用：${error.message}")
+        }.isSuccess
+        if (!refWritten) return
+
+        val cleanMessage = collapseTerminalText(userMessage)
         val prompt = buildString {
-            append("请查看我放入预览托盘的").append(kindText).append("：")
-            append(preview.path)
+            append("文件[").append(refId).append("] ")
+            append(shortenForTerminal(preview.name, 40))
+            append(" 已发送。")
+            if (cleanMessage.isNotBlank()) {
+                append("说明：").append(cleanMessage).append("。")
+            }
+            append("读取路径：codex-preview path ").append(refId)
             if (preview.kind == TerminalMediaPreviewKind.TEXT) {
-                append("\n不要让我粘贴全文，直接读取这个本地文件。")
+                append("。不要让我粘贴全文，直接读取这个本地文件")
             }
             append('\n')
         }
         session.write(prompt)
-        toast("已发送给 AI：${preview.name}")
+        toast("已发送：${shortenForTerminal(preview.name, 24)}")
+    }
+
+    private fun writePreviewReference(preview: TerminalMediaPreview, refId: String) {
+        val refsDir = localDir().child("media-preview").child("refs")
+        refsDir.mkdirs()
+        val target = refsDir.child(refId)
+        val tmp = refsDir.child("$refId.tmp")
+        tmp.writeText(
+            buildString {
+                append("path=").append(refValue(preview.path)).append('\n')
+                append("name=").append(refValue(preview.name)).append('\n')
+                append("kind=").append(preview.kind.name.lowercase(Locale.ROOT)).append('\n')
+                append("stamp=").append(refValue(preview.stamp)).append('\n')
+            }
+        )
+        if (!tmp.renameTo(target)) {
+            tmp.copyTo(target, overwrite = true)
+            tmp.delete()
+        }
+    }
+
+    private fun removePreviewReference(preview: TerminalMediaPreview) {
+        localDir().child("media-preview").child("refs").child(previewReferenceId(preview)).delete()
+    }
+
+    private fun previewReferenceId(preview: TerminalMediaPreview): String {
+        val safe = preview.stamp
+            .filter { it.isLetterOrDigit() || it == '.' || it == '_' || it == '-' }
+            .take(80)
+        if (safe.isNotBlank()) return safe
+
+        val hash = preview.path.hashCode().toLong().let { if (it < 0) -it else it }
+        return "file-$hash"
+    }
+
+    private fun refValue(value: String): String {
+        return value.replace('\r', ' ').replace('\n', ' ')
+    }
+
+    private fun collapseTerminalText(value: String): String {
+        return value.replace(Regex("\\s+"), " ").trim()
+    }
+
+    private fun shortenForTerminal(value: String, maxLength: Int): String {
+        if (value.length <= maxLength) return value
+        val head = (maxLength / 2).coerceAtLeast(8)
+        val tail = (maxLength - head - 3).coerceAtLeast(8)
+        return value.take(head) + "..." + value.takeLast(tail)
     }
 
     private fun launchBrowserFileChooser(
@@ -397,6 +456,7 @@ class MainActivity : ComponentActivity() {
             terminalViewModel.clearMediaPreviews()
             withContext(Dispatchers.IO) {
                 runCatching { previewDir.child("files").deleteRecursively() }
+                runCatching { previewDir.child("refs").deleteRecursively() }
             }
             writeMediaPreviewStatus(previewDir, "cleared=1\n")
             return

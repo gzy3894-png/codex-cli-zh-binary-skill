@@ -14,6 +14,8 @@ PUSH_MEDIA_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-push-med
 BROWSER_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-browser"
 TERMINAL_TOP_BAR="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalTopBar.kt"
 MEDIA_PREVIEW_PANE="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MediaPreviewPane.kt"
+MAIN_ACTIVITY="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/activities/terminal/MainActivity.kt"
+BROWSER_PANEL_PANE="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/BrowserPanelPane.kt"
 TERMINAL_BROWSER_SESSION="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalBrowserSession.kt"
 
 fail() {
@@ -69,7 +71,20 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$INIT_ASSET" 'export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"'
   assert_file_contains "$MEDIA_PREVIEW_PANE" 'EmptyPreviewTray'
   assert_file_contains "$MEDIA_PREVIEW_PANE" 'GridCells.Adaptive'
+  assert_file_contains "$MEDIA_PREVIEW_PANE" 'text = if (previewCount <= 0) "文件"'
+  assert_file_contains "$MEDIA_PREVIEW_PANE" 'Text("发送")'
+  assert_file_contains "$MEDIA_PREVIEW_PANE" '附加说明（可选）'
+  assert_file_contains "$BROWSER_PANEL_PANE" '.height(32.dp)'
+  assert_file_contains "$MAIN_ACTIVITY" 'codex-preview path'
+  assert_file_contains "$MAIN_ACTIVITY" 'writePreviewReference'
+  assert_file_contains "$PREVIEW_ASSET" 'codex-preview path FILE_ID'
+  assert_file_contains "$INIT_ASSET" 'codex-preview path FILE_ID'
   assert_file_not_contains "$TERMINAL_TOP_BAR" 'onPickFileClick'
+  assert_file_not_contains "$MEDIA_PREVIEW_PANE" '预览托盘'
+  assert_file_not_contains "$MEDIA_PREVIEW_PANE" 'Text("AI")'
+  assert_file_not_contains "$MEDIA_PREVIEW_PANE" '发给 AI'
+  assert_file_not_contains "$MEDIA_PREVIEW_PANE" '发送给 AI'
+  assert_file_not_contains "$MAIN_ACTIVITY" '请查看我放入预览托盘'
   sh -n "$PREVIEW_ASSET" || fail "codex-preview shell syntax failed"
   sh -n "$PUSH_IMAGE_ASSET" || fail "codex-push-image shell syntax failed"
   sh -n "$PUSH_MEDIA_ASSET" || fail "codex-push-media shell syntax failed"
@@ -103,9 +118,14 @@ test_image_preview_bridge_asset() {
     "$tmp/prefix/local/media-preview/files/"*.png) ;;
     *) fail "preview image path should use a unique png file: $image_path" ;;
   esac
+  image_stamp="$(sed -n 's/^stamp=//p' "$tmp/prefix/local/media-preview/request")"
+  resolved_path="$(PREFIX="$tmp/prefix" sh "$PREVIEW_ASSET" path "$image_stamp")" || fail "codex-preview path should resolve image ref"
+  [ "$resolved_path" = "$image_path" ] || fail "codex-preview path resolved wrong image path: $resolved_path"
+  fallback_resolved_path="$(PREFIX="$tmp/prefix" "$tmp/prefix/local/bin/codex-preview" path "$image_stamp")" || fail "fallback codex-preview path should resolve image ref"
+  [ "$fallback_resolved_path" = "$image_path" ] || fail "fallback codex-preview path resolved wrong image path: $fallback_resolved_path"
   assert_file_contains "$tmp/prefix/local/media-preview/request" "action=show"
   assert_file_contains "$tmp/prefix/local/media-preview/request" "kind=image"
-  printf '%s\n' "$output" | grep -F '已发送到 Codex for TUI 预览流' >/dev/null 2>&1 || fail "preview command did not report success"
+  printf '%s\n' "$output" | grep -F '已发送到 Codex for TUI 文件面板' >/dev/null 2>&1 || fail "preview command did not report success"
 
   if ! output="$(PREFIX="$tmp/prefix" "$tmp/prefix/local/bin/codex-push-media" "$tmp/source/clip.mp4")"; then
     fail "codex-push-media should copy a video into preview bridge"
@@ -136,7 +156,7 @@ test_image_preview_bridge_asset() {
     fail "codex-preview close should write a clear request"
   fi
   assert_file_contains "$tmp/prefix/local/media-preview/request" "action=clear"
-  printf '%s\n' "$output" | grep -F '已清空 Codex for TUI 预览流' >/dev/null 2>&1 || fail "preview close did not report success"
+  printf '%s\n' "$output" | grep -F '已清空 Codex for TUI 文件面板' >/dev/null 2>&1 || fail "preview close did not report success"
   rm -rf "$tmp"
 }
 

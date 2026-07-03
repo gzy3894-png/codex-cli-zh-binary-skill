@@ -27,6 +27,7 @@ set -eu
 
 usage() {
   printf '%s\n' "用法: codex-preview /path/to/image-video-or-text"
+  printf '%s\n' "      codex-preview path FILE_ID"
   printf '%s\n' "      codex-preview close"
 }
 
@@ -59,7 +60,48 @@ write_clear_request() {
     printf 'stamp=%s.%s\n' "$(date +%s 2>/dev/null || printf 0)" "$$"
   } > "$request_file.tmp.$$"
   mv "$request_file.tmp.$$" "$request_file"
-  printf '%s\n' "已清空 Codex for TUI 预览流"
+  printf '%s\n' "已清空 Codex for TUI 文件面板"
+}
+
+write_ref_file() {
+  bridge_dir="$1/local/media-preview"
+  ref_id="$2"
+  path="$3"
+  name="$4"
+  kind="$5"
+  refs_dir="$bridge_dir/refs"
+  mkdir -p "$refs_dir"
+  {
+    printf 'path=%s\n' "$path"
+    printf 'name=%s\n' "$name"
+    printf 'kind=%s\n' "$kind"
+    printf 'stamp=%s\n' "$ref_id"
+  } > "$refs_dir/$ref_id.tmp.$$"
+  mv "$refs_dir/$ref_id.tmp.$$" "$refs_dir/$ref_id"
+}
+
+print_ref_path() {
+  bridge_dir="$1/local/media-preview"
+  ref_id="$2"
+  case "$ref_id" in
+    ""|*[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*)
+      printf '文件编号无效: %s\n' "$ref_id" >&2
+      return 2
+      ;;
+  esac
+
+  ref_file="$bridge_dir/refs/$ref_id"
+  if [ ! -r "$ref_file" ]; then
+    printf '找不到文件编号: %s\n' "$ref_id" >&2
+    return 1
+  fi
+
+  path="$(sed -n 's/^path=//p' "$ref_file" | sed -n '1p')"
+  if [ -z "$path" ]; then
+    printf '文件编号缺少路径: %s\n' "$ref_id" >&2
+    return 1
+  fi
+  printf '%s\n' "$path"
 }
 
 detect_kind() {
@@ -72,7 +114,7 @@ detect_kind() {
   esac
 }
 
-if [ "$#" -ne 1 ]; then
+if [ "$#" -ne 1 ] && [ "$#" -ne 2 ]; then
   usage >&2
   exit 2
 fi
@@ -85,6 +127,16 @@ prefix="$(find_prefix)" || {
 if [ "$1" = "close" ] || [ "$1" = "--close" ]; then
   write_clear_request "$prefix"
   exit 0
+fi
+
+if [ "$#" -eq 2 ] && [ "$1" = "path" ]; then
+  print_ref_path "$prefix" "$2"
+  exit $?
+fi
+
+if [ "$#" -ne 1 ]; then
+  usage >&2
+  exit 2
 fi
 
 src="$1"
@@ -126,8 +178,9 @@ chmod 600 "$dest" 2>/dev/null || true
   printf 'stamp=%s\n' "$stamp"
 } > "$req_tmp"
 mv "$req_tmp" "$request_file"
+write_ref_file "$prefix" "$stamp" "$dest" "$base" "$kind"
 
-printf '已发送到 Codex for TUI 预览流: %s\n' "$src"
+printf '已发送到 Codex for TUI 文件面板: %s\n' "$src"
 EOF
   cat > "$bin_dir/codex-push-image" <<'EOF'
 #!/usr/bin/env sh

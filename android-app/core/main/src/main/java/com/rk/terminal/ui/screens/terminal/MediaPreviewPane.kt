@@ -31,15 +31,21 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -57,6 +63,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -84,10 +91,10 @@ fun TerminalMediaPreviewTopBarButton(
     Surface(
         modifier = modifier
             .padding(end = 6.dp)
-            .height(36.dp)
-            .widthIn(min = 82.dp, max = 126.dp)
+            .height(32.dp)
+            .widthIn(min = 64.dp, max = 104.dp)
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(16.dp),
         color = if (expanded) {
             MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
         } else {
@@ -96,33 +103,33 @@ fun TerminalMediaPreviewTopBarButton(
         border = BorderStroke(1.dp, color.copy(alpha = 0.34f))
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 7.dp),
+            modifier = Modifier.padding(horizontal = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             if (latestPreview != null) {
                 TopBarPreviewThumb(preview = latestPreview)
             } else {
                 Box(
                     modifier = Modifier
-                        .size(24.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .size(20.dp)
+                        .clip(RoundedCornerShape(10.dp))
                         .background(Color.Black.copy(alpha = 0.18f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "+",
                         color = color,
-                        style = MaterialTheme.typography.labelLarge,
+                        style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1
                     )
                 }
             }
             Text(
-                text = if (previewCount <= 0) "托盘" else if (previewCount > 99) "99+" else previewCount.toString(),
+                text = if (previewCount <= 0) "文件" else if (previewCount > 99) "99+" else previewCount.toString(),
                 color = color,
-                style = MaterialTheme.typography.labelLarge,
+                style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1
             )
@@ -134,8 +141,8 @@ fun TerminalMediaPreviewTopBarButton(
 private fun TopBarPreviewThumb(preview: TerminalMediaPreview) {
     Box(
         modifier = Modifier
-            .size(24.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .size(20.dp)
+            .clip(RoundedCornerShape(10.dp))
             .background(Color.Black.copy(alpha = 0.18f)),
         contentAlignment = Alignment.Center
     ) {
@@ -155,7 +162,7 @@ private fun TopBarPreviewThumb(preview: TerminalMediaPreview) {
             )
         } else if (preview.kind == TerminalMediaPreviewKind.VIDEO) {
             Text(
-                text = "视频",
+                text = "视",
                 color = Color.White,
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1
@@ -179,12 +186,13 @@ fun TerminalMediaPreviewTray(
     onPickFile: () -> Unit,
     onClear: () -> Unit,
     onRemove: (TerminalMediaPreview) -> Unit,
-    onSendToAi: (TerminalMediaPreview) -> Unit,
+    onSendToAi: (TerminalMediaPreview, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val trayHeight = (screenHeight * 0.42f).coerceIn(220.dp, 420.dp)
     var dialogState by remember { mutableStateOf<PreviewDialogState?>(null) }
+    var sendTarget by remember { mutableStateOf<TerminalMediaPreview?>(null) }
     val imagePreviews = previews.filter { it.kind == TerminalMediaPreviewKind.IMAGE }
 
     Surface(
@@ -227,7 +235,7 @@ fun TerminalMediaPreviewTray(
                             imagePreviews = imagePreviews,
                             onOpen = { dialogState = it },
                             onRemove = { onRemove(preview) },
-                            onSendToAi = { onSendToAi(preview) }
+                            onSendToAi = { sendTarget = preview }
                         )
                     }
                 }
@@ -241,6 +249,62 @@ fun TerminalMediaPreviewTray(
             onDismiss = { dialogState = null }
         )
     }
+
+    sendTarget?.let { preview ->
+        SendPreviewDialog(
+            preview = preview,
+            onDismiss = { sendTarget = null },
+            onConfirm = { message ->
+                onSendToAi(preview, message)
+                sendTarget = null
+            }
+        )
+    }
+}
+
+@Composable
+private fun SendPreviewDialog(
+    preview: TerminalMediaPreview,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var message by remember(preview.stamp) { mutableStateOf("") }
+    val send = { onConfirm(message.trim()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("发送文件") },
+        text = {
+            Column {
+                Text(
+                    text = preview.name,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = message,
+                    onValueChange = { message = it },
+                    label = { Text("附加说明（可选）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardActions = KeyboardActions(onDone = { send() }),
+                    keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Done)
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = send) {
+                Text("发送")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
 }
 
 @Composable
@@ -259,13 +323,13 @@ private fun PreviewTrayHeader(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "预览托盘",
+                text = "文件",
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1
             )
             Text(
-                text = "共 $count 个项目，可选择文件发给 AI",
+                text = "共 $count 个项目，可添加图片、视频、文本并发送到当前会话",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -294,7 +358,7 @@ private fun EmptyPreviewTray(onPickFile: () -> Unit) {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = "预览托盘为空",
+                text = "暂无文件",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1
@@ -390,8 +454,12 @@ private fun PreviewThumbTile(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(onClick = onSendToAi) {
-                    Text("AI")
+                TextButton(
+                    onClick = onSendToAi,
+                    modifier = Modifier.height(32.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp)
+                ) {
+                    Text("发送", style = MaterialTheme.typography.labelSmall)
                 }
                 IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
                     Icon(
@@ -483,7 +551,7 @@ private fun PreviewFeedCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 TextButton(onClick = onSendToAi) {
-                    Text("发给 AI")
+                    Text("发送")
                 }
                 IconButton(
                     onClick = onRemove,
@@ -637,7 +705,7 @@ private fun TextPreviewCard(
             Spacer(modifier = Modifier.height(6.dp))
         }
         Text(
-            text = text.ifBlank { "空文本或无法预览编码，文件路径仍可发送给 AI。" },
+            text = text.ifBlank { "空文本或无法预览编码，文件仍可发送。" },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 8,
@@ -766,7 +834,7 @@ private fun TextPreviewDialogContent(
         ) {
             Text(
                 text = preview.textPreview.orEmpty()
-                    .ifBlank { "空文本或无法预览编码，文件路径仍可发送给 AI。" },
+                    .ifBlank { "空文本或无法预览编码，文件仍可发送。" },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
