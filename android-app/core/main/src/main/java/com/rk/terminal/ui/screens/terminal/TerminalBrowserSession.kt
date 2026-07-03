@@ -146,6 +146,7 @@ class TerminalBrowserSessionManager(
         tab.webView.resumeTimers()
         tab.webView.requestLayout()
         tab.webView.post {
+            layoutWebViewInContainer(tab.webView, container)
             tab.webView.requestLayout()
             tab.webView.invalidate()
         }
@@ -490,6 +491,16 @@ class TerminalBrowserSessionManager(
         webView.measure(widthSpec, heightSpec)
         webView.layout(0, 0, width, height)
         return width to height
+    }
+
+    private fun layoutWebViewInContainer(webView: WebView, container: FrameLayout) {
+        val width = container.width
+        val height = container.height
+        if (width <= 0 || height <= 0) return
+        val widthSpec = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY)
+        val heightSpec = View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
+        webView.measure(widthSpec, heightSpec)
+        webView.layout(0, 0, width, height)
     }
 
     private fun focusWebView(webView: WebView) {
