@@ -64,6 +64,7 @@ class TerminalBrowserSessionManager(
     context: Context,
     private val onSnapshot: (TerminalBrowserSnapshot) -> Unit
 ) {
+    private val initialContext = context
     private val appContext = context.applicationContext
     private val tabs = linkedMapOf<Int, BrowserTab>()
     private var nextTabId = 0
@@ -142,6 +143,12 @@ class TerminalBrowserSessionManager(
         }
         layoutWebView(tab.webView)
         focusWebView(tab.webView)
+        tab.webView.onResume()
+        tab.webView.resumeTimers()
+        tab.webView.post {
+            tab.webView.requestLayout()
+            tab.webView.invalidate()
+        }
     }
 
     fun detachFrom(container: FrameLayout) {
@@ -357,7 +364,7 @@ class TerminalBrowserSessionManager(
     private fun createTab(): BrowserTab {
         require(tabs.size < MAX_BROWSER_TABS) { "browser tab limit is $MAX_BROWSER_TABS" }
         val tabId = ++nextTabId
-        val contextWrapper = MutableContextWrapper(appContext)
+        val contextWrapper = MutableContextWrapper(initialContext)
         val webView = WebView(contextWrapper).apply {
             setBackgroundColor(Color.WHITE)
             isFocusable = true
