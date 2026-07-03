@@ -26,6 +26,21 @@
 
 普通启动不会自动联网更新脚本，不会请求 `/models`，不会覆盖 `~/.codex/config.toml`。
 
+Codex for TUI 2.0 用户不需要重装 APK；但已经完成首次安装的用户需要手动更新脚本：
+
+```sh
+codex 更新
+codex-local repair-launcher
+```
+
+验证方式：
+
+```sh
+codex 配置模式
+```
+
+如果菜单里出现 `6. 修复全权限授权`，说明脚本已经更新到包含配置菜单和授权持久化修复的版本。需要修复授权时选择该项；它会写入 `approval_policy = "never"` 和 `sandbox_mode = "danger-full-access"`。
+
 只有这些路径会拉取脚本：
 
 1. 首次打开 APK 且本地没有 `codex`，用户确认安装后。
