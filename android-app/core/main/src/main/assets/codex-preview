@@ -35,7 +35,7 @@ write_clear_request() {
     printf 'stamp=%s.%s\n' "$(date +%s 2>/dev/null || printf 0)" "$$"
   } > "$request_file.tmp.$$"
   mv "$request_file.tmp.$$" "$request_file"
-  printf '%s\n' "已关闭 Codex for TUI 媒体预览"
+  printf '%s\n' "已清空 Codex for TUI 预览流"
 }
 
 detect_kind() {
@@ -84,7 +84,8 @@ media_dir="$bridge_dir/files"
 request_file="$bridge_dir/request"
 mkdir -p "$media_dir"
 
-dest="$media_dir/latest.$ext"
+stamp="$(date +%s 2>/dev/null || printf 0).$$"
+dest="$media_dir/$stamp.$ext"
 tmp="$dest.tmp.$$"
 req_tmp="$request_file.tmp.$$"
 
@@ -97,8 +98,8 @@ chmod 600 "$dest" 2>/dev/null || true
   printf 'kind=%s\n' "$kind"
   printf 'path=%s\n' "$dest"
   printf 'name=%s\n' "$base"
-  printf 'stamp=%s.%s\n' "$(date +%s 2>/dev/null || printf 0)" "$$"
+  printf 'stamp=%s\n' "$stamp"
 } > "$req_tmp"
 mv "$req_tmp" "$request_file"
 
-printf '已发送到 Codex for TUI 媒体预览: %s\n' "$src"
+printf '已发送到 Codex for TUI 预览流: %s\n' "$src"

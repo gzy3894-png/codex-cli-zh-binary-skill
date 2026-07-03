@@ -91,9 +91,9 @@ fun TerminalViewLayout(
             }
         )
 
-        MediaPreviewPane(
-            preview = viewModel.mediaPreview,
-            onClose = mainActivity::dismissMediaPreview
+        TerminalMediaPreviewFeed(
+            previews = viewModel.mediaPreviews,
+            onClear = mainActivity::dismissMediaPreview
         )
 
         if (viewModel.showVirtualKeys) {

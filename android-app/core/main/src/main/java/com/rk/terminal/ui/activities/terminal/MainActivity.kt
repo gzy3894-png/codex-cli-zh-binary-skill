@@ -1,6 +1,7 @@
 package com.rk.terminal.ui.activities.terminal
 
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
@@ -143,7 +144,7 @@ class MainActivity : ComponentActivity() {
     }
 
     fun dismissMediaPreview() {
-        terminalViewModel.mediaPreview = null
+        terminalViewModel.clearMediaPreviews()
         writeMediaPreviewStatus(localDir().child("media-preview"), "closed=1\n")
     }
 
@@ -170,7 +171,7 @@ class MainActivity : ComponentActivity() {
 
         val request = parseMediaPreviewRequest(content)
         if (request["action"] == "clear") {
-            terminalViewModel.mediaPreview = null
+            terminalViewModel.clearMediaPreviews()
             writeMediaPreviewStatus(previewDir, "cleared=1\n")
             return
         }
@@ -199,16 +200,38 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        terminalViewModel.mediaPreview = TerminalMediaPreview(
-            path = mediaFile.absolutePath,
-            name = request["name"]?.takeIf { it.isNotBlank() } ?: mediaFile.name,
-            kind = kind,
-            stamp = request["stamp"] ?: content.hashCode().toString()
+        val bounds = if (kind == TerminalMediaPreviewKind.IMAGE) {
+            readImageBounds(mediaFile)
+        } else {
+            null
+        }
+
+        terminalViewModel.addMediaPreview(
+            TerminalMediaPreview(
+                path = mediaFile.absolutePath,
+                name = request["name"]?.takeIf { it.isNotBlank() } ?: mediaFile.name,
+                kind = kind,
+                stamp = request["stamp"] ?: content.hashCode().toString(),
+                width = bounds?.first,
+                height = bounds?.second
+            )
         )
         writeMediaPreviewStatus(
             previewDir,
             "shown=1\nkind=${request["kind"]}\npath=${mediaFile.absolutePath}\n"
         )
+    }
+
+    private suspend fun readImageBounds(file: File): Pair<Int, Int>? = withContext(Dispatchers.IO) {
+        try {
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, options)
+            val width = options.outWidth
+            val height = options.outHeight
+            if (width > 0 && height > 0) width to height else null
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun parseMediaPreviewRequest(content: String): Map<String, String> {

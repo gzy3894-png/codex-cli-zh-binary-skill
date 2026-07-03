@@ -5,6 +5,7 @@ import android.graphics.Typeface
 import android.util.TypedValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
@@ -35,7 +36,19 @@ class TerminalViewModel : ViewModel() {
     var showToolbar by mutableStateOf(Settings.toolbar)
     var showVirtualKeys by mutableStateOf(Settings.virtualKeys)
     var showHorizontalToolbar by mutableStateOf(Settings.toolbar)
-    var mediaPreview by mutableStateOf<TerminalMediaPreview?>(null)
+    val mediaPreviews = mutableStateListOf<TerminalMediaPreview>()
+
+    fun addMediaPreview(preview: TerminalMediaPreview) {
+        mediaPreviews.removeAll { it.stamp == preview.stamp || it.path == preview.path }
+        mediaPreviews.add(preview)
+        while (mediaPreviews.size > MAX_MEDIA_PREVIEWS) {
+            mediaPreviews.removeAt(0)
+        }
+    }
+
+    fun clearMediaPreviews() {
+        mediaPreviews.clear()
+    }
 
     fun setFont(typeface: Typeface) {
         TerminalUtils.typeface = typeface
@@ -80,6 +93,8 @@ class TerminalViewModel : ViewModel() {
     }
 }
 
+private const val MAX_MEDIA_PREVIEWS = 60
+
 enum class TerminalMediaPreviewKind {
     IMAGE,
     VIDEO
@@ -89,5 +104,7 @@ data class TerminalMediaPreview(
     val path: String,
     val name: String,
     val kind: TerminalMediaPreviewKind,
-    val stamp: String
+    val stamp: String,
+    val width: Int? = null,
+    val height: Int? = null
 )

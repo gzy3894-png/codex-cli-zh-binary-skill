@@ -82,26 +82,34 @@ test_image_preview_bridge_asset() {
     fail "codex-preview should copy an image into preview bridge"
   fi
 
-  [ -s "$tmp/prefix/local/media-preview/files/latest.png" ] || fail "preview image copy missing"
   [ -s "$tmp/prefix/local/media-preview/request" ] || fail "preview request file missing"
+  image_path="$(sed -n 's/^path=//p' "$tmp/prefix/local/media-preview/request")"
+  [ -s "$image_path" ] || fail "preview image copy missing"
+  case "$image_path" in
+    "$tmp/prefix/local/media-preview/files/"*.png) ;;
+    *) fail "preview image path should use a unique png file: $image_path" ;;
+  esac
   assert_file_contains "$tmp/prefix/local/media-preview/request" "action=show"
   assert_file_contains "$tmp/prefix/local/media-preview/request" "kind=image"
-  assert_file_contains "$tmp/prefix/local/media-preview/request" "path=$tmp/prefix/local/media-preview/files/latest.png"
-  printf '%s\n' "$output" | grep -F '已发送到 Codex for TUI 媒体预览' >/dev/null 2>&1 || fail "preview command did not report success"
+  printf '%s\n' "$output" | grep -F '已发送到 Codex for TUI 预览流' >/dev/null 2>&1 || fail "preview command did not report success"
 
   if ! output="$(PREFIX="$tmp/prefix" "$tmp/prefix/local/bin/codex-push-media" "$tmp/source/clip.mp4")"; then
     fail "codex-push-media should copy a video into preview bridge"
   fi
 
-  [ -s "$tmp/prefix/local/media-preview/files/latest.mp4" ] || fail "preview video copy missing"
+  video_path="$(sed -n 's/^path=//p' "$tmp/prefix/local/media-preview/request")"
+  [ -s "$video_path" ] || fail "preview video copy missing"
+  case "$video_path" in
+    "$tmp/prefix/local/media-preview/files/"*.mp4) ;;
+    *) fail "preview video path should use a unique mp4 file: $video_path" ;;
+  esac
   assert_file_contains "$tmp/prefix/local/media-preview/request" "kind=video"
-  assert_file_contains "$tmp/prefix/local/media-preview/request" "path=$tmp/prefix/local/media-preview/files/latest.mp4"
 
   if ! output="$(PREFIX="$tmp/prefix" sh "$PREVIEW_ASSET" close)"; then
     fail "codex-preview close should write a clear request"
   fi
   assert_file_contains "$tmp/prefix/local/media-preview/request" "action=clear"
-  printf '%s\n' "$output" | grep -F '已关闭 Codex for TUI 媒体预览' >/dev/null 2>&1 || fail "preview close did not report success"
+  printf '%s\n' "$output" | grep -F '已清空 Codex for TUI 预览流' >/dev/null 2>&1 || fail "preview close did not report success"
   rm -rf "$tmp"
 }
 
