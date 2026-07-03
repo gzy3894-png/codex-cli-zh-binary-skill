@@ -56,13 +56,13 @@ codex-local refresh-models
 
 它只刷新 `model_catalog_json` 指向的 JSON 文件，并保留当前 `model` 和 `model_reasoning_effort`。
 
-重新填写第三方 API Base、API Key 或默认模型时运行：
+新建、编辑、切换或保存第三方 API 配置时运行：
 
 ```sh
 codex 配置模式
 ```
 
-该命令只更新第三方 provider、`auth.json`、默认模型和 `model_catalog_json`，不会重置通用配置。
+该命令会打开配置菜单，支持新建/重配、编辑当前配置、选择已保存配置、保存当前配置、刷新模型目录和修复全权限授权。第三方配置会写入 `config.toml`、`auth.json` 和 `model_catalog_json`，不会重置自动压缩、fast mode、goals、statusline 等通用配置。全权限模式会同时写入 `approval_policy = "never"` 和 `sandbox_mode = "danger-full-access"`。
 
 ## ReTerminal Alpine 安装
 
@@ -215,7 +215,7 @@ codex-local refresh-models
 codex 配置模式
 ```
 
-该命令会重新请求 `/models` 并让你选择默认模型，但保留自动压缩、fast mode、goals、statusline 等通用配置。
+该命令会进入配置菜单；选择新建/编辑时会重新请求 `/models` 并让你选择默认模型，但保留自动压缩、fast mode、goals、statusline 等通用配置。
 
 ## 本地维护命令
 
@@ -232,7 +232,7 @@ codex-update check
 codex-update apply
 ```
 
-`codex 配置模式` 是推荐的第三方配置入口；`codex-local configure` 是兼容维护入口。普通 `codex` 启动不会调用它们。
+`codex 配置模式` 是推荐的第三方配置入口；`codex-local configure` 是兼容维护入口，使用同一套菜单。普通 `codex` 启动不会调用它们。
 
 ## AGENTS.md
 

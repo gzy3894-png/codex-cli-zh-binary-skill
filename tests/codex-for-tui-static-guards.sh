@@ -242,6 +242,7 @@ EOF
 
   assert_file_contains "$tmp/bin/codex" '配置模式'
   assert_file_contains "$tmp/bin/codex" '更新'
+  assert_file_contains "$tmp/bin/codex" 'codex_config_menu'
   assert_file_contains "$tmp/bin/codex" 'CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"'
   assert_file_not_contains "$tmp/bin/codex" '--preflight'
   assert_file_not_contains "$tmp/bin/codex" '--refresh-current-profile'
@@ -411,6 +412,10 @@ test_codex_local_profile_commands_are_explicit_only() {
   assert_file_contains "$SCRIPT_DIR/codex-local-resume.sh" 'profile-save'
   assert_file_contains "$SCRIPT_DIR/codex-local-resume.sh" 'profile-use'
   assert_file_contains "$SCRIPT_DIR/codex-local-resume.sh" 'profile-list'
+  assert_file_contains "$SCRIPT_DIR/codex-local-resume.sh" 'codex_config_menu'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" 'codex_config_profile_choose_use'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" 'codex_config_repair_full_permission'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" 'sandbox_mode = \"danger-full-access\"'
   assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'profile-use'
 }
 

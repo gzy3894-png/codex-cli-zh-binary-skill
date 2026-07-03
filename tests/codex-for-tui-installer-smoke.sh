@@ -269,8 +269,87 @@ EOF
   }
 
   assert_file_contains "$tmp/home/.codex/config.toml" 'model = "gpt-5.5"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'approval_policy = "never"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'sandbox_mode = "danger-full-access"'
   assert_file_not_contains "$tmp/home/.codex/config.toml" "可用模型"
   assert_file_contains "$tmp/stderr" "可用模型"
+  rm -rf "$tmp"
+}
+
+test_edit_current_config_preserves_key_and_writes_full_permission() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-edit-current-config.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.codex"
+  cat > "$tmp/home/.codex/config.toml" <<'EOF'
+model_provider = "custom"
+model = "gpt-5.4"
+
+[model_providers.custom]
+base_url = "https://api.example.test/v1"
+wire_api = "responses"
+EOF
+  printf '%s\n' '{"OPENAI_API_KEY":"sk-old"}' > "$tmp/home/.codex/auth.json"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-config.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_FORCE_STDIN=1
+    codex_config_fetch_models() {
+      cat > "$3" <<'EOF'
+{
+  "data": [
+    {"id":"gpt-5.4"},
+    {"id":"gpt-5.5"}
+  ]
+}
+EOF
+      : > "$4"
+      return 0
+    }
+    printf '\n\n2\n' |
+      codex_config_prompt_third_party edit >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || {
+    sed -n '1,200p' "$tmp/stderr" >&2 || true
+    fail "editing current config should complete"
+  }
+
+  assert_file_contains "$tmp/home/.codex/config.toml" 'model = "gpt-5.5"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'base_url = "https://api.example.test/v1"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'approval_policy = "never"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'sandbox_mode = "danger-full-access"'
+  assert_file_contains "$tmp/home/.codex/auth.json" '"OPENAI_API_KEY": "sk-old"'
+  find "$tmp/home/.codex/install-state/backups" -type f -name config.toml | grep . >/dev/null 2>&1 ||
+    fail "editing current config should create a backup"
+  rm -rf "$tmp"
+}
+
+test_repair_full_permission_adds_sandbox_mode() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-repair-permission.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.codex"
+  cat > "$tmp/home/.codex/config.toml" <<'EOF'
+approval_policy = "never"
+model_provider = "custom"
+model = "gpt-5.5"
+EOF
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-config.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    codex_config_repair_full_permission >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || {
+    sed -n '1,200p' "$tmp/stderr" >&2 || true
+    fail "repair full permission should complete"
+  }
+
+  assert_file_contains "$tmp/home/.codex/config.toml" 'approval_policy = "never"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'sandbox_mode = "danger-full-access"'
+  find "$tmp/home/.codex/install-state/backups" -type f -name config.toml | grep . >/dev/null 2>&1 ||
+    fail "repair full permission should create a backup"
   rm -rf "$tmp"
 }
 
@@ -328,11 +407,45 @@ test_profile_save_and_use_switches_only_runtime_config() {
 
   assert_file_contains "$tmp/home/.codex/config.toml" 'model = "gpt-5.5"'
   assert_file_contains "$tmp/home/.codex/config.toml" 'base_url = "https://api-a.example.test/v1"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'approval_policy = "never"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'sandbox_mode = "danger-full-access"'
   assert_file_contains "$tmp/home/.codex/auth.json" '"OPENAI_API_KEY": "sk-a"'
   assert_file_contains "$tmp/home/.codex/model_catalog.json" '"slug": "gpt-5.5"'
   assert_file_contains "$tmp/home/.codex/AGENTS.md" "user agents must remain"
   assert_file_contains "$tmp/profiles.txt" "primary"
   assert_file_contains "$tmp/profiles.txt" "secondary"
+  rm -rf "$tmp"
+}
+
+test_config_menu_can_select_saved_profile() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-menu-profile-select.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home"
+  printf '%s\n' "gpt-5.5" > "$tmp/models-a.txt"
+  printf '%s\n' "gpt-5.4" > "$tmp/models-b.txt"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-config.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_FORCE_STDIN=1
+    codex_config_write_third_party_config "https://api-a.example.test/v1" "sk-a" "gpt-5.5" "$tmp/models-a.txt"
+    codex_config_profile_save primary
+    codex_config_write_third_party_config "https://api-b.example.test/v1" "sk-b" "gpt-5.4" "$tmp/models-b.txt"
+    codex_config_profile_save secondary
+    printf '%s\n%s\n' "3" "1" |
+      codex_config_menu >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || {
+    sed -n '1,200p' "$tmp/stderr" >&2 || true
+    fail "config menu should select a saved profile"
+  }
+
+  assert_file_contains "$tmp/home/.codex/config.toml" 'model = "gpt-5.5"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'base_url = "https://api-a.example.test/v1"'
+  assert_file_contains "$tmp/home/.codex/auth.json" '"OPENAI_API_KEY": "sk-a"'
+  assert_file_contains "$tmp/stderr" "Codex 配置模式"
+  assert_file_contains "$tmp/stderr" "选择已保存配置"
   rm -rf "$tmp"
 }
 
@@ -503,8 +616,11 @@ run_step test_generated_launcher_has_no_preflight_or_profile_refresh
 run_step test_install_scripts_do_not_create_default_agents_md
 run_step test_refresh_models_preserves_current_model_fields
 run_step test_interactive_model_choice_writes_only_model_id
+run_step test_edit_current_config_preserves_key_and_writes_full_permission
+run_step test_repair_full_permission_adds_sandbox_mode
 run_step test_model_catalog_uses_current_codex_schema_shapes
 run_step test_profile_save_and_use_switches_only_runtime_config
+run_step test_config_menu_can_select_saved_profile
 run_step test_proot_launcher_preserves_codex_args
 run_step test_update_download_failure_is_error
 run_step test_partial_download_failure_is_not_accepted

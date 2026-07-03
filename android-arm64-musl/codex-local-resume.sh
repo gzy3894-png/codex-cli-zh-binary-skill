@@ -63,7 +63,7 @@ case "$cmd" in
     ;;
   configure)
     codex_init_env
-    codex_config_prompt_third_party
+    codex_config_menu
     ;;
   refresh-models)
     codex_init_env

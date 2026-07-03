@@ -99,13 +99,15 @@ codex-update check
 codex-update apply
 ```
 
-需要重新填写第三方 API Base、API Key 或默认模型时，输入：
+需要新建、编辑、切换或保存第三方 API 配置时，输入：
 
 ```sh
 codex 配置模式
 ```
 
-`codex 配置模式` 只更新第三方 provider、`auth.json`、默认模型和 `model_catalog_json`；通用配置如自动压缩、fast mode、goals、statusline 会保留。第三方模型目录刷新也需要手动执行；它只更新 `model_catalog_json` 指向的模型目录文件，保留当前 `model` 和 `model_reasoning_effort`：
+`codex 配置模式` 会打开菜单，支持新建/重配、编辑当前配置、选择已保存配置、保存当前配置、刷新模型目录和修复全权限授权。第三方配置会写入 `config.toml`、`auth.json` 和 `model_catalog_json`；通用配置如自动压缩、fast mode、goals、statusline 会保留。全权限模式会同时写入 `approval_policy = "never"` 和 `sandbox_mode = "danger-full-access"`，避免只显示 never 但实际仍受沙箱限制。
+
+第三方模型目录刷新也可以手动执行；它只更新 `model_catalog_json` 指向的模型目录文件，保留当前 `model` 和 `model_reasoning_effort`：
 
 ```sh
 codex-local refresh-models
@@ -220,7 +222,7 @@ android-arm64-musl/SHA256SUMS
 codex-local doctor
 ```
 
-如果提示启动器缺失，可以运行 `codex-local repair-launcher`。需要重新配置第三方 API 时运行 `codex 配置模式`。
+如果提示启动器缺失，可以运行 `codex-local repair-launcher`。需要管理第三方 API、切换配置或修复全权限授权时运行 `codex 配置模式`。
 
 **下载 Codex 压缩包很慢或失败？**
 

@@ -153,7 +153,7 @@ codex_for_tui_configure_if_missing() {
 codex_for_tui_force_configure() {
   codex_for_tui_load_config_libs
   codex_init_env
-  codex_config_prompt_third_party
+  codex_config_menu
 }
 
 codex_for_tui_update() {

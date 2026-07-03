@@ -239,6 +239,82 @@ codex_config_current_catalog_path() {
   printf '%s\n' "$path"
 }
 
+codex_config_root_string_value() {
+  key="$1"
+  cfg="${2:-$(codex_config_file)}"
+  sed -n "s/^[[:space:]]*$key[[:space:]]*=[[:space:]]*\"\(.*\)\".*/\1/p" "$cfg" 2>/dev/null | sed -n '1p'
+}
+
+codex_config_is_full_permission() {
+  cfg="${1:-$(codex_config_file)}"
+  [ "$(codex_config_root_string_value approval_policy "$cfg")" = "never" ] || return 1
+  [ "$(codex_config_root_string_value sandbox_mode "$cfg")" = "danger-full-access" ] || return 1
+}
+
+codex_config_apply_full_permission() {
+  cfg="${1:-$(codex_config_file)}"
+  [ -s "$cfg" ] || codex_die "缺少 $cfg，无法修复授权"
+  cfg_tmp="$cfg.tmp.$$"
+  awk '
+function is_section(line) {
+  return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*($|#)/
+}
+function emit_full_permission() {
+  if (permission_done) {
+    return
+  }
+  print "approval_policy = \"never\""
+  print "sandbox_mode = \"danger-full-access\""
+  permission_done = 1
+}
+{
+  if (is_section($0)) {
+    if (section == "") {
+      emit_full_permission()
+    }
+    section = "section"
+    print
+    next
+  }
+  if (section == "" && $0 ~ /^[[:space:]]*approval_policy[[:space:]]*=/) {
+    next
+  }
+  if (section == "" && $0 ~ /^[[:space:]]*sandbox_mode[[:space:]]*=/) {
+    next
+  }
+  print
+}
+END {
+  if (section == "") {
+    emit_full_permission()
+  }
+}
+' "$cfg" > "$cfg_tmp"
+  mv "$cfg_tmp" "$cfg"
+  chmod 600 "$cfg" 2>/dev/null || true
+}
+
+codex_config_backup_current() {
+  home_dir="$(codex_home)"
+  state_root="$(codex_state_root)"
+  stamp="$(date '+%Y%m%d-%H%M%S' 2>/dev/null || printf '%s' "$$")"
+  backup_dir="$state_root/backups/$stamp"
+  made=0
+  for file in config.toml auth.json model_catalog.json; do
+    if [ -e "$home_dir/$file" ]; then
+      mkdir -p "$backup_dir"
+      cp "$home_dir/$file" "$backup_dir/$file"
+      made=1
+    fi
+  done
+  if [ -s "$(codex_config_official_marker_file)" ]; then
+    mkdir -p "$backup_dir/install-state"
+    cp "$(codex_config_official_marker_file)" "$backup_dir/install-state/official-login-mode"
+    made=1
+  fi
+  [ "$made" -eq 0 ] || codex_info "已备份当前配置。"
+}
+
 codex_config_set_catalog_path() {
   cfg="$1"
   catalog="$2"
@@ -456,6 +532,7 @@ cwd = "$home_esc"
 EOF
   mv "$config_tmp" "$cfg"
   chmod 600 "$cfg" 2>/dev/null || true
+  codex_config_apply_full_permission "$cfg"
 }
 
 codex_config_tty_read() {
@@ -472,31 +549,66 @@ codex_config_tty_read() {
   printf '%s' "$ans"
 }
 
+codex_config_tty_confirm() {
+  prompt="$1"
+  default="${2:-n}"
+  ans="$(codex_config_tty_read "$prompt" "$default")"
+  case "$ans" in
+    y|Y|yes|YES|Yes|是) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 codex_config_choose_model() {
   models_file="$1"
+  preferred_model="${2:-}"
   count="$(wc -l < "$models_file" | tr -d ' ')"
   [ "$count" -gt 0 ] || codex_die "模型列表为空"
+  default_choice="1"
+  if [ -n "$preferred_model" ]; then
+    preferred_choice="$(awk -v model="$preferred_model" '$0 == model { print NR; exit }' "$models_file")"
+    [ -n "$preferred_choice" ] && default_choice="$preferred_choice"
+  fi
   printf '%s\n' "可用模型：" >&2
   awk '{ printf "%2d. %s\n", NR, $0 }' "$models_file" >&2
-  choice="$(codex_config_tty_read "请选择默认模型编号" "1")"
-  case "$choice" in *[!0-9]*|"") choice=1 ;; esac
-  [ "$choice" -ge 1 ] 2>/dev/null || choice=1
-  [ "$choice" -le "$count" ] 2>/dev/null || choice=1
+  choice="$(codex_config_tty_read "请选择默认模型编号" "$default_choice")"
+  case "$choice" in *[!0-9]*|"") choice="$default_choice" ;; esac
+  [ "$choice" -ge 1 ] 2>/dev/null || choice="$default_choice"
+  [ "$choice" -le "$count" ] 2>/dev/null || choice="$default_choice"
   sed -n "${choice}p" "$models_file"
 }
 
 codex_config_prompt_third_party() {
+  mode="${1:-new}"
   home_dir="$(codex_home)"
+  cfg="$(codex_config_file)"
   work="$(codex_state_root)/configure"
   mkdir -p "$work"
+  existing_base=""
+  existing_key=""
+  existing_model=""
+  if [ "$mode" = "edit" ]; then
+    [ -s "$cfg" ] || codex_die "缺少当前 config.toml，无法编辑配置"
+    existing_base="$(codex_config_current_base_url "$cfg")"
+    existing_key="$(codex_config_read_auth_key "$(codex_config_auth_file)" || true)"
+    existing_model="$(codex_config_current_model "$cfg")"
+  fi
+  default_base="${CODEX_ZH_API_BASE:-$existing_base}"
   while :; do
-    raw_base="$(codex_config_tty_read "API Base URL，例如 https://api.example.com/v1" "${CODEX_ZH_API_BASE:-}")"
+    raw_base="$(codex_config_tty_read "API Base URL，例如 https://api.example.com/v1" "$default_base")"
     codex_config_valid_api_base "$raw_base" && break
     codex_warn "API Base URL 无效，必须是 http(s) URL"
   done
   api_base="$(codex_config_normalize_api_base "$raw_base")"
   api_key="${CODEX_ZH_API_KEY:-}"
-  [ -n "$api_key" ] || api_key="$(codex_config_tty_read "API Key" "")"
+  if [ -z "$api_key" ]; then
+    if [ "$mode" = "edit" ] && [ -n "$existing_key" ]; then
+      api_key="$(codex_config_tty_read "API Key（留空保留当前）" "")"
+      [ -n "$api_key" ] || api_key="$existing_key"
+    else
+      api_key="$(codex_config_tty_read "API Key" "")"
+    fi
+  fi
   [ -n "$api_key" ] || codex_die "API Key 不能为空"
   models_json="$work/models.json"
   models_err="$work/models.err"
@@ -509,7 +621,8 @@ codex_config_prompt_third_party() {
   codex_config_parse_models "$models_json" > "$models_file"
   [ -s "$models_file" ] || codex_die "未解析到模型，未写入 config.toml"
   default_model="${CODEX_ZH_DEFAULT_MODEL:-}"
-  [ -n "$default_model" ] || default_model="$(codex_config_choose_model "$models_file")"
+  [ -n "$default_model" ] || default_model="$(codex_config_choose_model "$models_file" "$existing_model")"
+  codex_config_backup_current
   codex_config_write_third_party_config "$api_base" "$api_key" "$default_model" "$models_file"
   codex_info "已写入第三方配置：$home_dir/config.toml"
 }
@@ -585,6 +698,7 @@ codex_config_profile_use() {
   dir="$(codex_config_profile_dir "$name")"
   [ -s "$dir/config.toml" ] || codex_die "找不到配置：$name"
   home_dir="$(codex_home)"
+  codex_config_backup_current
   codex_ensure_private_dir "$home_dir"
   tmp_cfg="$home_dir/config.toml.tmp.$$"
   cp "$dir/config.toml" "$tmp_cfg"
@@ -622,4 +736,92 @@ codex_config_profile_list() {
   root="$(codex_config_profiles_root)"
   [ -d "$root" ] || return 0
   find "$root" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | sort
+}
+
+codex_config_profile_choose_use() {
+  work="$(codex_state_root)/profile-menu"
+  mkdir -p "$work"
+  profiles_file="$work/profiles.txt"
+  codex_config_profile_list > "$profiles_file"
+  [ -s "$profiles_file" ] || codex_die "没有已保存配置；可先在配置模式中保存当前配置"
+  printf '%s\n' "已保存配置：" >&2
+  awk '{ printf "%2d. %s\n", NR, $0 }' "$profiles_file" >&2
+  count="$(wc -l < "$profiles_file" | tr -d ' ')"
+  choice="$(codex_config_tty_read "请选择配置编号" "1")"
+  case "$choice" in *[!0-9]*|"") choice=1 ;; esac
+  [ "$choice" -ge 1 ] 2>/dev/null || choice=1
+  [ "$choice" -le "$count" ] 2>/dev/null || choice=1
+  name="$(sed -n "${choice}p" "$profiles_file")"
+  [ -n "$name" ] || codex_die "配置选择为空"
+  codex_config_profile_use "$name"
+}
+
+codex_config_profile_save_interactive() {
+  name="$(codex_config_tty_read "请输入配置名称" "")"
+  codex_config_profile_valid_name "$name" || codex_die "配置名称无效，只能使用字母、数字、点、下划线和短横线：$name"
+  dest="$(codex_config_profile_dir "$name")"
+  if [ -e "$dest" ] && ! codex_config_tty_confirm "配置已存在，是否覆盖？" "n"; then
+    codex_die "已取消保存配置"
+  fi
+  codex_config_profile_save "$name"
+}
+
+codex_config_repair_full_permission() {
+  cfg="$(codex_config_file)"
+  [ -s "$cfg" ] || codex_die "缺少 $cfg，无法修复授权"
+  if codex_config_is_full_permission "$cfg"; then
+    codex_info "当前已是全权限模式：approval_policy=never，sandbox_mode=danger-full-access"
+    return 0
+  fi
+  codex_config_backup_current
+  codex_config_apply_full_permission "$cfg"
+  codex_info "已修复授权：approval_policy=never，sandbox_mode=danger-full-access"
+}
+
+codex_config_menu() {
+  printf '%s\n' "Codex 配置模式" >&2
+  printf '%s\n' "1. 新建/重配第三方 API" >&2
+  printf '%s\n' "2. 编辑当前第三方配置" >&2
+  printf '%s\n' "3. 选择已保存配置" >&2
+  printf '%s\n' "4. 保存当前配置" >&2
+  printf '%s\n' "5. 刷新模型目录" >&2
+  printf '%s\n' "6. 修复全权限授权" >&2
+  printf '%s\n' "7. 退出，不启动 Codex" >&2
+  while :; do
+    choice="$(codex_config_tty_read "请输入选项编号" "1")"
+    case "$choice" in
+      1|"")
+        codex_config_prompt_third_party new
+        return 0
+        ;;
+      2)
+        codex_config_prompt_third_party edit
+        return 0
+        ;;
+      3)
+        codex_config_profile_choose_use
+        return 0
+        ;;
+      4)
+        codex_config_profile_save_interactive
+        return 0
+        ;;
+      5)
+        codex_config_backup_current
+        codex_config_refresh_models
+        return 0
+        ;;
+      6)
+        codex_config_repair_full_permission
+        return 0
+        ;;
+      7)
+        codex_info "已退出配置模式。"
+        exit 0
+        ;;
+      *)
+        codex_warn "请输入 1 到 7。"
+        ;;
+    esac
+  done
 }
