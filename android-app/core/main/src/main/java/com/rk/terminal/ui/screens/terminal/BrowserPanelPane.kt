@@ -197,9 +197,10 @@ private fun BrowserWebViewHost(
     modifier: Modifier = Modifier
 ) {
     var container by remember { mutableStateOf<FrameLayout?>(null) }
-    DisposableEffect(container) {
+    DisposableEffect(container, browserSessionManager) {
+        val attachedContainer = container
         onDispose {
-            container?.let { browserSessionManager.detachFrom(it) }
+            attachedContainer?.let { browserSessionManager.detachFrom(it) }
         }
     }
     AndroidView(
