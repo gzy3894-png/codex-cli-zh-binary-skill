@@ -13,7 +13,9 @@ fi
 
 if [ ! -f /linkerconfig/ld.config.txt ]; then
   mkdir -p /linkerconfig 2>/dev/null || true
-  : > /linkerconfig/ld.config.txt 2>/dev/null || true
+  if [ -d /linkerconfig ]; then
+    : > /linkerconfig/ld.config.txt 2>/dev/null || true
+  fi
 fi
 
 ensure_codex_push_image() {
