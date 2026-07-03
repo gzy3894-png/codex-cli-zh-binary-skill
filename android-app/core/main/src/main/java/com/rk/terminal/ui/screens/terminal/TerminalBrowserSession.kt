@@ -1,14 +1,24 @@
 package com.rk.terminal.ui.screens.terminal
 
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
 import android.content.MutableContextWrapper
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.Message
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.CookieManager
+import android.webkit.JsPromptResult
+import android.webkit.JsResult
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -16,6 +26,9 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import android.widget.EditText
+import android.app.AlertDialog
+import androidx.browser.customtabs.CustomTabsIntent
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -62,7 +75,8 @@ private data class BrowserTab(
 
 class TerminalBrowserSessionManager(
     context: Context,
-    private val onSnapshot: (TerminalBrowserSnapshot) -> Unit
+    private val onSnapshot: (TerminalBrowserSnapshot) -> Unit,
+    private val launchFileChooser: ((Intent, (Array<Uri>?) -> Unit) -> Unit)? = null
 ) {
     private val initialContext = context
     private val appContext = context.applicationContext
@@ -128,6 +142,7 @@ class TerminalBrowserSessionManager(
                 "get_readable" -> getReadable()
                 "execute_js", "js" -> executeJs(request.requireValue("script"))
                 "screenshot" -> screenshot(browserDir, requestId)
+                "external", "auth", "custom_tab" -> openExternalBrowser(request.requireValue("url"))
                 "user_wait" -> userWait(request["message"].orEmpty().ifBlank { "请在浏览器中手动处理后继续" })
                 "user_done" -> userDone()
                 "close" -> closeSession()
@@ -374,6 +389,36 @@ class TerminalBrowserSessionManager(
             .put("bytes", bytesWritten)
     }
 
+    private fun openExternalBrowser(rawUrl: String): JSONObject {
+        val url = normalizeUrl(rawUrl)
+        val uri = Uri.parse(url)
+        needsUser = true
+        userMessage = "已在系统浏览器打开，请完成登录/验证后返回"
+        publish("waiting_for_user", userMessage)
+        Handler(Looper.getMainLooper()).post {
+            val opened = runCatching {
+                CustomTabsIntent.Builder()
+                    .setShowTitle(true)
+                    .build()
+                    .launchUrl(initialContext, uri)
+            }.recoverCatching {
+                initialContext.startActivity(
+                    Intent(Intent.ACTION_VIEW, uri)
+                        .addCategory(Intent.CATEGORY_BROWSABLE)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }.isSuccess
+            if (!opened) {
+                needsUser = false
+                userMessage = ""
+                publish("error", "没有可打开登录页面的浏览器")
+            }
+        }
+        return JSONObject()
+            .put("url", url)
+            .put("external", true)
+    }
+
     private fun userWait(message: String): JSONObject {
         needsUser = true
         userMessage = message
@@ -398,10 +443,16 @@ class TerminalBrowserSessionManager(
             isFocusable = true
             isFocusableInTouchMode = true
             settings.javaScriptEnabled = true
+            settings.javaScriptCanOpenWindowsAutomatically = true
             settings.domStorageEnabled = true
             settings.databaseEnabled = true
+            settings.allowContentAccess = true
+            settings.allowFileAccess = true
             settings.useWideViewPort = true
             settings.loadWithOverviewMode = true
+            settings.loadsImagesAutomatically = true
+            settings.cacheMode = WebSettings.LOAD_DEFAULT
+            settings.setSupportMultipleWindows(true)
             settings.setSupportZoom(true)
             settings.builtInZoomControls = true
             settings.displayZoomControls = false
@@ -413,14 +464,105 @@ class TerminalBrowserSessionManager(
                 settings.safeBrowsingEnabled = true
             }
         }
+        CookieManager.getInstance().setAcceptCookie(true)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+        }
         val tab = BrowserTab(id = tabId, contextWrapper = contextWrapper, webView = webView)
         webView.webChromeClient = object : WebChromeClient() {
             override fun onReceivedTitle(view: WebView?, title: String?) {
                 tab.title = title.orEmpty().ifBlank { tab.currentUrl }
                 publish()
             }
+
+            override fun onCreateWindow(
+                view: WebView?,
+                isDialog: Boolean,
+                isUserGesture: Boolean,
+                resultMsg: Message?
+            ): Boolean {
+                val child = runCatching { createTab() }.getOrNull() ?: return false
+                activeTabId = child.id
+                attachedContainer?.let { attachTo(it as FrameLayout) }
+                val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+                transport.webView = child.webView
+                resultMsg.sendToTarget()
+                publish("running", "已打开新窗口")
+                return true
+            }
+
+            override fun onCloseWindow(window: WebView?) {
+                val id = tabs.values.firstOrNull { it.webView === window }?.id
+                closeTab(id)
+            }
+
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: WebChromeClient.FileChooserParams?
+            ): Boolean {
+                val launcher = launchFileChooser ?: return false
+                val intent = runCatching {
+                    fileChooserParams?.createIntent()
+                }.getOrNull() ?: Intent(Intent.ACTION_OPEN_DOCUMENT)
+                    .addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("*/*")
+                needsUser = true
+                userMessage = "请选择网页要上传的文件"
+                launcher(intent) { uris ->
+                    needsUser = false
+                    userMessage = ""
+                    filePathCallback?.onReceiveValue(uris)
+                    publish("done", "文件选择已返回")
+                }
+                publish("waiting_for_user", userMessage)
+                return true
+            }
+
+            override fun onJsAlert(
+                view: WebView?,
+                url: String?,
+                message: String?,
+                result: JsResult?
+            ): Boolean {
+                showJsDialog(message.orEmpty(), result)
+                return true
+            }
+
+            override fun onJsConfirm(
+                view: WebView?,
+                url: String?,
+                message: String?,
+                result: JsResult?
+            ): Boolean {
+                showJsDialog(message.orEmpty(), result, cancelable = true)
+                return true
+            }
+
+            override fun onJsPrompt(
+                view: WebView?,
+                url: String?,
+                message: String?,
+                defaultValue: String?,
+                result: JsPromptResult?
+            ): Boolean {
+                showJsPrompt(message.orEmpty(), defaultValue.orEmpty(), result)
+                return true
+            }
         }
         webView.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(
+                view: WebView?,
+                request: WebResourceRequest?
+            ): Boolean {
+                return shouldHandleOutsideWebView(request?.url?.toString().orEmpty(), tab)
+            }
+
+            @Deprecated("Deprecated in Android API")
+            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                return shouldHandleOutsideWebView(url.orEmpty(), tab)
+            }
+
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                 tab.currentUrl = url.orEmpty()
                 tab.isLoading = true
@@ -449,10 +591,126 @@ class TerminalBrowserSessionManager(
                 }
             }
         }
+        webView.setDownloadListener { url, _, _, _, _ ->
+            handleDownloadUrl(url)
+        }
         tabs[tabId] = tab
         activeTabId = tabId
         publish("done", "浏览器已创建")
         return tab
+    }
+
+    private fun shouldHandleOutsideWebView(rawUrl: String, tab: BrowserTab): Boolean {
+        val url = rawUrl.trim()
+        if (url.isBlank()) return false
+        val scheme = Uri.parse(url).scheme.orEmpty().lowercase()
+        if (scheme in WEBVIEW_SCHEMES) return false
+
+        val externalIntent = runCatching {
+            if (scheme == "intent") {
+                Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+            } else {
+                Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            }.apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                setComponent(null)
+                setSelector(null)
+            }
+        }.getOrNull()
+
+        val fallbackUrl = externalIntent?.getStringExtra("browser_fallback_url")
+        var fallbackLoaded = false
+        val opened = externalIntent?.let { intent ->
+            runCatching {
+                initialContext.startActivity(intent)
+            }.onFailure { error ->
+                if (error is ActivityNotFoundException && !fallbackUrl.isNullOrBlank()) {
+                    tab.webView.loadUrl(fallbackUrl)
+                    fallbackLoaded = true
+                }
+            }.isSuccess
+        } == true
+
+        if (opened) {
+            needsUser = true
+            userMessage = "已交给外部应用处理：$scheme"
+            publish("waiting_for_user", userMessage)
+        } else if (fallbackLoaded || !fallbackUrl.isNullOrBlank()) {
+            if (!fallbackLoaded) {
+                tab.webView.loadUrl(fallbackUrl.orEmpty())
+            }
+            publish("running", "打开 fallback 页面")
+        } else {
+            tab.lastError = "设备没有可处理的外部链接：$scheme"
+            publish("error", tab.lastError.orEmpty())
+        }
+        return true
+    }
+
+    private fun handleDownloadUrl(rawUrl: String?) {
+        val url = rawUrl?.trim().orEmpty()
+        if (url.isBlank()) return
+        val opened = runCatching {
+            initialContext.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                    .addCategory(Intent.CATEGORY_BROWSABLE)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }.isSuccess
+        if (opened) {
+            publish("waiting_for_user", "已交给系统下载/打开")
+        } else {
+            publish("error", "无法处理下载链接")
+        }
+    }
+
+    private fun showJsDialog(
+        message: String,
+        result: JsResult?,
+        cancelable: Boolean = false
+    ) {
+        runCatching {
+            AlertDialog.Builder(initialContext)
+                .setMessage(message.ifBlank { "网页消息" })
+                .setPositiveButton(android.R.string.ok) { _, _ -> result?.confirm() }
+                .apply {
+                    if (cancelable) {
+                        setNegativeButton(android.R.string.cancel) { _, _ -> result?.cancel() }
+                    }
+                }
+                .setOnCancelListener {
+                    if (cancelable) result?.cancel() else result?.confirm()
+                }
+                .show()
+        }.onFailure {
+            result?.confirm()
+        }
+    }
+
+    private fun showJsPrompt(
+        message: String,
+        defaultValue: String,
+        result: JsPromptResult?
+    ) {
+        runCatching {
+            val input = EditText(initialContext).apply {
+                setSingleLine()
+                setText(defaultValue)
+                setSelection(text.length)
+            }
+            AlertDialog.Builder(initialContext)
+                .setMessage(message.ifBlank { "网页输入" })
+                .setView(input)
+                .setPositiveButton(android.R.string.ok) { _, _ ->
+                    result?.confirm(input.text.toString())
+                }
+                .setNegativeButton(android.R.string.cancel) { _, _ -> result?.cancel() }
+                .setOnCancelListener { result?.cancel() }
+                .show()
+        }.onFailure {
+            result?.cancel()
+        }
     }
 
     private fun activeTab(): BrowserTab {
@@ -620,3 +878,4 @@ class TerminalBrowserSessionManager(
 }
 
 private const val MAX_BROWSER_TABS = 3
+private val WEBVIEW_SCHEMES = setOf("http", "https", "about", "data", "file", "content")

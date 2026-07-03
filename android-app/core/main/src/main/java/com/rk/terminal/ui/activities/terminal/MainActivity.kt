@@ -8,8 +8,10 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.provider.OpenableColumns
 import android.view.View
 import android.view.inputmethod.InputMethodManager
+import android.webkit.MimeTypeMap
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -26,14 +28,18 @@ import androidx.navigation.compose.rememberNavController
 import com.rk.settings.Settings
 import com.rk.libcommons.child
 import com.rk.libcommons.localDir
+import com.rk.libcommons.toast
 import com.rk.terminal.ui.navHosts.MainActivityNavHost
 import com.rk.terminal.ui.routes.MainActivityRoutes
 import com.rk.terminal.ui.screens.terminal.TerminalBrowserSessionManager
 import com.rk.terminal.ui.screens.terminal.TerminalMediaPreview
 import com.rk.terminal.ui.screens.terminal.TerminalMediaPreviewKind
+import com.rk.terminal.ui.screens.terminal.TerminalMediaPreviewSource
 import com.rk.terminal.ui.screens.terminal.TerminalViewModel
 import com.rk.terminal.ui.theme.KarbonTheme
 import java.io.File
+import java.io.FileOutputStream
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -53,6 +59,7 @@ class MainActivity : ComponentActivity() {
     private var browserBridgeJob: Job? = null
     private var lastMediaPreviewRequest = ""
     private var lastBrowserRequest = ""
+    private var browserFileChooserCallback: ((Array<Uri>?) -> Unit)? = null
 
     private val requestNotificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
@@ -61,13 +68,47 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+    private val pickPreviewFiles =
+        registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+            if (uris.isEmpty()) return@registerForActivityResult
+            lifecycleScope.launch {
+                uris.forEach { uri ->
+                    ingestPickedPreviewFile(uri)
+                }
+            }
+        }
+
+    private val pickBrowserUploadFiles =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val callback = browserFileChooserCallback
+            browserFileChooserCallback = null
+            val data = result.data
+            val uris = if (result.resultCode == android.app.Activity.RESULT_OK && data != null) {
+                when {
+                    data.clipData != null -> {
+                        val clipData = data.clipData!!
+                        Array(clipData.itemCount) { index -> clipData.getItemAt(index).uri }
+                    }
+                    data.data != null -> arrayOf(data.data!!)
+                    else -> null
+                }
+            } else {
+                null
+            }
+            callback?.invoke(uris)
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         requestPermission()
-        browserSessionManager = TerminalBrowserSessionManager(this) { snapshot ->
-            terminalViewModel.updateBrowserSnapshot(snapshot)
-        }
+        browserSessionManager = TerminalBrowserSessionManager(
+            context = this,
+            onSnapshot = { snapshot ->
+                terminalViewModel.updateBrowserSnapshot(snapshot)
+            },
+            launchFileChooser = ::launchBrowserFileChooser
+        )
 
         if (intent.hasExtra("awake_intent")) {
             moveTaskToBack(true)
@@ -198,6 +239,62 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    fun openPreviewFilePicker() {
+        runCatching {
+            pickPreviewFiles.launch(
+                arrayOf(
+                    "text/*",
+                    "image/*",
+                    "video/*",
+                    "application/json",
+                    "application/xml",
+                    "application/x-yaml"
+                )
+            )
+        }.onFailure { error ->
+            toast("无法打开文件管理器：${error.message}")
+        }
+    }
+
+    fun sendPreviewToAi(preview: TerminalMediaPreview) {
+        val session = terminalViewModel.terminalView?.currentSession
+        if (session == null) {
+            toast("当前终端会话不可用")
+            return
+        }
+
+        val kindText = when (preview.kind) {
+            TerminalMediaPreviewKind.IMAGE -> "图片"
+            TerminalMediaPreviewKind.VIDEO -> "视频"
+            TerminalMediaPreviewKind.TEXT -> "文本文件"
+        }
+        val prompt = buildString {
+            append("请查看我放入预览托盘的").append(kindText).append("：")
+            append(preview.path)
+            if (preview.kind == TerminalMediaPreviewKind.TEXT) {
+                append("\n不要让我粘贴全文，直接读取这个本地文件。")
+            }
+            append('\n')
+        }
+        session.write(prompt)
+        toast("已发送给 AI：${preview.name}")
+    }
+
+    private fun launchBrowserFileChooser(
+        intent: Intent,
+        callback: (Array<Uri>?) -> Unit
+    ) {
+        browserFileChooserCallback?.invoke(null)
+        browserFileChooserCallback = callback
+        runCatching {
+            pickBrowserUploadFiles.launch(intent)
+        }.onFailure { error ->
+            browserFileChooserCallback = null
+            callback(null)
+            toast("无法打开文件选择器：${error.message}")
+        }
+    }
+
     fun closeBrowserSession() {
         terminalViewModel.browserPanelExpanded = false
         lifecycleScope.launch {
@@ -323,6 +420,7 @@ class MainActivity : ComponentActivity() {
         val kind = when (request["kind"]) {
             "image" -> TerminalMediaPreviewKind.IMAGE
             "video" -> TerminalMediaPreviewKind.VIDEO
+            "text" -> TerminalMediaPreviewKind.TEXT
             else -> {
                 writeMediaPreviewStatus(previewDir, "error=unsupported-kind\npath=$mediaPath\n")
                 return
@@ -334,6 +432,11 @@ class MainActivity : ComponentActivity() {
         } else {
             null
         }
+        val textPreview = if (kind == TerminalMediaPreviewKind.TEXT) {
+            readTextPreview(mediaFile)
+        } else {
+            null
+        }
 
         terminalViewModel.addMediaPreview(
             TerminalMediaPreview(
@@ -342,12 +445,78 @@ class MainActivity : ComponentActivity() {
                 kind = kind,
                 stamp = request["stamp"] ?: content.hashCode().toString(),
                 width = bounds?.first,
-                height = bounds?.second
+                height = bounds?.second,
+                sizeBytes = mediaFile.length(),
+                textPreview = textPreview
             )
         )
         writeMediaPreviewStatus(
             previewDir,
             "shown=1\nkind=${request["kind"]}\npath=${mediaFile.absolutePath}\n"
+        )
+    }
+
+    private suspend fun ingestPickedPreviewFile(uri: Uri) {
+        val previewDir = localDir().child("media-preview")
+        val mediaDir = previewDir.child("files")
+        val info = queryPickedFileInfo(uri)
+        val kind = detectPickedPreviewKind(info.name, info.mimeType)
+        if (kind == null) {
+            toast("暂不支持此文件类型：${info.name}")
+            return
+        }
+
+        val stamp = "${System.currentTimeMillis()}.${(0..9999).random()}"
+        val safeName = sanitizeFileName(info.name).ifBlank {
+            "picked-${kind.name.lowercase(Locale.ROOT)}.${extensionFromMime(info.mimeType).ifBlank { "bin" }}"
+        }
+        val target = mediaDir.child("$stamp-$safeName")
+        val copiedBytes = withContext(Dispatchers.IO) {
+            mediaDir.mkdirs()
+            runCatching {
+                contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            val tmp = File("${target.absolutePath}.tmp")
+            contentResolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(tmp).use { output ->
+                    input.copyTo(output)
+                }
+            } ?: throw IllegalArgumentException("无法读取文件")
+            tmp.renameTo(target)
+            target.length()
+        }
+
+        val bounds = if (kind == TerminalMediaPreviewKind.IMAGE) {
+            readImageBounds(target)
+        } else {
+            null
+        }
+        val textPreview = if (kind == TerminalMediaPreviewKind.TEXT) {
+            readTextPreview(target)
+        } else {
+            null
+        }
+
+        terminalViewModel.addMediaPreview(
+            TerminalMediaPreview(
+                path = target.absolutePath,
+                name = info.name.ifBlank { target.name },
+                kind = kind,
+                stamp = stamp,
+                width = bounds?.first,
+                height = bounds?.second,
+                sizeBytes = info.sizeBytes?.takeIf { it >= 0 } ?: copiedBytes,
+                mimeType = info.mimeType,
+                textPreview = textPreview,
+                source = TerminalMediaPreviewSource.USER
+            )
+        )
+        writeMediaPreviewStatus(
+            previewDir,
+            "picked=1\nkind=${kind.name.lowercase(Locale.ROOT)}\npath=${target.absolutePath}\n"
         )
     }
 
@@ -361,6 +530,74 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) {
             null
         }
+    }
+
+    private suspend fun readTextPreview(file: File): String = withContext(Dispatchers.IO) {
+        val maxBytes = 12 * 1024
+        val buffer = ByteArray(maxBytes)
+        val read = file.inputStream().use { input -> input.read(buffer) }
+        if (read <= 0) {
+            ""
+        } else {
+            String(buffer, 0, read, Charsets.UTF_8)
+                .replace("\u0000", "")
+                .trim()
+        }
+    }
+
+    private fun queryPickedFileInfo(uri: Uri): PickedPreviewFileInfo {
+        var name = uri.lastPathSegment.orEmpty().substringAfterLast('/')
+        var size: Long? = null
+        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (cursor.moveToFirst()) {
+                if (nameIndex >= 0) {
+                    name = cursor.getString(nameIndex).orEmpty().ifBlank { name }
+                }
+                if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
+                    size = cursor.getLong(sizeIndex)
+                }
+            }
+        }
+        val mimeType = contentResolver.getType(uri).orEmpty()
+        return PickedPreviewFileInfo(
+            name = name.ifBlank { "picked-file" },
+            mimeType = mimeType,
+            sizeBytes = size
+        )
+    }
+
+    private fun detectPickedPreviewKind(
+        name: String,
+        mimeType: String
+    ): TerminalMediaPreviewKind? {
+        val lowerName = name.lowercase(Locale.ROOT)
+        val lowerMime = mimeType.lowercase(Locale.ROOT)
+        return when {
+            lowerMime.startsWith("image/") -> TerminalMediaPreviewKind.IMAGE
+            lowerMime.startsWith("video/") -> TerminalMediaPreviewKind.VIDEO
+            lowerMime.startsWith("text/") -> TerminalMediaPreviewKind.TEXT
+            lowerMime in setOf("application/json", "application/xml", "application/x-yaml") ->
+                TerminalMediaPreviewKind.TEXT
+            lowerName.endsWith(".txt") || lowerName.endsWith(".md") || lowerName.endsWith(".markdown") ||
+                lowerName.endsWith(".json") || lowerName.endsWith(".yaml") || lowerName.endsWith(".yml") ||
+                lowerName.endsWith(".xml") || lowerName.endsWith(".csv") || lowerName.endsWith(".log") ->
+                TerminalMediaPreviewKind.TEXT
+            else -> null
+        }
+    }
+
+    private fun sanitizeFileName(name: String): String {
+        return name
+            .substringAfterLast('/')
+            .replace(Regex("""[\\/:*?"<>|]"""), "_")
+            .take(96)
+            .ifBlank { "picked-file" }
+    }
+
+    private fun extensionFromMime(mimeType: String): String {
+        return MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType).orEmpty()
     }
 
     private fun parseMediaPreviewRequest(content: String): Map<String, String> {
@@ -417,4 +654,10 @@ class MainActivity : ComponentActivity() {
             // Best-effort bridge result for terminal-side troubleshooting.
         }
     }
+
+    private data class PickedPreviewFileInfo(
+        val name: String,
+        val mimeType: String,
+        val sizeBytes: Long?
+    )
 }

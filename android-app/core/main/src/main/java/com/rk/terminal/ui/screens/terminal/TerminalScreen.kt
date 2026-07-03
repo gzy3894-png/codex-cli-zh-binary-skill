@@ -178,14 +178,15 @@ fun TerminalScreen(
 
             if (
                 terminalViewModel.mediaPreviewExpanded &&
-                !terminalViewModel.browserPanelExpanded &&
-                terminalViewModel.mediaPreviews.isNotEmpty()
+                !terminalViewModel.browserPanelExpanded
             ) {
                 TerminalMediaPreviewTray(
                     previews = terminalViewModel.mediaPreviews,
                     onCollapse = { terminalViewModel.mediaPreviewExpanded = false },
+                    onPickFile = mainActivity::openPreviewFilePicker,
                     onClear = mainActivity::dismissMediaPreview,
                     onRemove = mainActivity::removeMediaPreview,
+                    onSendToAi = mainActivity::sendPreviewToAi,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .padding(top = previewTrayTopPadding)

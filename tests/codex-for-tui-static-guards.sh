@@ -12,6 +12,9 @@ PREVIEW_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-preview"
 PUSH_IMAGE_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-push-image"
 PUSH_MEDIA_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-push-media"
 BROWSER_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-browser"
+TERMINAL_TOP_BAR="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalTopBar.kt"
+MEDIA_PREVIEW_PANE="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MediaPreviewPane.kt"
+TERMINAL_BROWSER_SESSION="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalBrowserSession.kt"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -64,6 +67,9 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$INIT_ASSET" 'ensure_codex_preview'
   assert_file_contains "$INIT_ASSET" '[ ! -r /etc/profile ] || . /etc/profile'
   assert_file_contains "$INIT_ASSET" 'export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"'
+  assert_file_contains "$MEDIA_PREVIEW_PANE" 'EmptyPreviewTray'
+  assert_file_contains "$MEDIA_PREVIEW_PANE" 'GridCells.Adaptive'
+  assert_file_not_contains "$TERMINAL_TOP_BAR" 'onPickFileClick'
   sh -n "$PREVIEW_ASSET" || fail "codex-preview shell syntax failed"
   sh -n "$PUSH_IMAGE_ASSET" || fail "codex-push-image shell syntax failed"
   sh -n "$PUSH_MEDIA_ASSET" || fail "codex-push-media shell syntax failed"
@@ -75,6 +81,11 @@ test_image_preview_bridge_asset() {
   mkdir -p "$tmp/prefix" "$tmp/source"
   printf 'fake-image\n' > "$tmp/source/pic.png"
   printf 'fake-video\n' > "$tmp/source/clip.mp4"
+  i=0
+  while [ "$i" -lt 200 ]; do
+    printf 'long text line %s\n' "$i"
+    i=$((i + 1))
+  done > "$tmp/source/notes.md"
 
   PREFIX="$tmp/prefix" sh "$INIT_ASSET" true || fail "init.sh should create preview commands before exec"
   [ -x "$tmp/prefix/local/bin/codex-preview" ] || fail "init.sh did not create codex-preview fallback"
@@ -108,6 +119,19 @@ test_image_preview_bridge_asset() {
   esac
   assert_file_contains "$tmp/prefix/local/media-preview/request" "kind=video"
 
+  if ! output="$(PREFIX="$tmp/prefix" sh "$PREVIEW_ASSET" "$tmp/source/notes.md")"; then
+    fail "codex-preview should copy a text file into preview bridge"
+  fi
+
+  text_path="$(sed -n 's/^path=//p' "$tmp/prefix/local/media-preview/request")"
+  [ -s "$text_path" ] || fail "preview text copy missing"
+  case "$text_path" in
+    "$tmp/prefix/local/media-preview/files/"*.md) ;;
+    *) fail "preview text path should use a unique md file: $text_path" ;;
+  esac
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "kind=text"
+  printf '%s\n' "$output" | grep -F 'long text line' >/dev/null 2>&1 && fail "codex-preview dumped text file content"
+
   if ! output="$(PREFIX="$tmp/prefix" sh "$PREVIEW_ASSET" close)"; then
     fail "codex-preview close should write a clear request"
   fi
@@ -129,6 +153,18 @@ test_browser_bridge_asset() {
   assert_file_contains "$tmp/prefix/local/browser/request" "url=https://example.test"
   printf '%s\n' "$output" | grep -F '已发送到 Codex for TUI 浏览器' >/dev/null 2>&1 || fail "browser command did not report success"
 
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait auth https://login.example.test >/dev/null; then
+    fail "codex-browser should write an auth request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=auth"
+  assert_file_contains "$tmp/prefix/local/browser/request" "url=https://login.example.test"
+
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait external https://external.example.test >/dev/null; then
+    fail "codex-browser should write an external request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=external"
+  assert_file_contains "$tmp/prefix/local/browser/request" "url=https://external.example.test"
+
   if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait type '#q' 'hello world' >/dev/null; then
     fail "codex-browser should write a type request"
   fi
@@ -141,6 +177,9 @@ test_browser_bridge_asset() {
   fi
   assert_file_contains "$tmp/prefix/local/browser/request" "action=user_wait"
   assert_file_contains "$tmp/prefix/local/browser/request" "message=请完成验证"
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'CustomTabsIntent.Builder'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'shouldHandleOutsideWebView'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'onShowFileChooser'
   rm -rf "$tmp"
 }
 

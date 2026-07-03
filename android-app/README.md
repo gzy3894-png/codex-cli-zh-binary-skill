@@ -42,17 +42,30 @@ codex-local refresh-models
 
 ## 媒体预览
 
-测试包内置原生媒体预览流。终端内运行：
+测试包内置原生预览托盘。终端内运行：
 
 ```sh
 codex-preview /path/to/image.png
+codex-preview /path/to/notes.md
 codex-push-image /path/to/image.png
 codex-push-media /path/to/video.mp4
 codex-preview close
 ```
 
 命令会把图片或视频复制到 App 私有目录，并通知前台终端界面在内嵌预览容器中展示。
-多次推送会累积为可滚动卡片；图片点击后进入全屏缩放预览，多张图片可左右滑动查看，视频使用系统级 Media3 控件播放。
+多次推送会累积为缩略图托盘；图片点击后进入全屏缩放预览，多张图片可左右滑动查看，视频使用系统级 Media3 控件播放，文本文件只展示摘要，不把全文刷到终端。托盘内也可以通过系统文件管理器选择文本、图片或视频，再把文件路径发送给当前 AI 会话读取。
+
+## 浏览器
+
+终端内运行：
+
+```sh
+codex-browser open https://example.com
+codex-browser auth https://chatgpt.com
+codex-browser external https://example.com/login
+```
+
+`open` 使用 App 内嵌 WebView，适合展示页面、读取 DOM、点击、输入和截图。`auth` / `external` 使用 Chrome Custom Tabs 或系统浏览器，适合登录、授权、验证码和风控场景；该模式不向 App 暴露用户浏览器 Cookie。
 
 ## 构建
 

@@ -25,12 +25,14 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.DividerDefaults
@@ -43,7 +45,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,13 +81,11 @@ fun TerminalMediaPreviewTopBarButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (previewCount <= 0 || latestPreview == null) return
-
     Surface(
         modifier = modifier
             .padding(end = 6.dp)
             .height(36.dp)
-            .widthIn(min = 74.dp, max = 126.dp)
+            .widthIn(min = 82.dp, max = 126.dp)
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(18.dp),
         color = if (expanded) {
@@ -101,9 +100,27 @@ fun TerminalMediaPreviewTopBarButton(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            TopBarPreviewThumb(preview = latestPreview)
+            if (latestPreview != null) {
+                TopBarPreviewThumb(preview = latestPreview)
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.Black.copy(alpha = 0.18f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "+",
+                        color = color,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
+                    )
+                }
+            }
             Text(
-                text = if (previewCount > 99) "99+" else previewCount.toString(),
+                text = if (previewCount <= 0) "托盘" else if (previewCount > 99) "99+" else previewCount.toString(),
                 color = color,
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
@@ -136,11 +153,19 @@ private fun TopBarPreviewThumb(preview: TerminalMediaPreview) {
                 },
                 modifier = Modifier.fillMaxSize()
             )
-        } else {
+        } else if (preview.kind == TerminalMediaPreviewKind.VIDEO) {
             Text(
                 text = "视频",
                 color = Color.White,
                 style = MaterialTheme.typography.labelSmall,
+                maxLines = 1
+            )
+        } else {
+            Text(
+                text = "文",
+                color = Color.White,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 1
             )
         }
@@ -151,23 +176,16 @@ private fun TopBarPreviewThumb(preview: TerminalMediaPreview) {
 fun TerminalMediaPreviewTray(
     previews: SnapshotStateList<TerminalMediaPreview>,
     onCollapse: () -> Unit,
+    onPickFile: () -> Unit,
     onClear: () -> Unit,
     onRemove: (TerminalMediaPreview) -> Unit,
+    onSendToAi: (TerminalMediaPreview) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (previews.isEmpty()) return
-
-    val listState = rememberLazyListState()
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
-    val trayHeight = (screenHeight * 0.46f).coerceIn(240.dp, 460.dp)
+    val trayHeight = (screenHeight * 0.42f).coerceIn(220.dp, 420.dp)
     var dialogState by remember { mutableStateOf<PreviewDialogState?>(null) }
     val imagePreviews = previews.filter { it.kind == TerminalMediaPreviewKind.IMAGE }
-
-    LaunchedEffect(previews.size) {
-        if (previews.isNotEmpty()) {
-            listState.animateScrollToItem(previews.lastIndex)
-        }
-    }
 
     Surface(
         modifier = modifier
@@ -183,28 +201,35 @@ fun TerminalMediaPreviewTray(
             PreviewTrayHeader(
                 count = previews.size,
                 onCollapse = onCollapse,
+                onPickFile = onPickFile,
                 onClear = onClear
             )
             HorizontalDivider(
                 color = DividerDefaults.color.copy(alpha = 0.7f),
                 thickness = 0.5.dp
             )
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                itemsIndexed(
-                    items = previews,
-                    key = { _, item -> item.stamp }
-                ) { _, preview ->
-                    PreviewFeedCard(
-                        preview = preview,
-                        imagePreviews = imagePreviews,
-                        onOpen = { dialogState = it },
-                        onRemove = { onRemove(preview) }
-                    )
+            if (previews.isEmpty()) {
+                EmptyPreviewTray(onPickFile = onPickFile)
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(108.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(
+                        items = previews,
+                        key = { item -> item.stamp }
+                    ) { preview ->
+                        PreviewThumbTile(
+                            preview = preview,
+                            imagePreviews = imagePreviews,
+                            onOpen = { dialogState = it },
+                            onRemove = { onRemove(preview) },
+                            onSendToAi = { onSendToAi(preview) }
+                        )
+                    }
                 }
             }
         }
@@ -222,6 +247,7 @@ fun TerminalMediaPreviewTray(
 private fun PreviewTrayHeader(
     count: Int,
     onCollapse: () -> Unit,
+    onPickFile: () -> Unit,
     onClear: () -> Unit
 ) {
     Row(
@@ -239,12 +265,15 @@ private fun PreviewTrayHeader(
                 maxLines = 1
             )
             Text(
-                text = "共 $count 个媒体项，长按图片可分享",
+                text = "共 $count 个项目，可选择文件发给 AI",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+        }
+        TextButton(onClick = onPickFile) {
+            Text("添加")
         }
         TextButton(onClick = onCollapse) {
             Text("折叠")
@@ -256,15 +285,181 @@ private fun PreviewTrayHeader(
 }
 
 @Composable
+private fun EmptyPreviewTray(onPickFile: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = "预览托盘为空",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            TextButton(onClick = onPickFile) {
+                Text("添加文件")
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PreviewThumbTile(
+    preview: TerminalMediaPreview,
+    imagePreviews: List<TerminalMediaPreview>,
+    onOpen: (PreviewDialogState) -> Unit,
+    onRemove: () -> Unit,
+    onSendToAi: () -> Unit
+) {
+    val context = LocalContext.current
+    val sourceLabel = when (preview.source) {
+        TerminalMediaPreviewSource.AGENT -> "AI"
+        TerminalMediaPreviewSource.USER -> "用户"
+    }
+    val initialIndex = imagePreviews.indexOfFirst { it.stamp == preview.stamp }.coerceAtLeast(0)
+    val open = {
+        when (preview.kind) {
+            TerminalMediaPreviewKind.IMAGE -> onOpen(
+                PreviewDialogState.Images(
+                    images = imagePreviews,
+                    initialIndex = initialIndex
+                )
+            )
+            TerminalMediaPreviewKind.VIDEO -> onOpen(PreviewDialogState.Video(preview))
+            TerminalMediaPreviewKind.TEXT -> onOpen(PreviewDialogState.Text(preview))
+        }
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(154.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+        tonalElevation = 1.dp
+    ) {
+        Column(modifier = Modifier.padding(6.dp)) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(92.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .combinedClickable(
+                        onClick = open,
+                        onLongClick = {
+                            if (preview.kind != TerminalMediaPreviewKind.TEXT) {
+                                sharePreview(context, preview)
+                            }
+                        }
+                    )
+                    .background(MaterialTheme.colorScheme.surface),
+                contentAlignment = Alignment.Center
+            ) {
+                PreviewThumbContent(preview = preview)
+                Text(
+                    text = sourceLabel,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(5.dp)
+                        .background(
+                            Color.Black.copy(alpha = 0.46f),
+                            RoundedCornerShape(4.dp)
+                        )
+                        .padding(horizontal = 5.dp, vertical = 2.dp),
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1
+                )
+            }
+            Spacer(modifier = Modifier.height(5.dp))
+            Text(
+                text = preview.name,
+                modifier = Modifier.fillMaxWidth(),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onSendToAi) {
+                    Text("AI")
+                }
+                IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "删除预览",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PreviewThumbContent(preview: TerminalMediaPreview) {
+    when (preview.kind) {
+        TerminalMediaPreviewKind.IMAGE -> {
+            val mediaFile = remember(preview.path) { File(preview.path) }
+            AndroidView(
+                factory = { viewContext ->
+                    ImageView(viewContext).apply {
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        contentDescription = preview.name
+                        load(mediaFile) { crossfade(true) }
+                    }
+                },
+                update = { imageView ->
+                    imageView.contentDescription = preview.name
+                    imageView.load(mediaFile) { crossfade(true) }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        TerminalMediaPreviewKind.VIDEO -> {
+            Text(
+                text = "视频",
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
+        }
+        TerminalMediaPreviewKind.TEXT -> {
+            Text(
+                text = preview.textPreview.orEmpty()
+                    .ifBlank { "文本" },
+                modifier = Modifier.padding(8.dp),
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 5,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
 private fun PreviewFeedCard(
     preview: TerminalMediaPreview,
     imagePreviews: List<TerminalMediaPreview>,
     onOpen: (PreviewDialogState) -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onSendToAi: () -> Unit
 ) {
     val kindLabel = when (preview.kind) {
         TerminalMediaPreviewKind.IMAGE -> "图片"
         TerminalMediaPreviewKind.VIDEO -> "视频"
+        TerminalMediaPreviewKind.TEXT -> "文本"
     }
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -287,6 +482,9 @@ private fun PreviewFeedCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                TextButton(onClick = onSendToAi) {
+                    Text("发给 AI")
+                }
                 IconButton(
                     onClick = onRemove,
                     modifier = Modifier.size(32.dp)
@@ -319,6 +517,12 @@ private fun PreviewFeedCard(
                     VideoPreviewCard(
                         preview = preview,
                         onFullscreen = { onOpen(PreviewDialogState.Video(preview)) }
+                    )
+                }
+                TerminalMediaPreviewKind.TEXT -> {
+                    TextPreviewCard(
+                        preview = preview,
+                        onClick = { onOpen(PreviewDialogState.Text(preview)) }
                     )
                 }
             }
@@ -407,6 +611,42 @@ private fun VideoPreviewCard(
 }
 
 @Composable
+private fun TextPreviewCard(
+    preview: TerminalMediaPreview,
+    onClick: () -> Unit
+) {
+    val text = preview.textPreview.orEmpty()
+    val sizeLabel = remember(preview.sizeBytes) {
+        preview.sizeBytes?.let { formatBytes(it) }.orEmpty()
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(12.dp)
+    ) {
+        if (sizeLabel.isNotBlank()) {
+            Text(
+                text = sizeLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+        }
+        Text(
+            text = text.ifBlank { "空文本或无法预览编码，文件路径仍可发送给 AI。" },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 8,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
 private fun MediaPreviewDialog(
     state: PreviewDialogState,
     onDismiss: () -> Unit
@@ -424,6 +664,10 @@ private fun MediaPreviewDialog(
                 onDismiss = onDismiss
             )
             is PreviewDialogState.Video -> VideoPreviewDialogContent(
+                preview = state.preview,
+                onDismiss = onDismiss
+            )
+            is PreviewDialogState.Text -> TextPreviewDialogContent(
                 preview = state.preview,
                 onDismiss = onDismiss
             )
@@ -499,6 +743,36 @@ private fun VideoPreviewDialogContent(
         PreviewDialogTopBar(
             title = preview.name,
             onShare = { sharePreview(context, preview) },
+            onDismiss = onDismiss
+        )
+    }
+}
+
+@Composable
+private fun TextPreviewDialogContent(
+    preview: TerminalMediaPreview,
+    onDismiss: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 56.dp, start = 16.dp, end = 16.dp, bottom = 16.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Text(
+                text = preview.textPreview.orEmpty()
+                    .ifBlank { "空文本或无法预览编码，文件路径仍可发送给 AI。" },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+        PreviewDialogTopBar(
+            title = preview.name,
             onDismiss = onDismiss
         )
     }
@@ -648,6 +922,7 @@ private fun sharePreview(context: Context, preview: TerminalMediaPreview) {
 }
 
 private fun TerminalMediaPreview.mimeType(): String {
+    if (mimeType.isNotBlank()) return mimeType
     val lower = name.lowercase()
     return when (kind) {
         TerminalMediaPreviewKind.IMAGE -> when {
@@ -663,7 +938,22 @@ private fun TerminalMediaPreview.mimeType(): String {
             lower.endsWith(".3gp") -> "video/3gpp"
             else -> "video/mp4"
         }
+        TerminalMediaPreviewKind.TEXT -> when {
+            lower.endsWith(".md") || lower.endsWith(".markdown") -> "text/markdown"
+            lower.endsWith(".json") -> "application/json"
+            lower.endsWith(".csv") -> "text/csv"
+            else -> "text/plain"
+        }
     }
+}
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    val kb = bytes / 1024.0
+    if (kb < 1024) return String.format("%.1f KB", kb)
+    val mb = kb / 1024.0
+    if (mb < 1024) return String.format("%.1f MB", mb)
+    return String.format("%.1f GB", mb / 1024.0)
 }
 
 private sealed class PreviewDialogState {
@@ -673,4 +963,6 @@ private sealed class PreviewDialogState {
     ) : PreviewDialogState()
 
     data class Video(val preview: TerminalMediaPreview) : PreviewDialogState()
+
+    data class Text(val preview: TerminalMediaPreview) : PreviewDialogState()
 }

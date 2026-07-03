@@ -3,6 +3,8 @@ set -eu
 
 usage() {
   printf '%s\n' "用法: codex-browser open URL"
+  printf '%s\n' "      codex-browser auth URL"
+  printf '%s\n' "      codex-browser external URL"
   printf '%s\n' "      codex-browser click CSS_SELECTOR"
   printf '%s\n' "      codex-browser type CSS_SELECTOR TEXT"
   printf '%s\n' "      codex-browser scroll [up|down] [amount]"
@@ -88,6 +90,12 @@ case "$cmd" in
   open|navigate)
     [ "$#" -eq 1 ] || { usage >&2; exit 2; }
     request_id="$(write_request "$prefix" action navigate url "$1")"
+    ;;
+  auth|external|custom-tab)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    action="$cmd"
+    [ "$cmd" = "custom-tab" ] && action="custom_tab"
+    request_id="$(write_request "$prefix" action "$action" url "$1")"
     ;;
   reload|snapshot|screenshot|user-done|close)
     action="$cmd"

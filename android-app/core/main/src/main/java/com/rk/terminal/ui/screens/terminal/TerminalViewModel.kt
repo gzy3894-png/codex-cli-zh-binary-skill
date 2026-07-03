@@ -119,7 +119,13 @@ private const val MAX_MEDIA_PREVIEWS = 60
 
 enum class TerminalMediaPreviewKind {
     IMAGE,
-    VIDEO
+    VIDEO,
+    TEXT
+}
+
+enum class TerminalMediaPreviewSource {
+    AGENT,
+    USER
 }
 
 data class TerminalMediaPreview(
@@ -128,5 +134,9 @@ data class TerminalMediaPreview(
     val kind: TerminalMediaPreviewKind,
     val stamp: String,
     val width: Int? = null,
-    val height: Int? = null
+    val height: Int? = null,
+    val sizeBytes: Long? = null,
+    val mimeType: String = "",
+    val textPreview: String? = null,
+    val source: TerminalMediaPreviewSource = TerminalMediaPreviewSource.AGENT
 )

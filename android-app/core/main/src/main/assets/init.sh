@@ -26,7 +26,7 @@ ensure_codex_preview() {
 set -eu
 
 usage() {
-  printf '%s\n' "用法: codex-preview /path/to/image-or-video"
+  printf '%s\n' "用法: codex-preview /path/to/image-video-or-text"
   printf '%s\n' "      codex-preview close"
 }
 
@@ -67,6 +67,7 @@ detect_kind() {
   case "$ext" in
     jpg|jpeg|png|webp|bmp|gif) printf '%s\n' image ;;
     mp4|m4v|mov|webm|mkv|3gp|avi) printf '%s\n' video ;;
+    txt|md|markdown|json|yaml|yml|xml|csv|log) printf '%s\n' text ;;
     *) return 1 ;;
   esac
 }
