@@ -141,10 +141,10 @@ class TerminalBrowserSessionManager(
                 )
             )
         }
-        layoutWebView(tab.webView)
         focusWebView(tab.webView)
         tab.webView.onResume()
         tab.webView.resumeTimers()
+        tab.webView.requestLayout()
         tab.webView.post {
             tab.webView.requestLayout()
             tab.webView.invalidate()
