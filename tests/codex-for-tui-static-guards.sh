@@ -252,6 +252,14 @@ test_browser_bridge_asset() {
   assert_file_contains "$tmp/prefix/local/browser/request" "action=user_wait"
   assert_file_contains "$tmp/prefix/local/browser/request" "present=1"
   assert_file_contains "$tmp/prefix/local/browser/request" "message=请完成验证"
+
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait wait-user '请完成验证' >/dev/null; then
+    fail "codex-browser should accept wait-user alias"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=user_wait"
+  assert_file_contains "$tmp/prefix/local/browser/request" "present=1"
+  assert_file_contains "$tmp/prefix/local/browser/request" "message=请完成验证"
+
   PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" status >/dev/null || fail "codex-browser status should be safe without status file"
   PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" events >/dev/null || fail "codex-browser events should be safe without events file"
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'CustomTabsIntent.Builder'

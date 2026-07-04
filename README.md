@@ -32,7 +32,7 @@ codex 配置模式
 
 - 文件托盘：终端可以推送图片、视频和文本到顶部托盘，用户也可以从系统文件管理器添加文件，第一格常驻文本框可发送长文本。
 - 隐私友好的文件引用：发送到终端时只展示短编号和 `codex-preview path <编号>`，不再把应用私有目录完整刷到屏幕里。
-- 协作浏览器：内置 WebView 默认后台运行，只有 `present` / `wait-user` 或用户点顶栏时才展示；支持 Agent 读取页面、点击、输入、执行 JS、截图、文件上传、用户接管和多标签切换。
+- 协作浏览器：内置 WebView 默认后台运行，只有 `present` / `user-wait`（兼容 `wait-user`）或用户点顶栏时才展示；支持 Agent 读取页面、点击、输入、执行 JS、截图、文件上传、用户接管和多标签切换。
 - 登录/验证场景：需要真实浏览器能力时支持跳转 Custom Tabs 或系统浏览器，由用户完成登录、授权或验证后再回到 TUI。
 - 移动端体验：文件和浏览器入口更紧凑，托盘容器更轻，减少遮挡终端内容。
 
@@ -160,7 +160,7 @@ codex-preview status
 codex-preview events
 ```
 
-协作浏览器由应用内桥接驱动。`open` 默认后台加载，不会立刻弹出；需要展示给用户时再调用 `present`，需要用户协作时用 `user-wait`：
+协作浏览器由应用内桥接驱动。`open` 默认后台加载，不会立刻弹出；需要展示给用户时再调用 `present`，需要用户协作时用 `user-wait`（也兼容 `wait-user`）：
 
 ```sh
 codex-browser open https://www.baidu.com/s?wd=codex

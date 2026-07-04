@@ -10,6 +10,7 @@ usage() {
   printf '%s\n' "      codex-browser type CSS_SELECTOR TEXT"
   printf '%s\n' "      codex-browser scroll [up|down] [amount]"
   printf '%s\n' "      codex-browser get-text [CSS_SELECTOR]"
+  printf '%s\n' "      codex-browser user-wait|wait-user [MESSAGE]"
   printf '%s\n' "      codex-browser screenshot|snapshot|reload|back|forward|user-done|status|events|wait|close"
 }
 
@@ -216,7 +217,7 @@ case "$cmd" in
     [ "$#" -ge 1 ] || { usage >&2; exit 2; }
     request_id="$(write_request "$prefix" action execute_js script "$*")"
     ;;
-  user-wait)
+  user-wait|wait-user)
     message="${*:-请在浏览器中手动处理后继续}"
     request_id="$(write_request "$prefix" action user_wait present 1 message "$message")"
     CODEX_BROWSER_WAIT_USER_DONE=1
