@@ -65,7 +65,8 @@ codex-preview close
 终端内运行：
 
 ```sh
-codex-browser open https://example.com
+codex-browser --no-wait open 'https://example.com'
+codex-browser status
 codex-browser present 页面已就绪
 codex-browser user-wait 请完成验证
 codex-browser status

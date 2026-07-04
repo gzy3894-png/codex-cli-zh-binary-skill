@@ -126,6 +126,7 @@ prefix="$(find_prefix)" || {
 
 cmd="$1"
 shift
+post_hint=0
 
 case "$cmd" in
   open|navigate)
@@ -134,8 +135,20 @@ case "$cmd" in
       present=1
       shift
     fi
-    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
-    request_id="$(write_request "$prefix" action navigate present "$present" url "$1")"
+    [ "$#" -ge 1 ] || { usage >&2; exit 2; }
+    url="$1"
+    shift
+    if [ "$#" -gt 0 ]; then
+      if [ "$#" -eq 1 ] && [ "$1" = "status" ]; then
+        post_hint=1
+      elif [ "$#" -eq 2 ] && [ "$1" = "codex-browser" ] && [ "$2" = "status" ]; then
+        post_hint=1
+      else
+        usage >&2
+        exit 2
+      fi
+    fi
+    request_id="$(write_request "$prefix" action navigate present "$present" url "$url")"
     ;;
   present|show)
     reason="${*:-present}"
@@ -230,4 +243,7 @@ case "$cmd" in
 esac
 
 printf '已发送到 Codex for TUI 浏览器: %s\n' "$request_id"
+if [ "$post_hint" -eq 1 ]; then
+  printf '%s\n' "提示：status 要另起一行执行：codex-browser status"
+fi
 [ "$wait" -eq 0 ] || wait_status "$prefix" "$request_id"

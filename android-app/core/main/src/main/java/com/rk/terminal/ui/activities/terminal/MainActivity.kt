@@ -358,15 +358,10 @@ class MainActivity : ComponentActivity() {
         val cleanMessage = collapseTerminalText(userMessage)
         val prompt = buildString {
             append("文件[").append(refId).append("] ")
-            append(shortenForTerminal(preview.name, 40))
-            append(" 已发送。")
             if (cleanMessage.isNotBlank()) {
-                append("说明：").append(cleanMessage).append("。")
+                append(cleanMessage).append("。")
             }
-            append("读取路径：codex-preview path ").append(refId)
-            if (preview.kind == TerminalMediaPreviewKind.TEXT) {
-                append("。不要让我粘贴全文，直接读取这个本地文件")
-            }
+            append("路径：codex-preview path ").append(refId)
             append('\n')
         }
         session.write(prompt)
@@ -433,9 +428,7 @@ class MainActivity : ComponentActivity() {
 
         session.write(
             buildString {
-                append("文本[").append(refId).append("] 已发送。")
-                append("读取路径：codex-preview path ").append(refId)
-                append("。不要让我粘贴全文，直接读取这个本地文件\n")
+                append("文本[").append(refId).append("] 路径：codex-preview path ").append(refId).append('\n')
             }
         )
         writeAgentPanelEvent(

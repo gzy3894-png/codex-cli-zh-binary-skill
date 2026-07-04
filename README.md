@@ -163,7 +163,8 @@ codex-preview events
 协作浏览器由应用内桥接驱动。`open` 默认后台加载，不会立刻弹出；需要展示给用户时再调用 `present`，需要用户协作时用 `user-wait`（也兼容 `wait-user`）：
 
 ```sh
-codex-browser open https://www.baidu.com/s?wd=codex
+codex-browser --no-wait open 'https://www.baidu.com/s?wd=codex'
+codex-browser status
 codex-browser present 搜索结果已就绪
 codex-browser user-wait 请完成登录或验证
 codex-browser status

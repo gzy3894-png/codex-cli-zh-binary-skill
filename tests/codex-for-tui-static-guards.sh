@@ -94,6 +94,7 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$MAIN_ACTIVITY" 'user_sent_text'
   assert_file_contains "$MAIN_ACTIVITY" 'visible='
   assert_file_contains "$MAIN_ACTIVITY" 'collapsed='
+  assert_file_not_contains "$MAIN_ACTIVITY" '不要让我粘贴全文'
   assert_file_contains "$PREVIEW_ASSET" 'codex-preview path FILE_ID'
   assert_file_contains "$PREVIEW_ASSET" 'codex-preview [--present|--background] text --stdin'
   assert_file_contains "$PREVIEW_ASSET" 'codex-preview status|events|wait|close'
@@ -213,6 +214,14 @@ test_browser_bridge_asset() {
   assert_file_contains "$tmp/prefix/local/browser/request" "present=0"
   assert_file_contains "$tmp/prefix/local/browser/request" "url=https://example.test"
   printf '%s\n' "$output" | grep -F '已发送到 Codex for TUI 浏览器' >/dev/null 2>&1 || fail "browser command did not report success"
+
+  if ! output="$(PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait open https://baidu.example.test codex-browser status)"; then
+    fail "codex-browser should tolerate accidental chained status after open"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=navigate"
+  assert_file_contains "$tmp/prefix/local/browser/request" "present=0"
+  assert_file_contains "$tmp/prefix/local/browser/request" "url=https://baidu.example.test"
+  printf '%s\n' "$output" | grep -F 'status 要另起一行执行' >/dev/null 2>&1 || fail "browser command did not print chained status hint"
 
   if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait open --present https://visible.example.test >/dev/null; then
     fail "codex-browser open --present should write a visible open request"
