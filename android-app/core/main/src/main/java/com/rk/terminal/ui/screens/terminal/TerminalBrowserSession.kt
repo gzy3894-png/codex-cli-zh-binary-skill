@@ -74,6 +74,14 @@ private data class BrowserTab(
     var loadWaiter: CompletableDeferred<Unit>? = null
 )
 
+private data class BrowserUserScript(
+    val id: String,
+    val name: String,
+    val match: String,
+    val path: String,
+    val enabled: Boolean
+)
+
 class TerminalBrowserSessionManager(
     context: Context,
     private val onSnapshot: (TerminalBrowserSnapshot) -> Unit,
@@ -90,6 +98,7 @@ class TerminalBrowserSessionManager(
     private var userMessage = ""
     private var currentRequestId = ""
     private var activeUserRequestId = ""
+    private var currentBrowserDir: File? = null
 
     fun snapshot(): TerminalBrowserSnapshot = latestSnapshot
 
@@ -131,12 +140,24 @@ class TerminalBrowserSessionManager(
         request: Map<String, String>,
         browserDir: File
     ): JSONObject = withContext(Dispatchers.Main.immediate) {
+        currentBrowserDir = browserDir
         val action = request["action"]?.trim().orEmpty().ifBlank { "snapshot" }
         val requestId = request["request_id"] ?: request["stamp"] ?: System.currentTimeMillis().toString()
         currentRequestId = requestId
         val result = runCatching {
             when (action) {
                 "open", "navigate" -> navigate(request.requireValue("url"))
+                "list_tabs" -> listTabs()
+                "history" -> history(browserDir)
+                "clear_history" -> clearHistory(browserDir)
+                "cookies_status" -> cookieStatus(request["url"] ?: activeTab().currentUrl)
+                "cookies_verify" -> cookieVerify(request["url"] ?: activeTab().currentUrl)
+                "cookies_flush" -> cookieFlush()
+                "userscript_add" -> userScriptAdd(browserDir, request)
+                "userscript_list" -> userScriptList(browserDir)
+                "userscript_enable" -> userScriptSetEnabled(browserDir, request.requireValue("id"), enabled = true)
+                "userscript_disable" -> userScriptSetEnabled(browserDir, request.requireValue("id"), enabled = false)
+                "userscript_remove" -> userScriptRemove(browserDir, request.requireValue("id"))
                 "present" -> present(request["reason"].orEmpty().ifBlank { "present" })
                 "collapse" -> JSONObject().put("collapsed", true)
                 "reload" -> {
@@ -155,7 +176,7 @@ class TerminalBrowserSessionManager(
                 "get_text" -> getText(request["selector"])
                 "get_readable" -> getReadable()
                 "execute_js", "js" -> executeJs(request.requireValue("script"))
-                "screenshot" -> screenshot(browserDir, requestId)
+                "screenshot" -> screenshot(browserDir, requestId, request)
                 "external", "auth", "custom_tab" -> openExternalBrowser(request.requireValue("url"))
                 "user_wait" -> userWait(
                     message = request["message"].orEmpty().ifBlank { "请在浏览器中手动处理后继续" },
@@ -174,6 +195,7 @@ class TerminalBrowserSessionManager(
         } else if (action !in setOf("open", "navigate", "reload", "user_wait", "present", "close")) {
             publish("done", action)
         }
+        cookieFlush()
         JSONObject()
             .put("ok", ok)
             .put("requestId", requestId)
@@ -290,6 +312,24 @@ class TerminalBrowserSessionManager(
         return JSONObject().put("tabId", tab.id)
     }
 
+    private fun listTabs(): JSONObject {
+        return JSONObject()
+            .put("activeTabId", activeTabId)
+            .put("tabs", JSONArray().apply {
+                tabs.values.forEach { tab ->
+                    put(
+                        JSONObject()
+                            .put("id", tab.id)
+                            .put("title", tab.title)
+                            .put("url", tab.currentUrl)
+                            .put("isLoading", tab.isLoading)
+                            .put("canGoBack", tab.webView.canGoBack())
+                            .put("canGoForward", tab.webView.canGoForward())
+                    )
+                }
+            })
+    }
+
     private fun selectTab(tabId: Int): JSONObject {
         require(tabs.containsKey(tabId)) { "tab not found: $tabId" }
         activeTabId = tabId
@@ -310,6 +350,95 @@ class TerminalBrowserSessionManager(
         attachedContainer?.let { attachTo(it as FrameLayout) }
         publish("done", "已关闭标签页")
         return JSONObject().put("closed", true).put("tabId", id)
+    }
+
+    private fun history(browserDir: File): JSONObject {
+        val entries = JSONArray()
+        val historyFile = File(browserDir, "history.jsonl")
+        if (historyFile.isFile) {
+            historyFile.readLines().takeLast(200).forEach { line ->
+                runCatching { JSONObject(line) }.getOrNull()?.let { entries.put(it) }
+            }
+        }
+        return JSONObject().put("entries", entries).put("count", entries.length())
+    }
+
+    private fun clearHistory(browserDir: File): JSONObject {
+        File(browserDir, "history.jsonl").delete()
+        return JSONObject().put("cleared", true)
+    }
+
+    private fun cookieStatus(rawUrl: String): JSONObject {
+        val url = normalizeCookieUrl(rawUrl.takeIf { it.isNotBlank() } ?: activeTab().currentUrl)
+        val rawCookie = CookieManager.getInstance().getCookie(url).orEmpty()
+        val names = rawCookie.split(';')
+            .map { it.trim().substringBefore('=') }
+            .filter { it.isNotBlank() }
+            .distinct()
+        return JSONObject()
+            .put("url", url)
+            .put("hasCookies", names.isNotEmpty())
+            .put("cookieCount", names.size)
+            .put("cookieNames", JSONArray().apply { names.forEach { put(it) } })
+            .put("valuesRedacted", true)
+    }
+
+    private fun cookieVerify(rawUrl: String): JSONObject {
+        val status = cookieStatus(rawUrl)
+        return status.put("verified", status.optInt("cookieCount") > 0)
+    }
+
+    private fun cookieFlush(): JSONObject {
+        CookieManager.getInstance().flush()
+        return JSONObject().put("flushed", true)
+    }
+
+    private fun userScriptAdd(browserDir: File, request: Map<String, String>): JSONObject {
+        val id = request["id"]?.takeIf { it.isNotBlank() } ?: "script-${System.currentTimeMillis()}"
+        val sourcePath = request.requireValue("path")
+        val sourceFile = File(sourcePath)
+        require(sourceFile.isFile && sourceFile.canRead()) { "userscript file is unreadable" }
+        val scriptsDir = File(browserDir, "userscripts").apply { mkdirs() }
+        val targetFile = File(scriptsDir, "$id.js")
+        sourceFile.copyTo(targetFile, overwrite = true)
+        val scripts = loadUserScripts(browserDir)
+            .filterNot { it.id == id }
+            .toMutableList()
+        val script = BrowserUserScript(
+            id = id,
+            name = request["name"]?.takeIf { it.isNotBlank() } ?: id,
+            match = request["match"]?.takeIf { it.isNotBlank() } ?: "*",
+            path = targetFile.absolutePath,
+            enabled = request["enabled"] != "0"
+        )
+        scripts.add(script)
+        saveUserScripts(browserDir, scripts)
+        activeTabId?.let { tabs[it] }?.let { applyUserScripts(it) }
+        return userScriptToJson(script)
+    }
+
+    private fun userScriptList(browserDir: File): JSONObject {
+        return JSONObject().put("scripts", JSONArray().apply {
+            loadUserScripts(browserDir).forEach { put(userScriptToJson(it)) }
+        })
+    }
+
+    private fun userScriptSetEnabled(browserDir: File, id: String, enabled: Boolean): JSONObject {
+        val scripts = loadUserScripts(browserDir).map {
+            if (it.id == id) it.copy(enabled = enabled) else it
+        }
+        require(scripts.any { it.id == id }) { "userscript not found: $id" }
+        saveUserScripts(browserDir, scripts)
+        return JSONObject().put("id", id).put("enabled", enabled)
+    }
+
+    private fun userScriptRemove(browserDir: File, id: String): JSONObject {
+        val scripts = loadUserScripts(browserDir)
+        val removed = scripts.firstOrNull { it.id == id }
+        require(removed != null) { "userscript not found: $id" }
+        File(removed.path).delete()
+        saveUserScripts(browserDir, scripts.filterNot { it.id == id })
+        return JSONObject().put("id", id).put("removed", true)
     }
 
     private suspend fun click(request: Map<String, String>): JSONObject {
@@ -391,11 +520,19 @@ class TerminalBrowserSessionManager(
         """.trimIndent()
     )
 
-    private suspend fun screenshot(browserDir: File, requestId: String): JSONObject {
+    private suspend fun screenshot(
+        browserDir: File,
+        requestId: String,
+        request: Map<String, String>
+    ): JSONObject {
         val tab = activeTab()
         val file = File(browserDir, "screenshots/$requestId.png")
+        var captureWidth = 0
+        var captureHeight = 0
         val bytesWritten = withContext(Dispatchers.Main.immediate) {
             val (width, height) = layoutWebView(tab.webView)
+            captureWidth = width
+            captureHeight = height
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
             canvas.drawColor(Color.WHITE)
@@ -408,9 +545,17 @@ class TerminalBrowserSessionManager(
                 bitmap.recycle()
             }
         }
+        val pushToFiles = request["push"] == "1" || request["to_files"] == "1"
+        val fileId = request["file_id"]?.takeIf { it.isNotBlank() } ?: requestId
         return JSONObject()
             .put("path", file.absolutePath)
             .put("bytes", bytesWritten)
+            .put("width", captureWidth)
+            .put("height", captureHeight)
+            .put("pushToFiles", pushToFiles)
+            .put("presentFiles", request["present_files"] != "0")
+            .put("fileId", fileId)
+            .put("name", "browser-$requestId.png")
     }
 
     private fun openExternalBrowser(rawUrl: String): JSONObject {
@@ -469,7 +614,6 @@ class TerminalBrowserSessionManager(
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun createTab(): BrowserTab {
-        require(tabs.size < MAX_BROWSER_TABS) { "browser tab limit is $MAX_BROWSER_TABS" }
         val tabId = ++nextTabId
         val contextWrapper = MutableContextWrapper(initialContext)
         val webView = WebView(contextWrapper).apply {
@@ -607,6 +751,9 @@ class TerminalBrowserSessionManager(
                 tab.currentUrl = url.orEmpty().ifBlank { tab.currentUrl }
                 tab.title = view?.title.orEmpty().ifBlank { tab.currentUrl }
                 tab.isLoading = false
+                cookieFlush()
+                appendHistory(tab)
+                applyUserScripts(tab)
                 tab.loadWaiter?.complete(Unit)
                 tab.loadWaiter = null
                 publish("done", "网页已加载")
@@ -799,6 +946,108 @@ class TerminalBrowserSessionManager(
         onSnapshot(latestSnapshot)
     }
 
+    private fun appendHistory(tab: BrowserTab) {
+        val browserDir = currentBrowserDir ?: return
+        if (tab.currentUrl.isBlank() || tab.currentUrl == "about:blank") return
+        runCatching {
+            browserDir.mkdirs()
+            File(browserDir, "history.jsonl").appendText(
+                JSONObject()
+                    .put("timestamp", System.currentTimeMillis())
+                    .put("tabId", tab.id)
+                    .put("title", tab.title)
+                    .put("url", tab.currentUrl)
+                    .toString() + "\n"
+            )
+        }
+    }
+
+    private fun applyUserScripts(tab: BrowserTab) {
+        val browserDir = currentBrowserDir ?: return
+        val scripts = loadUserScripts(browserDir)
+            .filter { it.enabled && userScriptMatches(it.match, tab.currentUrl) }
+        if (scripts.isEmpty()) return
+        scripts.forEach { script ->
+            val source = runCatching { File(script.path).readText() }.getOrNull() ?: return@forEach
+            tab.webView.post {
+                runCatching {
+                    tab.webView.evaluateJavascript(
+                        """
+                        (function(){
+                          try {
+                            $source
+                            return {ok:true,id:${JSONObject.quote(script.id)}};
+                          } catch (error) {
+                            return {ok:false,id:${JSONObject.quote(script.id)},error:String(error && error.message ? error.message : error)};
+                          }
+                        })();
+                        """.trimIndent(),
+                        null
+                    )
+                }
+            }
+        }
+    }
+
+    private fun userScriptMatches(match: String, url: String): Boolean {
+        val rule = match.trim()
+        if (rule.isBlank() || rule == "*") return true
+        if (!rule.contains('*')) return url.contains(rule)
+        val parts = rule.split('*').filter { it.isNotEmpty() }
+        var index = 0
+        for (part in parts) {
+            val found = url.indexOf(part, startIndex = index)
+            if (found < 0) return false
+            index = found + part.length
+        }
+        return true
+    }
+
+    private fun loadUserScripts(browserDir: File): List<BrowserUserScript> {
+        val file = File(browserDir, "userscripts.json")
+        if (!file.isFile) return emptyList()
+        return runCatching {
+            val array = JSONArray(file.readText())
+            buildList {
+                for (index in 0 until array.length()) {
+                    val item = array.optJSONObject(index) ?: continue
+                    val id = item.optString("id")
+                    val path = item.optString("path")
+                    if (id.isBlank() || path.isBlank()) continue
+                    add(
+                        BrowserUserScript(
+                            id = id,
+                            name = item.optString("name", id),
+                            match = item.optString("match", "*"),
+                            path = path,
+                            enabled = item.optBoolean("enabled", true)
+                        )
+                    )
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun saveUserScripts(browserDir: File, scripts: List<BrowserUserScript>) {
+        browserDir.mkdirs()
+        val file = File(browserDir, "userscripts.json")
+        val tmp = File(browserDir, "userscripts.json.tmp")
+        tmp.writeText(JSONArray().apply { scripts.forEach { put(userScriptToJson(it)) } }.toString(2))
+        if (!tmp.renameTo(file)) {
+            tmp.copyTo(file, overwrite = true)
+            tmp.delete()
+        }
+    }
+
+    private fun userScriptToJson(script: BrowserUserScript): JSONObject {
+        return JSONObject()
+            .put("id", script.id)
+            .put("name", script.name)
+            .put("match", script.match)
+            .put("path", script.path)
+            .put("enabled", script.enabled)
+    }
+
     private fun layoutWebView(webView: WebView): Pair<Int, Int> {
         val display = appContext.resources.displayMetrics
         val parent = webView.parent as? View
@@ -894,6 +1143,13 @@ class TerminalBrowserSessionManager(
         }
     }
 
+    private fun normalizeCookieUrl(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank()) return activeTab().currentUrl
+        if (trimmed.contains("://")) return trimmed
+        return normalizeUrl(trimmed)
+    }
+
     private fun decodeJsString(raw: String?): String {
         val text = raw?.trim().orEmpty()
         if (text.isEmpty()) return "{}"
@@ -913,5 +1169,4 @@ class TerminalBrowserSessionManager(
     }
 }
 
-private const val MAX_BROWSER_TABS = 3
 private val WEBVIEW_SCHEMES = setOf("http", "https", "about", "data", "file", "content")

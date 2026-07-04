@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.0.8-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.0.8)
+[![Release](https://img.shields.io/badge/release-v2.1.0-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.1.0)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.142.4-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,11 +9,11 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.0.8 更新
+## 重要：2.1.0 更新
 
-2.0.8 让 RTK/context 进入启动前快捷授权流程：普通启动 `codex` 时，终端会在启动 Codex 前询问是否授权 Codex for TUI 增强功能。选择 `1` 后脚本会写入系统级 `requirements.toml`，把 RTK/context 注册为 Codex 托管 hooks，不需要再进入 `/hooks` 手动信任；会话托盘运行中耗时会自动刷新；新增 `codex-context`，记录 `PreCompact` / `PostCompact` / `SessionStart` 事件，方便自动压缩后继续交接。
+2.1.0 把协作浏览器升级为长期可用的 Agent WebView 浏览器：`codex-browser` 使用请求队列避免并发覆盖，补齐多标签、历史记录、Cookie/WebStorage 持久化验证、WebView 自绘截图推送到文件托盘、userscript 本地注入和用户接管事件回传。终端还内置默认背景图，默认透明度为 1；用户自定义背景仍然优先。
 
-已经安装 2.0.x 的用户需要从 Releases 下载并覆盖安装 2.0.8 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk` 和 `codex-context` 桥接命令。
+已经安装 2.0.x 的用户需要从 Releases 下载并覆盖安装 2.1.0 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk` 和 `codex-context` 桥接命令。
 
 如果你在旧 resume 会话里遇到裸命令不可见，再手动执行一次：
 
@@ -30,10 +30,12 @@ codex 配置模式
 
 如果菜单里能看到 `6. 修复全权限授权`，说明脚本已经更新到包含配置菜单和授权持久化修复的版本。需要修复授权时选择该项；它会把全权限模式持久写入为 `approval_policy = "never"` + `sandbox_mode = "danger-full-access"`。
 
-新安装、尚未完成首次安装的 2.0.8 用户，首次安装时会拉取当前分支的最新脚本；普通启动仍然不会隐藏联网更新、不会刷新模型、不会覆盖用户配置。已安装 2.0.8 的用户运行 `codex 更新` 再运行 `codex-local repair-launcher` 后，新启动器会带上快捷授权菜单。
+新安装、尚未完成首次安装的用户，首次安装时会拉取当前分支的最新脚本；普通启动仍然不会隐藏联网更新、不会刷新模型、不会覆盖用户配置。已安装用户运行 `codex 更新` 再运行 `codex-local repair-launcher` 后，新启动器会带上最新桥接命令和快捷授权菜单。
 
 ## 2.0 新功能
 
+- 2.1.0 新增：`codex-browser` 请求队列、多标签列表、历史、Cookie 状态/验证、截图推送文件托盘、userscript 本地注入。
+- 2.1.0 新增：内置终端预设背景图，默认透明度为 1；用户自定义背景优先。
 - 2.0.8 修复：RTK/context 改为启动前终端快捷授权，授权后写入系统级 `requirements.toml` 托管 hooks，不再要求普通用户进入 `/hooks` 手动信任。
 - 2.0.8 新增：`codex-context status|events|hook|enable|disable|verify`，记录自动/手动 compact 和 session start 事件，便于后续 Agent 接续。
 - 2.0.8 修复：会话托盘运行中耗时自动刷新，不再只在 Agent 主动传参时变化。
@@ -67,7 +69,7 @@ codex 配置模式
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.0.8` |
+| Android App | `2.1.0` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug 包名 | `com.gzy3894.codexfortui.debug` |
 | Codex CLI | `0.142.4` 中文版 |
@@ -203,13 +205,18 @@ codex-panel result browser
 ```sh
 codex-browser --no-wait open 'https://www.baidu.com/s?wd=codex'
 codex-browser status
+codex-browser list-tabs
+codex-browser cookies verify 'https://www.baidu.com'
+codex-browser screenshot --push
 codex-browser present 搜索结果已就绪
 codex-browser user-wait 请完成登录或验证
 codex-browser status
 codex-browser events
 ```
 
-Agent 可以打开网页、读 DOM、点击、输入、执行 JS、截图；遇到登录、授权、验证码或风控时，可以切到 Custom Tabs/系统浏览器让用户处理，再回到当前会话继续。
+Agent 可以打开网页、读 DOM、点击、输入、执行 JS、截图、管理多标签、读取历史、验证 Cookie 是否存在、把网页截图推送到文件托盘。`codex-browser` 请求写入队列，多个命令不会互相覆盖；每个请求会写入独立 `results/<request_id>.status/json`。
+
+Cookie 边界需要注意：内嵌 WebView 的 Cookie/WebStorage 会在 App 数据目录中持久化，适合定时签到这类长期任务；但它不共享 Chrome、Edge 或 Custom Tabs 的 Cookie。遇到登录、授权、验证码或风控时，可以切到 Custom Tabs/系统浏览器让用户处理，但这条链路不能承诺把外部浏览器登录态带回 WebView。
 
 会话时间线用于承载 Agent 的思考、工具、长文本、文件和浏览器协作摘要。整体折叠只隐藏托盘列表，不会清空记录；清空才会删除时间线记录：
 

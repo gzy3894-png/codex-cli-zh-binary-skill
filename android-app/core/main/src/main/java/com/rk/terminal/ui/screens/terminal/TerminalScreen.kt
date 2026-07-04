@@ -31,6 +31,7 @@ import androidx.navigation.NavController
 import com.rk.components.compose.preferences.base.PreferenceGroup
 import com.rk.libcommons.child
 import com.rk.resources.strings
+import com.rk.terminal.R
 import com.rk.terminal.ui.activities.terminal.MainActivity
 import com.rk.terminal.ui.activities.terminal.MainViewModel
 import com.rk.terminal.ui.components.SetStatusBarTextColor
@@ -61,12 +62,18 @@ fun TerminalScreen(
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
-            if (context.filesDir.child("background").exists().not()) {
-                TerminalUtils.darkText.value = !isDarkMode
-            } else if (terminalViewModel.bitmap == null) {
-                BitmapFactory.decodeFile(context.filesDir.child("background").absolutePath)?.asImageBitmap()?.let {
+            val customBackground = context.filesDir.child("background")
+            if (customBackground.exists() && terminalViewModel.bitmap == null) {
+                BitmapFactory.decodeFile(customBackground.absolutePath)?.asImageBitmap()?.let {
                     terminalViewModel.bitmap = it
                 }
+            } else if (!customBackground.exists() && terminalViewModel.bitmap == null) {
+                BitmapFactory.decodeResource(context.resources, R.drawable.codex_tui_tonal_background)
+                    ?.asImageBitmap()
+                    ?.let {
+                        terminalViewModel.bitmap = it
+                        TerminalUtils.darkText.value = true
+                    }
             }
         }
     }

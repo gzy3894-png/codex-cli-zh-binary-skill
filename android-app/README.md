@@ -71,12 +71,19 @@ codex-browser present 页面已就绪
 codex-browser user-wait 请完成验证
 codex-browser status
 codex-browser events
+codex-browser list-tabs
+codex-browser new-tab https://example.com/help
+codex-browser cookies verify https://example.com
+codex-browser screenshot --push
 codex-browser auth https://chatgpt.com
 codex-browser external https://example.com/login
 ```
 
-`open` 使用 App 内嵌 WebView，默认后台加载，适合读取 DOM、点击、输入和截图；需要展示给用户时调用 `present`，需要用户协作时调用 `user-wait`（也兼容 `wait-user`）。`auth` / `external` 使用 Chrome Custom Tabs 或系统浏览器，适合登录、授权、验证码和风控场景；该模式不向 App 暴露用户浏览器 Cookie。
-浏览器托盘支持多标签，顶部标签条可以切换或关闭标签；文件和浏览器托盘都采用更紧凑的入口按钮和更轻的半透明容器，减少对终端内容的遮挡。
+`open` 使用 App 内嵌 WebView，默认后台加载，适合读取 DOM、点击、输入和截图；需要展示给用户时调用 `present`，需要用户协作时调用 `user-wait`（也兼容 `wait-user`）。浏览器请求写入队列，多个 Agent 命令不会互相覆盖；每个请求都有独立 `results/<request_id>.status/json`。
+
+内嵌 WebView 支持多标签、历史记录、Cookie 状态/验证、WebStorage 持久化、WebView 自绘截图和本地 userscript 注入。`screenshot --push` 会把当前网页截图加入可清理文件托盘，可用 `codex-preview path <编号>` 解析真实图片路径。`cookies status|verify` 不输出 Cookie value，只输出 Cookie 名称和数量。
+
+`auth` / `external` 使用 Chrome Custom Tabs 或系统浏览器，适合登录、授权、验证码和风控场景；该模式不向 App 暴露用户浏览器 Cookie。需要定时签到或自动化复用登录态的站点，应在内嵌 WebView 中完成一次登录；Android WebView 的 Cookie 不与 Chrome、Edge 或 Custom Tabs 共享。
 
 ## 构建
 

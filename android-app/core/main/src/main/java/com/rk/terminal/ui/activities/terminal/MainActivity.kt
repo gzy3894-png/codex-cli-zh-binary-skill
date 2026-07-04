@@ -65,6 +65,7 @@ class MainActivity : ComponentActivity() {
     private var lastBrowserRequest = ""
     private var lastSessionFoldRequest = ""
     private var lastBrowserNeedsUserEventKey = ""
+    private val browserProcessedRequestIds = linkedSetOf<String>()
     private var browserFileChooserCallback: ((Array<Uri>?) -> Unit)? = null
 
     private val requestNotificationPermission =
@@ -1324,15 +1325,40 @@ class MainActivity : ComponentActivity() {
     private suspend fun pollBrowserRequest() {
         val browserDir = localDir().child("browser")
         val requestFile = browserDir.child("request")
+        val queueDir = browserDir.child("queue")
+        val queuedRequests = withContext(Dispatchers.IO) {
+            browserDir.mkdirs()
+            queueDir.mkdirs()
+            queueDir.listFiles()
+                ?.filter { it.isFile && it.name.endsWith(".req") }
+                ?.sortedBy { it.name }
+                ?: emptyList()
+        }
+        for (file in queuedRequests) {
+            val content = withContext(Dispatchers.IO) { file.readText().trim() }
+            if (content.isNotBlank()) {
+                handleBrowserRequestContent(browserDir, content)
+            }
+            withContext(Dispatchers.IO) {
+                runCatching { file.delete() }
+            }
+        }
+
         val content = withContext(Dispatchers.IO) {
             browserDir.mkdirs()
             if (requestFile.isFile) requestFile.readText() else ""
         }.trim()
 
         if (content.isBlank() || content == lastBrowserRequest) return
+        val requestId = panelRequestId(parseMediaPreviewRequest(content), content)
+        if (isBrowserRequestProcessed(requestId)) return
         lastBrowserRequest = content
+        handleBrowserRequestContent(browserDir, content)
+    }
 
+    private suspend fun handleBrowserRequestContent(browserDir: File, content: String) {
         val request = parseMediaPreviewRequest(content)
+        val requestId = panelRequestId(request, content)
         val requestedAction = request["action"].orEmpty()
         val effectiveAction = when (requestedAction) {
             "toggle" -> if (terminalViewModel.browserPanelExpanded) "collapse" else "present"
@@ -1377,7 +1403,9 @@ class MainActivity : ComponentActivity() {
             terminalViewModel.mediaPreviewExpanded = false
             terminalViewModel.browserPanelExpanded = true
         }
+        maybePushBrowserScreenshotToFiles(result, request)
         writeBrowserResult(browserDir, result)
+        rememberBrowserRequestId(requestId)
         val state = if (result.optBoolean("ok")) {
             snapshot?.optString("status")?.takeIf { it.isNotBlank() } ?: "done"
         } else {
@@ -1399,6 +1427,111 @@ class MainActivity : ComponentActivity() {
             status = state,
             itemId = result.optString("requestId").ifBlank { "browser-${System.currentTimeMillis()}" }
         )
+    }
+
+    private fun isBrowserRequestProcessed(requestId: String): Boolean {
+        return requestId.isNotBlank() && browserProcessedRequestIds.contains(requestId)
+    }
+
+    private fun rememberBrowserRequestId(requestId: String) {
+        if (requestId.isBlank()) return
+        browserProcessedRequestIds.add(requestId)
+        while (browserProcessedRequestIds.size > 200) {
+            browserProcessedRequestIds.remove(browserProcessedRequestIds.first())
+        }
+    }
+
+    private suspend fun maybePushBrowserScreenshotToFiles(
+        result: JSONObject,
+        request: Map<String, String>
+    ) {
+        if (!result.optBoolean("ok")) return
+        val data = result.optJSONObject("data") ?: return
+        if (!data.optBoolean("pushToFiles")) return
+        val path = data.optString("path")
+        val file = File(path)
+        val readable = withContext(Dispatchers.IO) { file.isFile && file.canRead() }
+        if (!readable) return
+
+        val previewDir = localDir().child("media-preview")
+        val stamp = data.optString("fileId").ifBlank { result.optString("requestId") }
+        val preview = TerminalMediaPreview(
+            path = file.absolutePath,
+            name = data.optString("name").ifBlank { file.name },
+            kind = TerminalMediaPreviewKind.IMAGE,
+            stamp = stamp,
+            width = data.optInt("width").takeIf { it > 0 },
+            height = data.optInt("height").takeIf { it > 0 },
+            sizeBytes = data.optLong("bytes").takeIf { it > 0 } ?: file.length(),
+            mimeType = "image/png"
+        )
+        terminalViewModel.addMediaPreview(preview)
+        val refId = previewReferenceId(preview)
+        withContext(Dispatchers.IO) {
+            writePreviewReference(preview, refId)
+        }
+        val shouldPresent = data.optBoolean("presentFiles", true) && request["present_files"] != "0"
+        if (shouldPresent) {
+            terminalViewModel.browserPanelExpanded = false
+            terminalViewModel.mediaPreviewExpanded = true
+        }
+        writeMediaPreviewStatus(
+            previewDir,
+            buildString {
+                append("state=ready\n")
+                append("reason=browser_screenshot\n")
+                append("shown=1\n")
+                append("request_id=").append(refValue(result.optString("requestId"))).append('\n')
+                append("kind=image\n")
+                append("path=").append(refValue(preview.path)).append('\n')
+                append("name=").append(refValue(preview.name)).append('\n')
+                append("stamp=").append(refValue(preview.stamp)).append('\n')
+                append("item_id=").append(refId).append('\n')
+            }
+        )
+        writeMediaPreviewResult(
+            previewDir = previewDir,
+            requestId = result.optString("requestId"),
+            action = "browser_screenshot",
+            ok = true,
+            state = "ready",
+            reason = "browser_screenshot",
+            itemId = refId,
+            extra = mediaPreviewExtras(preview)
+        )
+        writeAgentPanelEvent(
+            source = "files",
+            type = if (shouldPresent) "agent_presented" else "agent_added",
+            state = "ready",
+            reason = "browser_screenshot",
+            requestId = result.optString("requestId"),
+            itemId = refId,
+            extra = mediaPreviewExtras(preview)
+        )
+        writeAgentPanelStatus(
+            source = "files",
+            state = "ready",
+            reason = "browser_screenshot",
+            requestId = result.optString("requestId"),
+            itemId = refId,
+            extra = mediaPreviewExtras(preview)
+        )
+        appendActiveSessionFoldItem(
+            kind = TerminalSessionFoldItemKind.FILE,
+            title = preview.name,
+            summary = snapshotSummaryForBrowserScreenshot(result),
+            path = preview.path,
+            status = "ready",
+            itemId = refId
+        )
+        data.put("fileId", refId)
+    }
+
+    private fun snapshotSummaryForBrowserScreenshot(result: JSONObject): String {
+        val snapshot = result.optJSONObject("snapshot")
+        return snapshot?.optString("currentUrl").orEmpty()
+            .ifBlank { snapshot?.optString("title").orEmpty() }
+            .ifBlank { "浏览器截图" }
     }
 
     private suspend fun pollMediaPreviewRequest() {
@@ -1942,6 +2075,7 @@ class MainActivity : ComponentActivity() {
             val visible = terminalViewModel.browserPanelExpanded
             val activeItem = snapshot?.opt("activeTabId")?.toString().orEmpty()
             val tabsCount = (snapshot?.optJSONArray("tabs")?.length() ?: 0).toString()
+            val requestId = result.optString("requestId")
             result
                 .put("visible", visible)
                 .put("collapsed", !visible)
@@ -1951,8 +2085,9 @@ class MainActivity : ComponentActivity() {
                 .put("needsUser", snapshot?.optBoolean("needsUser") == true)
                 .put("tabsCount", tabsCount)
             browserDir.child("result.json").writeText(result.toString(2))
+            val requestResultsDir = browserDir.child("results").apply { mkdirs() }
             val text = buildString {
-                append("request_id=").append(result.optString("requestId")).append('\n')
+                append("request_id=").append(requestId).append('\n')
                 append("state=").append(state).append('\n')
                 append("action=").append(result.optString("action")).append('\n')
                 append("ok=").append(if (result.optBoolean("ok")) "1" else "0").append('\n')
@@ -1968,8 +2103,29 @@ class MainActivity : ComponentActivity() {
                 result.optString("error").takeIf { it.isNotBlank() && it != "null" }?.let {
                     append("error=").append(it).append('\n')
                 }
+                result.optJSONObject("data")?.let { data ->
+                    data.optString("path").takeIf { it.isNotBlank() }?.let {
+                        append("path=").append(refValue(it)).append('\n')
+                    }
+                    data.optString("fileId").takeIf { it.isNotBlank() }?.let {
+                        append("file_id=").append(refValue(it)).append('\n')
+                    }
+                    data.optInt("cookieCount", -1).takeIf { it >= 0 }?.let {
+                        append("cookie_count=").append(it).append('\n')
+                    }
+                    data.optBoolean("verified", false).takeIf { it }?.let {
+                        append("verified=1\n")
+                    }
+                }
             }
             browserDir.child("status").writeText(text)
+            if (requestId.isNotBlank()) {
+                val safeId = requestId.filter { it.isLetterOrDigit() || it == '.' || it == '_' || it == '-' }.take(120)
+                if (safeId.isNotBlank()) {
+                    requestResultsDir.child("$safeId.json").writeText(result.toString(2))
+                    requestResultsDir.child("$safeId.status").writeText(text)
+                }
+            }
             browserDir.child("logs").mkdirs()
             browserDir.child("logs").child("session.log").appendText(text.lines().take(4).joinToString(" ") + "\n")
             writeAgentPanelStatus(

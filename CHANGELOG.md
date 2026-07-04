@@ -1,5 +1,28 @@
 # Changelog
 
+## Codex for TUI 2.1.0
+
+Codex for TUI 2.1.0 硬化协作浏览器，并加入终端默认背景图，让 WebView 自动化更接近长期可用。
+
+### 新功能
+
+- `codex-browser` 改为队列请求，避免并发命令覆盖同一个 request 文件；每个请求写入独立 `results/<request_id>.status/json`。
+- 浏览器补齐多标签列表、选择/关闭、历史记录、Cookie 状态/验证、Cookie flush、WebView 自绘截图推送文件托盘。
+- 新增本地 userscript 注入：从本地文件导入，按 URL match 注入，不自动下载远程脚本。
+- 内置终端预设背景图，默认透明度为 1；用户自定义背景仍然优先。
+
+### 边界
+
+- 内嵌 WebView 的 Cookie/WebStorage 会持久化，但不与 Chrome、Edge 或 Custom Tabs 共享。
+- `cookies status|verify` 只返回 Cookie 名称和数量，不输出 Cookie value。
+- Chrome/Edge 原生扩展不适用于 Android WebView；本版本以 userscript 作为可控替代。
+
+### 验证
+
+- 本地非 APK 门禁：`sh -n`、`sh tests/codex-for-tui-static-guards.sh`、`sh tests/codex-for-tui-installer-smoke.sh`、`git diff --check`。
+- 新增 `tests/codex-for-tui-browser-smoke.sh`，用于真机测试多标签、请求队列、Cookie、localStorage、历史、截图推送、userscript 和用户接管状态。
+- APK、签名校验、RTK 二进制和 release 资产仍只通过 GitHub Actions 构建。
+
 ## Codex for TUI 2.0.8
 
 Codex for TUI 2.0.8 修复 RTK 默认启用、会话托盘耗时刷新和上下文压缩监测三类问题，让长会话在自动 compact 前后更容易交接。

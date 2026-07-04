@@ -517,6 +517,8 @@ codex_config_ensure_default_hooks() {
   codex_config_set_hooks_feature "$codex_hooks_cfg" true
   if codex_config_managed_hooks_enabled; then
     codex_config_strip_default_hook_blocks "$codex_hooks_cfg"
+  else
+    codex_config_append_default_hook_blocks "$codex_hooks_cfg"
   fi
 }
 

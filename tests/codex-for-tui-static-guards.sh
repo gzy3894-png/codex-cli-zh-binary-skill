@@ -17,6 +17,7 @@ PANEL_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-panel"
 SESSION_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-session"
 RTK_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-rtk"
 CONTEXT_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-context"
+BROWSER_SMOKE="$ROOT_DIR/tests/codex-for-tui-browser-smoke.sh"
 TERMINAL_TOP_BAR="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalTopBar.kt"
 TERMINAL_SCREEN="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalScreen.kt"
 MEDIA_PREVIEW_PANE="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MediaPreviewPane.kt"
@@ -66,8 +67,8 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 28'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.8"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 29'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.1.0"'
 }
 
 test_release_workflow_signature_gate() {
@@ -164,6 +165,7 @@ test_image_preview_bridge_asset() {
   sh -n "$PANEL_ASSET" || fail "codex-panel shell syntax failed"
   sh -n "$SESSION_ASSET" || fail "codex-session shell syntax failed"
   sh -n "$RTK_ASSET" || fail "codex-rtk shell syntax failed"
+  sh -n "$BROWSER_SMOKE" || fail "browser smoke shell syntax failed"
   sh -n "$INIT_ASSET" || fail "init.sh shell syntax failed"
 
   tmp="${TMPDIR:-/tmp}/codex-tui-static-image-preview.$$"
@@ -269,7 +271,9 @@ test_browser_bridge_asset() {
     fail "codex-browser should write an open request"
   fi
   [ -s "$tmp/prefix/local/browser/request" ] || fail "browser request file missing"
+  ls "$tmp/prefix/local/browser/queue/"*.req >/dev/null 2>&1 || fail "browser queue request file missing"
   assert_file_contains "$tmp/prefix/local/browser/request" "action=navigate"
+  assert_file_contains "$tmp/prefix/local/browser/request" "queued=1"
   assert_file_contains "$tmp/prefix/local/browser/request" "present=0"
   assert_file_contains "$tmp/prefix/local/browser/request" "url=https://example.test"
   printf '%s\n' "$output" | grep -F '已发送到 Codex for TUI 浏览器' >/dev/null 2>&1 || fail "browser command did not report success"
@@ -326,6 +330,33 @@ test_browser_bridge_asset() {
   assert_file_contains "$tmp/prefix/local/browser/request" "selector=#q"
   assert_file_contains "$tmp/prefix/local/browser/request" "text=hello world"
 
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait list-tabs >/dev/null; then
+    fail "codex-browser should write a list-tabs request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=list_tabs"
+
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait screenshot --push --background >/dev/null; then
+    fail "codex-browser should write a screenshot push request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=screenshot"
+  assert_file_contains "$tmp/prefix/local/browser/request" "push=1"
+  assert_file_contains "$tmp/prefix/local/browser/request" "present_files=0"
+
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait cookies verify https://cookie.example.test >/dev/null; then
+    fail "codex-browser should write a cookie verify request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=cookies_verify"
+  assert_file_contains "$tmp/prefix/local/browser/request" "url=https://cookie.example.test"
+
+  printf 'document.body.dataset.codexUserscript="ok";\n' > "$tmp/userscript.js"
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait userscript add test-script example.test "$tmp/userscript.js" >/dev/null; then
+    fail "codex-browser should write a userscript add request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=userscript_add"
+  assert_file_contains "$tmp/prefix/local/browser/request" "name=test-script"
+  assert_file_contains "$tmp/prefix/local/browser/request" "match=example.test"
+  assert_file_contains "$tmp/prefix/local/browser/request" "path=$tmp/prefix/local/browser/userscripts/incoming/"
+
   if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait user-wait '请完成验证' >/dev/null; then
     fail "codex-browser should write a user wait request"
   fi
@@ -343,12 +374,24 @@ test_browser_bridge_asset() {
   PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" status >/dev/null || fail "codex-browser status should be safe without status file"
   PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" events >/dev/null || fail "codex-browser events should be safe without events file"
   PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" result >/dev/null || fail "codex-browser result should be safe without result file"
+  PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" result missing-id >/dev/null || fail "codex-browser result REQUEST_ID should be safe without result file"
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'CustomTabsIntent.Builder'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'shouldHandleOutsideWebView'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'onShowFileChooser'
+  assert_file_not_contains "$TERMINAL_BROWSER_SESSION" 'MAX_BROWSER_TABS'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'CookieManager.getInstance().flush()'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" '"cookies_verify" -> cookieVerify'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" '"userscript_add" -> userScriptAdd'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'appendHistory(tab)'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'applyUserScripts(tab)'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'pushToFiles'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" '"present" -> present'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" '"collapse" -> JSONObject().put("collapsed", true)'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'activeUserRequestId'
+  assert_file_contains "$MAIN_ACTIVITY" 'queueDir.listFiles()'
+  assert_file_contains "$MAIN_ACTIVITY" 'isBrowserRequestProcessed'
+  assert_file_contains "$MAIN_ACTIVITY" 'maybePushBrowserScreenshotToFiles'
+  assert_file_contains "$MAIN_ACTIVITY" 'browserDir.child("results")'
   assert_file_contains "$MAIN_ACTIVITY" 'action == "present"'
   assert_file_contains "$MAIN_ACTIVITY" 'action == "collapse"'
   assert_file_contains "$MAIN_ACTIVITY" 'requestedAction) {'
@@ -362,6 +405,13 @@ test_browser_bridge_asset() {
   assert_file_contains "$MAIN_ACTIVITY" 'append("tabs_count=").append(tabsCount)'
   assert_file_contains "$MAIN_ACTIVITY" 'append("item_id=").append(refId)'
   rm -rf "$tmp"
+}
+
+test_browser_background_asset() {
+  [ -s "$ROOT_DIR/android-app/core/main/src/main/res/drawable-nodpi/codex_tui_tonal_background.png" ] || fail "default terminal background asset missing"
+  assert_file_contains "$TERMINAL_SCREEN" 'R.drawable.codex_tui_tonal_background'
+  assert_file_contains "$TERMINAL_SCREEN" 'customBackground.exists()'
+  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/settings/Settings.kt" 'Preference.getFloat(key = "wallTransparency", default = 1f)'
 }
 
 test_agent_panel_bridge_asset() {
@@ -500,7 +550,7 @@ test_codex_rtk_bridge_asset() {
   assert_file_contains "$RTK_ASSET" 'codex-for-tui-rtk-hook begin'
 
   sample='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status"}}'
-  output="$(printf '%s' "$sample" | PREFIX="$tmp/no-prefix" PATH="$tmp/empty:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" hook)"
+  output="$(printf '%s' "$sample" | RTK_DISABLED=0 PREFIX="$tmp/no-prefix" PATH="$tmp/empty:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" hook)"
   [ -z "$output" ] || fail "codex-rtk hook should fail open when rtk is missing"
 
   cat > "$tmp/bin/rtk" <<'EOF'
@@ -523,7 +573,7 @@ esac
 EOF
   chmod 755 "$tmp/bin/rtk"
 
-  output="$(printf '%s' "$sample" | PREFIX="$tmp/no-prefix" PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" hook)"
+  output="$(printf '%s' "$sample" | RTK_DISABLED=0 PREFIX="$tmp/no-prefix" PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" hook)"
   printf '%s\n' "$output" | grep -F '"updatedInput":{"command":"rtk git status"}' >/dev/null 2>&1 || fail "codex-rtk hook did not return updatedInput"
 
   PREFIX="$tmp/no-prefix" PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" enable >/dev/null || fail "codex-rtk enable failed"
@@ -590,6 +640,7 @@ EOF
     export PATH="$tmp/bin:$PATH"
     export HOME="$tmp/home"
     export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_FOR_TUI_REQUIREMENTS_FILE="$tmp/requirements.toml"
     codex_config_write_third_party_config "https://api.example.com/v1" "key" "model-a" "$tmp/models.txt"
     codex_config_profile_save keep-hooks
     mkdir -p "$CODEX_HOME/config-profiles/no-hooks"
@@ -861,6 +912,7 @@ run_step test_debug_build_uses_test_package_name
 run_step test_release_workflow_signature_gate
 run_step test_image_preview_bridge_asset
 run_step test_browser_bridge_asset
+run_step test_browser_background_asset
 run_step test_agent_panel_bridge_asset
 run_step test_session_fold_bridge_asset
 run_step test_codex_rtk_bridge_asset

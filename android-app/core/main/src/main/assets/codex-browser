@@ -2,16 +2,19 @@
 set -eu
 
 usage() {
-  printf '%s\n' "用法: codex-browser open [--present] URL"
-  printf '%s\n' "      codex-browser present [REASON]"
-  printf '%s\n' "      codex-browser auth URL"
-  printf '%s\n' "      codex-browser external URL"
-  printf '%s\n' "      codex-browser click CSS_SELECTOR"
-  printf '%s\n' "      codex-browser type CSS_SELECTOR TEXT"
-  printf '%s\n' "      codex-browser scroll [up|down] [amount]"
-  printf '%s\n' "      codex-browser get-text [CSS_SELECTOR]"
+  printf '%s\n' "用法: codex-browser [--no-wait] open [--present] URL"
+  printf '%s\n' "      codex-browser present|collapse|toggle [REASON]"
+  printf '%s\n' "      codex-browser new-tab [URL] | list-tabs | select-tab ID | close-tab [ID]"
+  printf '%s\n' "      codex-browser back|forward|reload|history|clear-history"
+  printf '%s\n' "      codex-browser click CSS_SELECTOR | type CSS_SELECTOR TEXT | scroll [up|down] [amount]"
+  printf '%s\n' "      codex-browser get-text [CSS_SELECTOR] | get-readable | js SCRIPT"
+  printf '%s\n' "      codex-browser screenshot [--push] [--background]"
+  printf '%s\n' "      codex-browser cookies status|verify URL | cookies flush"
+  printf '%s\n' "      codex-browser userscript add NAME MATCH FILE"
+  printf '%s\n' "      codex-browser userscript list|enable|disable|remove ID"
   printf '%s\n' "      codex-browser user-wait|wait-user [MESSAGE]"
-  printf '%s\n' "      codex-browser screenshot|snapshot|reload|back|forward|present|collapse|toggle|user-done|done|cancel|status|events|wait|result|close"
+  printf '%s\n' "      codex-browser auth|external URL"
+  printf '%s\n' "      codex-browser status|events|wait|result [REQUEST_ID]|close"
 }
 
 find_prefix() {
@@ -26,33 +29,69 @@ find_prefix() {
   return 1
 }
 
+safe_id() {
+  printf '%s' "$1" | tr -cd 'A-Za-z0-9._-' | cut -c 1-120
+}
+
 write_request() {
   bridge_dir="$1/local/browser"
   shift
   request_file="$bridge_dir/request"
-  mkdir -p "$bridge_dir"
-  req_tmp="$request_file.tmp.$$"
+  queue_dir="$bridge_dir/queue"
+  mkdir -p "$queue_dir"
   request_id="$(date +%s 2>/dev/null || printf 0).$$"
+  safe_request_id="$(safe_id "$request_id")"
+  req_tmp="$queue_dir/$safe_request_id.req.tmp.$$"
+  req_file="$queue_dir/$safe_request_id.req"
   {
     printf 'request_id=%s\n' "$request_id"
     printf 'stamp=%s\n' "$request_id"
+    printf 'queued=1\n'
     while [ "$#" -gt 0 ]; do
       printf '%s=%s\n' "$1" "$2"
       shift 2
     done
   } > "$req_tmp"
-  mv "$req_tmp" "$request_file"
+  mv "$req_tmp" "$req_file"
+
+  # Legacy fallback for older app builds. Newer builds de-duplicate by request_id.
+  legacy_tmp="$request_file.tmp.$$"
+  cp "$req_file" "$legacy_tmp"
+  mv "$legacy_tmp" "$request_file"
   printf '%s\n' "$request_id"
+}
+
+print_file_if_readable() {
+  file="$1"
+  if [ -r "$file" ]; then
+    cat "$file"
+    return 0
+  fi
+  return 1
 }
 
 wait_status() {
   bridge_dir="$1/local/browser"
   request_id="$2"
   status_file="$bridge_dir/status"
+  safe_request_id="$(safe_id "$request_id")"
+  request_status_file="$bridge_dir/results/$safe_request_id.status"
   wait_seconds="${CODEX_BROWSER_WAIT_SECONDS:-25}"
   elapsed=0
   while [ "$elapsed" -lt "$wait_seconds" ]; do
-    if [ -s "$status_file" ] && grep -F "request_id=$request_id" "$status_file" >/dev/null 2>&1; then
+    if [ -s "$request_status_file" ]; then
+      state="$(sed -n 's/^state=//p' "$request_status_file" | sed -n '1p')"
+      case "$state" in
+        done|closed|ready|cancelled|waiting_for_user)
+          cat "$request_status_file"
+          return 0
+          ;;
+        error)
+          cat "$request_status_file" >&2
+          return 1
+          ;;
+      esac
+    elif [ -s "$status_file" ] && grep -F "request_id=$request_id" "$status_file" >/dev/null 2>&1; then
       state="$(sed -n 's/^state=//p' "$status_file" | sed -n '1p')"
       case "$state" in
         done|closed|ready|cancelled)
@@ -80,15 +119,6 @@ wait_status() {
   return 1
 }
 
-print_file_if_readable() {
-  file="$1"
-  if [ -r "$file" ]; then
-    cat "$file"
-    return 0
-  fi
-  return 1
-}
-
 wait_events() {
   panel_dir="$1/local/agent-panel"
   events_file="$panel_dir/events"
@@ -109,6 +139,21 @@ wait_events() {
   done
   printf '等待浏览器事件超时\n' >&2
   return 1
+}
+
+copy_userscript() {
+  prefix="$1"
+  id="$2"
+  source="$3"
+  [ -r "$source" ] || {
+    printf 'userscript 文件不可读: %s\n' "$source" >&2
+    exit 1
+  }
+  dir="$prefix/local/browser/userscripts/incoming"
+  mkdir -p "$dir"
+  target="$dir/$(safe_id "$id").js"
+  cp "$source" "$target"
+  printf '%s\n' "$target"
 }
 
 wait=1
@@ -168,12 +213,25 @@ case "$cmd" in
     [ "$cmd" = "custom-tab" ] && action="custom_tab"
     request_id="$(write_request "$prefix" action "$action" url "$1")"
     ;;
-  reload|snapshot|screenshot|user-done|done|cancel|close)
+  reload|snapshot|user-done|done|cancel|close)
     action="$cmd"
     [ "$cmd" = "user-done" ] && action="user_done"
     [ "$cmd" = "done" ] && action="user_done"
     [ "$cmd" = "cancel" ] && action="user_cancelled"
     request_id="$(write_request "$prefix" action "$action")"
+    ;;
+  screenshot)
+    push=0
+    present_files=1
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --push) push=1 ;;
+        --background|--no-present) present_files=0 ;;
+        *) usage >&2; exit 2 ;;
+      esac
+      shift
+    done
+    request_id="$(write_request "$prefix" action screenshot push "$push" present_files "$present_files")"
     ;;
   status)
     print_file_if_readable "$prefix/local/browser/status" || true
@@ -184,7 +242,12 @@ case "$cmd" in
     exit 0
     ;;
   result)
-    print_file_if_readable "$prefix/local/browser/result.json" || true
+    if [ "$#" -gt 0 ]; then
+      safe_request_id="$(safe_id "$1")"
+      print_file_if_readable "$prefix/local/browser/results/$safe_request_id.json" || true
+    else
+      print_file_if_readable "$prefix/local/browser/result.json" || true
+    fi
     exit 0
     ;;
   wait)
@@ -197,23 +260,85 @@ case "$cmd" in
   forward)
     request_id="$(write_request "$prefix" action forward)"
     ;;
-  new-tab)
+  new-tab|new_tab)
     if [ "$#" -gt 0 ]; then
       request_id="$(write_request "$prefix" action new_tab url "$1")"
     else
       request_id="$(write_request "$prefix" action new_tab)"
     fi
     ;;
-  select-tab)
+  list-tabs|tabs)
+    request_id="$(write_request "$prefix" action list_tabs)"
+    ;;
+  select-tab|select_tab)
     [ "$#" -eq 1 ] || { usage >&2; exit 2; }
     request_id="$(write_request "$prefix" action select_tab tab_id "$1")"
     ;;
-  close-tab)
+  close-tab|close_tab)
     if [ "$#" -gt 0 ]; then
       request_id="$(write_request "$prefix" action close_tab tab_id "$1")"
     else
       request_id="$(write_request "$prefix" action close_tab)"
     fi
+    ;;
+  history)
+    request_id="$(write_request "$prefix" action history)"
+    ;;
+  clear-history|clear_history)
+    request_id="$(write_request "$prefix" action clear_history)"
+    ;;
+  cookies)
+    [ "$#" -ge 1 ] || { usage >&2; exit 2; }
+    subcmd="$1"
+    shift
+    case "$subcmd" in
+      status)
+        [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+        request_id="$(write_request "$prefix" action cookies_status url "$1")"
+        ;;
+      verify)
+        [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+        request_id="$(write_request "$prefix" action cookies_verify url "$1")"
+        ;;
+      flush)
+        [ "$#" -eq 0 ] || { usage >&2; exit 2; }
+        request_id="$(write_request "$prefix" action cookies_flush)"
+        ;;
+      *) usage >&2; exit 2 ;;
+    esac
+    ;;
+  userscript)
+    [ "$#" -ge 1 ] || { usage >&2; exit 2; }
+    subcmd="$1"
+    shift
+    case "$subcmd" in
+      add)
+        [ "$#" -eq 3 ] || { usage >&2; exit 2; }
+        name="$1"
+        match="$2"
+        source="$3"
+        script_id="$(date +%s 2>/dev/null || printf 0).$$"
+        copied_path="$(copy_userscript "$prefix" "$script_id" "$source")"
+        request_id="$(write_request "$prefix" action userscript_add id "$script_id" name "$name" match "$match" path "$copied_path")"
+        ;;
+      list)
+        [ "$#" -eq 0 ] || { usage >&2; exit 2; }
+        request_id="$(write_request "$prefix" action userscript_list)"
+        ;;
+      enable)
+        [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+        request_id="$(write_request "$prefix" action userscript_enable id "$1")"
+        ;;
+      disable)
+        [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+        request_id="$(write_request "$prefix" action userscript_disable id "$1")"
+        ;;
+      remove)
+        [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+        request_id="$(write_request "$prefix" action userscript_remove id "$1")"
+        ;;
+      *) usage >&2; exit 2 ;;
+    esac
     ;;
   click)
     [ "$#" -eq 1 ] || { usage >&2; exit 2; }

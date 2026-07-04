@@ -65,6 +65,7 @@ MANUAL TERMINAL ASSERTIONS:
 3. codex                -> if config/auth is missing, opens the config guide once, then runs Codex
 4. codex 配置模式        -> opens the config guide explicitly
 5. codex 更新            -> runs codex-update apply
+6. tests/codex-for-tui-browser-smoke.sh -> run inside the installed terminal before promoting a browser release
 EOF
 
 printf 'OK: Codex for TUI device smoke launch passed\n'
