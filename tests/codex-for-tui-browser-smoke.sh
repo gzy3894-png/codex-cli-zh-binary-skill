@@ -30,6 +30,31 @@ run_browser() {
   codex-browser "$@"
 }
 
+send_browser_no_wait() {
+  info "codex-browser --no-wait $*"
+  output="$(codex-browser --no-wait "$@")" || fail "codex-browser --no-wait failed: $*"
+  request_id="$(printf '%s\n' "$output" | sed -n 's/^已发送到 Codex for TUI 浏览器: //p' | sed -n '1p')"
+  [ -n "$request_id" ] || fail "missing request id for: $*"
+  printf '%s\n' "$request_id"
+}
+
+wait_browser_result_contains() {
+  request_id="$1"
+  needle="$2"
+  elapsed=0
+  while [ "$elapsed" -lt 30 ]; do
+    result="$(codex-browser result "$request_id" 2>/dev/null || true)"
+    if printf '%s\n' "$result" | grep -F '"ok": true' >/dev/null 2>&1 &&
+      printf '%s\n' "$result" | grep -F "$needle" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  printf '%s\n' "$result" >&2
+  fail "browser result $request_id did not contain: $needle"
+}
+
 need_cmd codex-browser
 need_cmd codex-preview
 
@@ -57,6 +82,12 @@ cat > "$webroot/page2.html" <<'HTML'
 <!doctype html>
 <html><head><meta charset="utf-8"><title>Codex Smoke Page 2</title></head>
 <body><main id="page2">Second Tab Ready</main></body></html>
+HTML
+
+cat > "$webroot/persist.html" <<'HTML'
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Codex Smoke Persist</title></head>
+<body><main id="persist-ready">Persistence Check Ready</main></body></html>
 HTML
 
 cat > "$webroot/userscript.html" <<'HTML'
@@ -104,19 +135,43 @@ http_get "$base/index.html" || fail "local smoke server did not become reachable
 run_browser open "$base/index.html"
 run_browser get-text '#ready' | grep -F 'state=done' >/dev/null || fail "get-text did not complete"
 run_browser cookies verify "$base/index.html" | grep -F 'verified=1' >/dev/null || fail "cookie verification failed"
-run_browser js "localStorage.getItem('codex_smoke_storage')" | grep -F 'state=done' >/dev/null || fail "localStorage js read failed"
+storage_request="$(send_browser_no_wait js "return localStorage.getItem('codex_smoke_storage');")"
+wait_browser_result_contains "$storage_request" '"value": "ok"'
+
+present_output="$(run_browser present smoke_present)"
+printf '%s\n' "$present_output" | grep -F 'state=ready' >/dev/null || fail "present did not report ready"
+printf '%s\n' "$present_output" | grep -F 'visible=1' >/dev/null || fail "present did not report visible=1"
+printf '%s\n' "$present_output" | grep -F 'collapsed=0' >/dev/null || fail "present did not report collapsed=0"
+codex-browser events | grep -F 'type=agent_presented' >/dev/null || fail "present event missing"
+
+collapse_output="$(run_browser collapse smoke_collapse)"
+printf '%s\n' "$collapse_output" | grep -F 'state=done' >/dev/null || fail "collapse did not report done"
+printf '%s\n' "$collapse_output" | grep -F 'visible=0' >/dev/null || fail "collapse did not report visible=0"
+printf '%s\n' "$collapse_output" | grep -F 'collapsed=1' >/dev/null || fail "collapse did not report collapsed=1"
+codex-browser events | grep -F 'type=agent_collapsed' >/dev/null || fail "collapse event missing"
 
 run_browser new-tab "$base/page2.html" | grep -F 'state=done' >/dev/null || fail "new-tab failed"
 run_browser list-tabs | grep -F 'tabs_count=' >/dev/null || fail "list-tabs did not return status"
 run_browser select-tab 1 | grep -F 'state=done' >/dev/null || fail "select-tab failed"
 
 i=1
+queue_ids="$tmp/queue-ids"
+: > "$queue_ids"
 while [ "$i" -le 20 ]; do
-  codex-browser --no-wait js "return 'queue-$i';" >/dev/null
+  request_id="$(send_browser_no_wait js "return 'queue-$i';")"
+  printf '%s %s\n' "$request_id" "queue-$i" >> "$queue_ids"
   i=$((i + 1))
 done
-sleep 3
-codex-browser status | grep -F 'ok=1' >/dev/null || fail "queued browser commands did not leave ok status"
+while IFS=' ' read -r request_id expected; do
+  wait_browser_result_contains "$request_id" "\"value\": \"$expected\""
+done < "$queue_ids"
+
+run_browser close | grep -F 'state=closed' >/dev/null || fail "close did not report closed"
+run_browser open "$base/persist.html"
+run_browser get-text '#persist-ready' | grep -F 'state=done' >/dev/null || fail "persist page did not load after browser restart"
+run_browser cookies verify "$base/persist.html" | grep -F 'verified=1' >/dev/null || fail "cookie was not reused after browser restart"
+storage_restart_request="$(send_browser_no_wait js "return localStorage.getItem('codex_smoke_storage');")"
+wait_browser_result_contains "$storage_restart_request" '"value": "ok"'
 
 run_browser screenshot --push --background | grep -F 'file_id=' >/dev/null || fail "screenshot --push did not return file_id"
 file_id="$(codex-browser status | sed -n 's/^file_id=//p' | sed -n '1p')"
@@ -133,6 +188,8 @@ run_browser clear-history | grep -F 'state=done' >/dev/null || fail "clear-histo
 codex-browser --no-wait user-wait 'smoke user handoff' >/dev/null
 sleep 1
 codex-browser status | grep -F 'needs_user=1' >/dev/null || fail "user-wait did not set needs_user"
+codex-browser events | grep -F 'type=agent_user_wait' >/dev/null || fail "user-wait event missing"
 run_browser user-done | grep -F 'needs_user=0' >/dev/null || fail "user-done did not clear needs_user"
+codex-browser events | grep -F 'type=agent_done' >/dev/null || fail "user-done event missing"
 
 printf 'OK: browser smoke passed\n'
