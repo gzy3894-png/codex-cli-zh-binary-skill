@@ -60,8 +60,8 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 20'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.0"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 21'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.1"'
 }
 
 test_image_preview_bridge_asset() {

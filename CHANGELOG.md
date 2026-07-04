@@ -1,5 +1,21 @@
 # Changelog
 
+## Codex for TUI 2.0.1
+
+Codex for TUI 2.0.1 修复 2.0 正式版后续测试中发现的浏览器和文件托盘协作问题。
+
+### 修复
+
+- `codex-browser open` 继续默认后台打开；当手机终端误把 `codex-browser status` 粘在同一行时，不再直接 usage 失败，而是继续发送打开请求并提示 `status` 需要另起一行执行。
+- 浏览器协作命令支持 `user-wait` 和 `wait-user` 两种写法，便于 Agent 和用户按自然语序调用。
+- 文件托盘发送文本/文件到当前会话时，终端提示进一步缩短为编号和 `codex-preview path <编号>`，避免长提示词干扰 shell 或 Codex 上下文。
+- README 和 Android README 的浏览器测试命令改为 URL 加引号、`status` 单独执行，更适合手机终端复制粘贴。
+
+### 验证
+
+- 本地非构建门禁：APK asset shell 语法、安装器 smoke test、静态 guards 和 `git diff --check`。
+- GitHub Actions：测试 APK 由仓库工作流构建通过；正式 APK 由 release/tag 工作流构建。
+
 ## Codex for TUI 2.0.0
 
 Codex for TUI 2.0.0 聚焦移动端协作体验：文件托盘、协作浏览器和更轻的顶部容器。
