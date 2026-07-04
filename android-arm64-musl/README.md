@@ -26,7 +26,7 @@
 
 普通启动不会自动联网更新脚本，不会请求 `/models`，不会覆盖 `~/.codex/config.toml`。
 
-Codex for TUI 2.0 用户不需要重装 APK；但已经完成首次安装的用户需要手动更新脚本：
+Codex for TUI 2.0.8 用户建议覆盖安装最新 APK；已经完成首次安装但只需要更新脚本时，可以手动运行：
 
 ```sh
 codex 更新
@@ -77,7 +77,7 @@ codex-local refresh-models
 codex 配置模式
 ```
 
-该命令会打开配置菜单，支持新建/重配、编辑当前配置、选择已保存配置、保存当前配置、刷新模型目录和修复全权限授权。第三方配置会写入 `config.toml`、`auth.json` 和 `model_catalog_json`，不会重置自动压缩、fast mode、goals、statusline 等通用配置。全权限模式会同时写入 `approval_policy = "never"` 和 `sandbox_mode = "danger-full-access"`。
+该命令会打开配置菜单，支持新建/重配、编辑当前配置、选择已保存配置、保存当前配置、刷新模型目录和修复全权限授权。第三方配置会写入 `config.toml`、`auth.json` 和 `model_catalog_json`，并保持自动压缩、fast mode、goals、statusline、RTK hook 和 context hook 等通用配置。全权限模式会同时写入 `approval_policy = "never"` 和 `sandbox_mode = "danger-full-access"`。
 
 ## ReTerminal Alpine 安装
 
@@ -198,7 +198,7 @@ disable_response_storage = true
 auto_compaction = true
 fast_mode = true
 goals = true
-hooks = false
+hooks = true
 
 [tui]
 status_line = ["model-with-reasoning", "current-dir", "context-remaining", "used-tokens", "total-input-tokens", "total-output-tokens", "fast-mode", "task-progress"]
@@ -300,25 +300,27 @@ curl -v --http1.1 https://api.example.com/v1/models
 
 **Codex 结束时报 `Stop hook exited with code 127`？**
 
-脚本生成的新配置会写入：
+2.0.8 起脚本生成的新配置会写入：
 
 ```toml
 [features]
-hooks = false
+hooks = true
 ```
 
-如果你迁移了旧配置，请手动检查 `~/.codex/config.toml`。需要使用 RTK 压缩之后的 shell 输出时，先运行：
+如果你迁移了旧配置，请手动检查 `~/.codex/config.toml`。需要检查 RTK 和上下文压缩监测时运行：
 
 ```sh
 codex-rtk status
 codex-rtk verify
-codex-rtk enable
+codex-context status
+codex-context verify
 ```
 
-然后在 Codex TUI 里运行 `/hooks` 信任 `codex-rtk hook`。关闭 RTK hook 用：
+然后在 Codex TUI 里运行 `/hooks` 信任 `codex-rtk hook` 和 `codex-context hook`。关闭托管 hook 用：
 
 ```sh
 codex-rtk disable
+codex-context disable
 ```
 
 ## 文件校验

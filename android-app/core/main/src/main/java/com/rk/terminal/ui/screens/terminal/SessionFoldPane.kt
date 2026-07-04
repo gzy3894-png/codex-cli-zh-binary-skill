@@ -20,7 +20,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -28,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.io.File
+import kotlinx.coroutines.delay
 
 @Composable
 fun SessionFoldTimeline(
@@ -44,6 +50,15 @@ fun SessionFoldTimeline(
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val maxHeight = (screenHeight * 0.34f).coerceIn(104.dp, 280.dp)
     val totalItems = runs.sumOf { it.items.size }
+    val hasRunningRun = runs.any { it.status == "running" && it.endedAt <= 0L }
+    var nowMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(hasRunningRun) {
+        while (hasRunningRun) {
+            nowMillis = System.currentTimeMillis()
+            delay(1000)
+        }
+    }
 
     Surface(
         modifier = modifier
@@ -101,6 +116,7 @@ fun SessionFoldTimeline(
                     items(runs.asReversed(), key = { it.id }) { run ->
                         SessionFoldRunRow(
                             run = run,
+                            nowMillis = nowMillis,
                             onToggle = { onToggle(run.id) },
                             onRemove = { onRemove(run.id) }
                         )
@@ -114,6 +130,7 @@ fun SessionFoldTimeline(
 @Composable
 private fun SessionFoldRunRow(
     run: TerminalSessionFoldRun,
+    nowMillis: Long,
     onToggle: () -> Unit,
     onRemove: () -> Unit
 ) {
@@ -139,7 +156,7 @@ private fun SessionFoldRunRow(
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = sessionFoldHeader(run),
+                        text = sessionFoldHeader(run, nowMillis),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -228,9 +245,9 @@ private fun SessionFoldItemRow(item: TerminalSessionFoldItem) {
     }
 }
 
-private fun sessionFoldHeader(run: TerminalSessionFoldRun): String {
+private fun sessionFoldHeader(run: TerminalSessionFoldRun, nowMillis: Long): String {
     val label = if (run.status == "running") "处理中" else "已处理"
-    val elapsed = sessionFoldElapsed(run)
+    val elapsed = sessionFoldElapsed(run, nowMillis)
     return if (elapsed.isBlank()) label else "$label  $elapsed"
 }
 
@@ -248,8 +265,8 @@ private fun sessionFoldTimelineSummary(runs: List<TerminalSessionFoldRun>): Stri
         .joinToString("  ")
 }
 
-private fun sessionFoldElapsed(run: TerminalSessionFoldRun): String {
-    val end = if (run.endedAt > 0) run.endedAt else System.currentTimeMillis()
+private fun sessionFoldElapsed(run: TerminalSessionFoldRun, nowMillis: Long): String {
+    val end = if (run.endedAt > 0) run.endedAt else nowMillis
     val seconds = ((end - run.startedAt) / 1000).coerceAtLeast(0)
     if (seconds <= 0) return ""
     if (seconds < 60) return "${seconds}s"

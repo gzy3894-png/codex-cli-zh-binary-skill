@@ -16,6 +16,7 @@ BROWSER_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-browser"
 PANEL_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-panel"
 SESSION_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-session"
 RTK_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-rtk"
+CONTEXT_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-context"
 TERMINAL_TOP_BAR="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalTopBar.kt"
 TERMINAL_SCREEN="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalScreen.kt"
 MEDIA_PREVIEW_PANE="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MediaPreviewPane.kt"
@@ -65,8 +66,8 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 27'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.7"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 28'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.8"'
 }
 
 test_release_workflow_signature_gate() {
@@ -93,6 +94,7 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$MKSESSION" '"codex-panel" to "codex-panel"'
   assert_file_contains "$MKSESSION" '"codex-session" to "codex-session"'
   assert_file_contains "$MKSESSION" '"codex-rtk" to "codex-rtk"'
+  assert_file_contains "$MKSESSION" '"codex-context" to "codex-context"'
   assert_file_contains "$MKSESSION" '"rtk" to "rtk"'
   assert_file_contains "$MKSESSION" 'input.copyTo(output)'
   assert_file_contains "$INIT_ASSET" 'ensure_codex_preview'
@@ -498,7 +500,7 @@ test_codex_rtk_bridge_asset() {
   assert_file_contains "$RTK_ASSET" 'codex-for-tui-rtk-hook begin'
 
   sample='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status"}}'
-  output="$(printf '%s' "$sample" | PATH="$tmp/empty:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" hook)"
+  output="$(printf '%s' "$sample" | PREFIX="$tmp/no-prefix" PATH="$tmp/empty:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" hook)"
   [ -z "$output" ] || fail "codex-rtk hook should fail open when rtk is missing"
 
   cat > "$tmp/bin/rtk" <<'EOF'
@@ -521,17 +523,89 @@ esac
 EOF
   chmod 755 "$tmp/bin/rtk"
 
-  output="$(printf '%s' "$sample" | PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" hook)"
+  output="$(printf '%s' "$sample" | PREFIX="$tmp/no-prefix" PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" hook)"
   printf '%s\n' "$output" | grep -F '"updatedInput":{"command":"rtk git status"}' >/dev/null 2>&1 || fail "codex-rtk hook did not return updatedInput"
 
-  PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" enable >/dev/null || fail "codex-rtk enable failed"
+  PREFIX="$tmp/no-prefix" PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" enable >/dev/null || fail "codex-rtk enable failed"
   assert_file_contains "$tmp/home/.codex/config.toml" 'hooks = true'
   assert_file_contains "$tmp/home/.codex/config.toml" 'codex-for-tui-rtk-hook begin'
   assert_file_contains "$tmp/home/.codex/config.toml" 'command = "codex-rtk hook"'
 
-  PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" disable >/dev/null || fail "codex-rtk disable failed"
+  PREFIX="$tmp/no-prefix" PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" disable >/dev/null || fail "codex-rtk disable failed"
   assert_file_not_contains "$tmp/home/.codex/config.toml" 'codex-for-tui-rtk-hook begin'
 
+  rm -rf "$tmp"
+}
+
+test_codex_context_bridge_asset() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-static-context.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.codex" "$tmp/prefix/local"
+
+  assert_file_contains "$CONTEXT_ASSET" 'codex-context status|events|hook|enable|disable|verify'
+  assert_file_contains "$CONTEXT_ASSET" 'codex-for-tui-context-hook begin'
+  assert_file_contains "$CONTEXT_ASSET" '[[hooks.PreCompact]]'
+  assert_file_contains "$CONTEXT_ASSET" '[[hooks.PostCompact]]'
+  assert_file_contains "$CONTEXT_ASSET" '[[hooks.SessionStart]]'
+  assert_file_contains "$CONTEXT_ASSET" 'matcher = "manual|auto"'
+  assert_file_contains "$CONTEXT_ASSET" 'matcher = "startup|resume|compact"'
+
+  HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" enable >/dev/null || fail "codex-context enable failed"
+  assert_file_contains "$tmp/home/.codex/config.toml" 'hooks = true'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'codex-for-tui-context-hook begin'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'command = "codex-context hook"'
+
+  sample='{"hook_event_name":"PreCompact","trigger":"auto"}'
+  printf '%s' "$sample" | PREFIX="$tmp/prefix" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" hook
+  assert_file_contains "$tmp/home/.codex/context-state/events" 'phase=pre_compact'
+  assert_file_contains "$tmp/prefix/local/session-fold/events" 'source=context'
+  assert_file_contains "$tmp/prefix/local/session-fold/events" 'type=context_pre_compact'
+
+  HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" status >"$tmp/status" || fail "codex-context status failed"
+  assert_file_contains "$tmp/status" 'context_hook=enabled'
+  HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" disable >/dev/null || fail "codex-context disable failed"
+  assert_file_not_contains "$tmp/home/.codex/config.toml" 'codex-for-tui-context-hook begin'
+  sh "$CONTEXT_ASSET" verify >/dev/null || fail "codex-context verify failed"
+  rm -rf "$tmp"
+}
+
+test_codex_config_default_hooks_survive_profile_use() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-static-config-hooks.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.codex" "$tmp/bin"
+  cat > "$tmp/bin/codex-rtk" <<'EOF'
+#!/usr/bin/env sh
+exit 0
+EOF
+  cat > "$tmp/bin/codex-context" <<'EOF'
+#!/usr/bin/env sh
+exit 0
+EOF
+  chmod 755 "$tmp/bin/codex-rtk" "$tmp/bin/codex-context"
+  printf '%s\n' 'model-a' > "$tmp/models.txt"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-config.sh"
+    export PATH="$tmp/bin:$PATH"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    codex_config_write_third_party_config "https://api.example.com/v1" "key" "model-a" "$tmp/models.txt"
+    codex_config_profile_save keep-hooks
+    mkdir -p "$CODEX_HOME/config-profiles/no-hooks"
+    {
+      printf 'model = "model-a"\n'
+      printf '[features]\n'
+      printf 'hooks = false\n'
+    } > "$CODEX_HOME/config-profiles/no-hooks/config.toml"
+    codex_config_profile_use no-hooks
+  ) >/dev/null
+
+  assert_file_contains "$tmp/home/.codex/config.toml" 'hooks = true'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'codex-for-tui-rtk-hook begin'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'codex-for-tui-context-hook begin'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'command = "codex-rtk hook"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'command = "codex-context hook"'
   rm -rf "$tmp"
 }
 
@@ -711,6 +785,7 @@ test_update_apply_installs_self_test_script_and_aliases() {
   [ -x "$tmp/bin/codex-panel" ] || fail "codex-panel bridge wrapper was not installed by update"
   [ -x "$tmp/bin/codex-session" ] || fail "codex-session bridge wrapper was not installed by update"
   [ -x "$tmp/bin/codex-rtk" ] || fail "codex-rtk bridge wrapper was not installed by update"
+  [ -x "$tmp/bin/codex-context" ] || fail "codex-context bridge wrapper was not installed by update"
   assert_file_contains "$tmp/stdout" "已更新：codex-for-tui-self-test.sh"
   rm -rf "$tmp"
 }
@@ -789,6 +864,8 @@ run_step test_browser_bridge_asset
 run_step test_agent_panel_bridge_asset
 run_step test_session_fold_bridge_asset
 run_step test_codex_rtk_bridge_asset
+run_step test_codex_context_bridge_asset
+run_step test_codex_config_default_hooks_survive_profile_use
 run_step test_generated_launcher_entrypoints_and_normal_path
 run_step test_generated_launcher_first_run_configures_then_runs
 run_step test_update_apply_installs_self_test_script_and_aliases

@@ -27,6 +27,7 @@ object MkSession {
         "codex-panel" to "codex-panel",
         "codex-session" to "codex-session",
         "codex-rtk" to "codex-rtk",
+        "codex-context" to "codex-context",
         "rtk" to "rtk",
     )
     private val obsoleteScripts = listOf(

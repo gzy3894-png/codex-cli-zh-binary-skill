@@ -1,0 +1,340 @@
+#!/usr/bin/env sh
+set -eu
+
+MARK_BEGIN="# codex-for-tui-context-hook begin"
+MARK_END="# codex-for-tui-context-hook end"
+
+usage() {
+  printf '%s\n' "用法: codex-context status|events|hook|enable|disable|verify"
+}
+
+codex_home() {
+  printf '%s\n' "${CODEX_HOME:-$HOME/.codex}"
+}
+
+config_file() {
+  printf '%s/config.toml\n' "$(codex_home)"
+}
+
+state_dir() {
+  printf '%s/context-state\n' "$(codex_home)"
+}
+
+backup_file() {
+  file="$1"
+  [ -e "$file" ] || return 0
+  stamp="$(date +%Y%m%d%H%M%S 2>/dev/null || printf 0)"
+  cp -p "$file" "$file.codex-context.bak.$stamp"
+}
+
+strip_managed_block() {
+  input="$1"
+  output="$2"
+  awk -v begin="$MARK_BEGIN" -v end="$MARK_END" '
+    $0 == begin { skip = 1; next }
+    $0 == end { skip = 0; next }
+    !skip { print }
+  ' "$input" > "$output"
+}
+
+set_hooks_feature() {
+  value="$1"
+  cfg="$(config_file)"
+  home_dir="$(codex_home)"
+  mkdir -p "$home_dir"
+  [ -f "$cfg" ] || : > "$cfg"
+  backup_file "$cfg"
+  tmp="$cfg.tmp.$$"
+  awk -v desired="$value" '
+    function is_section(line) { return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*$/ }
+    function section_name(line, value) {
+      value = line
+      sub(/^[[:space:]]*\[/, "", value)
+      sub(/\][[:space:]]*$/, "", value)
+      return value
+    }
+    function flush_features() {
+      if (section == "features" && hooks_seen == 0) {
+        print "hooks = " desired
+        hooks_seen = 1
+      }
+    }
+    BEGIN {
+      section = ""
+      features_seen = 0
+      hooks_seen = 0
+    }
+    {
+      if (is_section($0)) {
+        flush_features()
+        section = section_name($0)
+        if (section == "features") {
+          features_seen = 1
+          hooks_seen = 0
+        }
+        print
+        next
+      }
+      if (section == "features" && $0 ~ /^[[:space:]]*hooks[[:space:]]*=/) {
+        print "hooks = " desired
+        hooks_seen = 1
+        next
+      }
+      print
+    }
+    END {
+      flush_features()
+      if (features_seen == 0) {
+        print ""
+        print "[features]"
+        print "hooks = " desired
+      }
+    }
+  ' "$cfg" > "$tmp"
+  mv "$tmp" "$cfg"
+  chmod 600 "$cfg" 2>/dev/null || true
+}
+
+hook_configured() {
+  cfg="$(config_file)"
+  [ -f "$cfg" ] && grep -F "$MARK_BEGIN" "$cfg" >/dev/null 2>&1
+}
+
+install_hook_block() {
+  cfg="$(config_file)"
+  home_dir="$(codex_home)"
+  mkdir -p "$home_dir"
+  [ -f "$cfg" ] || : > "$cfg"
+  backup_file "$cfg"
+  tmp="$cfg.tmp.$$"
+  strip_managed_block "$cfg" "$tmp"
+  {
+    cat "$tmp"
+    printf '\n%s\n' "$MARK_BEGIN"
+    printf '[[hooks.PreCompact]]\n'
+    printf 'matcher = "manual|auto"\n\n'
+    printf '[[hooks.PreCompact.hooks]]\n'
+    printf 'type = "command"\n'
+    printf 'command = "codex-context hook"\n'
+    printf 'timeout = 5\n'
+    printf 'statusMessage = "Recording context compact start"\n\n'
+    printf '[[hooks.PostCompact]]\n'
+    printf 'matcher = "manual|auto"\n\n'
+    printf '[[hooks.PostCompact.hooks]]\n'
+    printf 'type = "command"\n'
+    printf 'command = "codex-context hook"\n'
+    printf 'timeout = 5\n'
+    printf 'statusMessage = "Recording context compact finish"\n\n'
+    printf '[[hooks.SessionStart]]\n'
+    printf 'matcher = "startup|resume|compact"\n\n'
+    printf '[[hooks.SessionStart.hooks]]\n'
+    printf 'type = "command"\n'
+    printf 'command = "codex-context hook"\n'
+    printf 'timeout = 5\n'
+    printf 'statusMessage = "Recording Codex session start"\n'
+    printf '%s\n' "$MARK_END"
+  } > "$cfg"
+  rm -f "$tmp"
+  chmod 600 "$cfg" 2>/dev/null || true
+}
+
+remove_hook_block() {
+  cfg="$(config_file)"
+  [ -f "$cfg" ] || return 0
+  backup_file "$cfg"
+  tmp="$cfg.tmp.$$"
+  strip_managed_block "$cfg" "$tmp"
+  mv "$tmp" "$cfg"
+  chmod 600 "$cfg" 2>/dev/null || true
+}
+
+json_value() {
+  key="$1"
+  sed -n 's/.*"'"$key"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed -n '1p'
+}
+
+ref_value() {
+  printf '%s' "$1" | tr '\r\n' '  '
+}
+
+find_prefix() {
+  if [ -n "${PREFIX:-}" ] && [ -d "${PREFIX%/}/local" ]; then
+    printf '%s\n' "${PREFIX%/}"
+    return 0
+  fi
+  if [ -n "${PKG:-}" ]; then
+    for prefix in "/data/user/0/$PKG" "/data/data/$PKG"; do
+      [ -d "$prefix/local" ] && { printf '%s\n' "$prefix"; return 0; }
+    done
+  fi
+  for prefix in \
+    /data/user/0/com.gzy3894.codexfortui \
+    /data/data/com.gzy3894.codexfortui \
+    /data/user/0/com.gzy3894.codexfortui.test \
+    /data/data/com.gzy3894.codexfortui.test \
+    /data/user/0/com.gzy3894.codexfortui.debug \
+    /data/data/com.gzy3894.codexfortui.debug
+  do
+    [ -d "$prefix/local" ] && { printf '%s\n' "$prefix"; return 0; }
+  done
+  return 1
+}
+
+write_session_event() {
+  event_id="$1"
+  event_name="$2"
+  phase="$3"
+  trigger="$4"
+  reason="$5"
+  prefix="$(find_prefix 2>/dev/null || true)"
+  [ -n "$prefix" ] || return 0
+  dir="$prefix/local/session-fold"
+  mkdir -p "$dir" 2>/dev/null || return 0
+  {
+    printf 'event_id=%s\n' "$event_id"
+    printf 'source=context\n'
+    printf 'type=context_%s\n' "$phase"
+    printf 'state=%s\n' "$phase"
+    printf 'reason=%s\n' "$(ref_value "$reason")"
+    printf 'hook_event=%s\n' "$(ref_value "$event_name")"
+    printf 'trigger=%s\n' "$(ref_value "$trigger")"
+    printf '%s\n' '---'
+  } >> "$dir/events" 2>/dev/null || true
+}
+
+record_event() {
+  event_name="$1"
+  trigger="$2"
+  reason="$3"
+  dir="$(state_dir)"
+  mkdir -p "$dir"
+  stamp="$(date +%s 2>/dev/null || printf 0).$$"
+  case "$event_name" in
+    PreCompact) phase="pre_compact" ;;
+    PostCompact) phase="post_compact" ;;
+    SessionStart) phase="session_start" ;;
+    *) phase="hook" ;;
+  esac
+  {
+    printf 'event_id=%s\n' "$stamp"
+    printf 'source=context\n'
+    printf 'hook_event=%s\n' "$(ref_value "$event_name")"
+    printf 'phase=%s\n' "$phase"
+    printf 'trigger=%s\n' "$(ref_value "$trigger")"
+    printf 'reason=%s\n' "$(ref_value "$reason")"
+    printf 'cwd=%s\n' "$(pwd 2>/dev/null || true)"
+    printf 'stamp=%s\n' "$stamp"
+  } > "$dir/status.tmp.$$"
+  mv "$dir/status.tmp.$$" "$dir/status"
+  {
+    cat "$dir/status"
+    printf '%s\n' '---'
+  } >> "$dir/events"
+  write_session_event "$stamp" "$event_name" "$phase" "$trigger" "$reason"
+}
+
+run_hook() {
+  input="$(cat || true)"
+  event_name=""
+  trigger=""
+  reason=""
+  if [ -n "$input" ]; then
+    event_name="$(printf '%s' "$input" | json_value hook_event_name)"
+    [ -n "$event_name" ] || event_name="$(printf '%s' "$input" | json_value hookEventName)"
+    [ -n "$event_name" ] || event_name="$(printf '%s' "$input" | json_value event)"
+    trigger="$(printf '%s' "$input" | json_value trigger)"
+    [ -n "$trigger" ] || trigger="$(printf '%s' "$input" | json_value compact_trigger)"
+    [ -n "$trigger" ] || trigger="$(printf '%s' "$input" | json_value source)"
+    [ -n "$trigger" ] || trigger="$(printf '%s' "$input" | json_value matcher)"
+    reason="$(printf '%s' "$input" | json_value reason)"
+  fi
+  [ -n "$event_name" ] || event_name="unknown"
+  [ -n "$trigger" ] || trigger="unknown"
+  [ -n "$reason" ] || reason="$event_name:$trigger"
+  record_event "$event_name" "$trigger" "$reason"
+}
+
+status() {
+  cfg="$(config_file)"
+  printf 'codex_home=%s\n' "$(codex_home)"
+  printf 'config=%s\n' "$cfg"
+  printf 'state_dir=%s\n' "$(state_dir)"
+  if [ -f "$cfg" ] && grep -Eq '^[[:space:]]*model_auto_compact_token_limit[[:space:]]*=' "$cfg"; then
+    sed -n 's/^[[:space:]]*model_auto_compact_token_limit[[:space:]]*=[[:space:]]*/model_auto_compact_token_limit=/p' "$cfg" | sed -n '1p'
+  else
+    printf 'model_auto_compact_token_limit=default\n'
+  fi
+  if [ -f "$cfg" ] && grep -Eq '^[[:space:]]*hooks[[:space:]]*=[[:space:]]*true' "$cfg"; then
+    printf 'hooks_feature=true\n'
+  elif [ -f "$cfg" ] && grep -Eq '^[[:space:]]*hooks[[:space:]]*=[[:space:]]*false' "$cfg"; then
+    printf 'hooks_feature=false\n'
+  else
+    printf 'hooks_feature=default\n'
+  fi
+  if hook_configured; then
+    printf 'context_hook=enabled\n'
+  else
+    printf 'context_hook=disabled\n'
+  fi
+  if [ -r "$(state_dir)/status" ]; then
+    cat "$(state_dir)/status"
+  fi
+}
+
+events() {
+  [ -r "$(state_dir)/events" ] && cat "$(state_dir)/events"
+}
+
+verify() {
+  tmp="${TMPDIR:-/tmp}/codex-context-verify.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.codex"
+  CODEX_HOME="$tmp/home/.codex" HOME="$tmp/home" sh "$0" enable >/dev/null
+  grep -F 'codex-for-tui-context-hook begin' "$tmp/home/.codex/config.toml" >/dev/null 2>&1 || {
+    printf '%s\n' "context hook 未写入 config.toml" >&2
+    rm -rf "$tmp"
+    exit 1
+  }
+  sample='{"hook_event_name":"PreCompact","trigger":"auto"}'
+  printf '%s' "$sample" | CODEX_HOME="$tmp/home/.codex" HOME="$tmp/home" sh "$0" hook
+  grep -F 'phase=pre_compact' "$tmp/home/.codex/context-state/events" >/dev/null 2>&1 || {
+    printf '%s\n' "context hook 未记录 pre_compact" >&2
+    rm -rf "$tmp"
+    exit 1
+  }
+  rm -rf "$tmp"
+  printf '%s\n' "Codex context hook 可用。首次启用后请在 Codex 内用 /hooks 信任该 hook。"
+}
+
+[ "$#" -ge 1 ] || { usage >&2; exit 2; }
+
+cmd="$1"
+shift
+
+case "$cmd" in
+  status)
+    status
+    ;;
+  events)
+    events
+    ;;
+  hook)
+    run_hook
+    ;;
+  enable)
+    set_hooks_feature true
+    install_hook_block
+    printf '%s\n' "已启用 Codex for TUI context hook。请在 Codex 内运行 /hooks 信任该 hook。"
+    ;;
+  disable)
+    remove_hook_block
+    printf '%s\n' "已移除 Codex for TUI context hook。未修改用户其他 hooks。"
+    ;;
+  verify)
+    verify
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

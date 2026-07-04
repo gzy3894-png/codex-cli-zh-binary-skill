@@ -11,10 +11,12 @@ codex_config_official_marker_file() {
 }
 
 codex_config_mark_official_mode() {
+  codex_config_backup_current
   marker="$(codex_config_official_marker_file)"
   mkdir -p "$(dirname "$marker")"
   printf '%s\n' "official-login" > "$marker"
   chmod 600 "$marker" 2>/dev/null || true
+  codex_config_ensure_default_hooks
 }
 
 codex_config_clear_official_mode() {
@@ -294,6 +296,136 @@ END {
   chmod 600 "$cfg" 2>/dev/null || true
 }
 
+codex_config_strip_managed_block() {
+  codex_strip_begin="$1"
+  codex_strip_end="$2"
+  codex_strip_input="$3"
+  codex_strip_output="$4"
+  awk -v begin="$codex_strip_begin" -v end="$codex_strip_end" '
+    $0 == begin { skip = 1; next }
+    $0 == end { skip = 0; next }
+    !skip { print }
+  ' "$codex_strip_input" > "$codex_strip_output"
+}
+
+codex_config_set_hooks_feature() {
+  codex_hooks_cfg="${1:-$(codex_config_file)}"
+  codex_hooks_desired="${2:-true}"
+  codex_hooks_home="$(codex_home)"
+  mkdir -p "$codex_hooks_home"
+  [ -f "$codex_hooks_cfg" ] || : > "$codex_hooks_cfg"
+  codex_hooks_tmp="$codex_hooks_cfg.hooks.tmp.$$"
+  awk -v desired="$codex_hooks_desired" '
+function is_section(line) {
+  return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*($|#)/
+}
+function section_name(line, s) {
+  s = line
+  sub(/^[[:space:]]*\[/, "", s)
+  sub(/\][[:space:]]*($|#.*$)/, "", s)
+  return s
+}
+function flush_features() {
+  if (section == "features" && !hooks_seen) {
+    print "hooks = " desired
+    hooks_seen = 1
+  }
+}
+{
+  if (is_section($0)) {
+    flush_features()
+    section = section_name($0)
+    if (section == "features") {
+      features_seen = 1
+      hooks_seen = 0
+    }
+    print
+    next
+  }
+  if (section == "features" && $0 ~ /^[[:space:]]*hooks[[:space:]]*=/) {
+    print "hooks = " desired
+    hooks_seen = 1
+    next
+  }
+  print
+}
+END {
+  flush_features()
+  if (!features_seen) {
+    print ""
+    print "[features]"
+    print "hooks = " desired
+  }
+}
+' "$codex_hooks_cfg" > "$codex_hooks_tmp"
+  mv "$codex_hooks_tmp" "$codex_hooks_cfg"
+  chmod 600 "$codex_hooks_cfg" 2>/dev/null || true
+}
+
+codex_config_append_default_hook_blocks() {
+  codex_hooks_cfg="$1"
+  codex_hooks_strip_rtk="$codex_hooks_cfg.strip-rtk.$$"
+  codex_hooks_strip_context="$codex_hooks_cfg.strip-context.$$"
+  codex_config_strip_managed_block \
+    "# codex-for-tui-rtk-hook begin" \
+    "# codex-for-tui-rtk-hook end" \
+    "$codex_hooks_cfg" "$codex_hooks_strip_rtk"
+  codex_config_strip_managed_block \
+    "# codex-for-tui-context-hook begin" \
+    "# codex-for-tui-context-hook end" \
+    "$codex_hooks_strip_rtk" "$codex_hooks_strip_context"
+  {
+    cat "$codex_hooks_strip_context"
+    if command -v codex-rtk >/dev/null 2>&1 && codex-rtk status >/dev/null 2>&1; then
+      printf '\n# codex-for-tui-rtk-hook begin\n'
+      printf '[[hooks.PreToolUse]]\n'
+      printf 'matcher = "^Bash$"\n\n'
+      printf '[[hooks.PreToolUse.hooks]]\n'
+      printf 'type = "command"\n'
+      printf 'command = "codex-rtk hook"\n'
+      printf 'timeout = 5\n'
+      printf 'statusMessage = "RTK compacting shell command"\n'
+      printf '# codex-for-tui-rtk-hook end\n'
+    fi
+    if command -v codex-context >/dev/null 2>&1 && codex-context status >/dev/null 2>&1; then
+      printf '\n# codex-for-tui-context-hook begin\n'
+      printf '[[hooks.PreCompact]]\n'
+      printf 'matcher = "manual|auto"\n\n'
+      printf '[[hooks.PreCompact.hooks]]\n'
+      printf 'type = "command"\n'
+      printf 'command = "codex-context hook"\n'
+      printf 'timeout = 5\n'
+      printf 'statusMessage = "Recording context compact start"\n\n'
+      printf '[[hooks.PostCompact]]\n'
+      printf 'matcher = "manual|auto"\n\n'
+      printf '[[hooks.PostCompact.hooks]]\n'
+      printf 'type = "command"\n'
+      printf 'command = "codex-context hook"\n'
+      printf 'timeout = 5\n'
+      printf 'statusMessage = "Recording context compact finish"\n\n'
+      printf '[[hooks.SessionStart]]\n'
+      printf 'matcher = "startup|resume|compact"\n\n'
+      printf '[[hooks.SessionStart.hooks]]\n'
+      printf 'type = "command"\n'
+      printf 'command = "codex-context hook"\n'
+      printf 'timeout = 5\n'
+      printf 'statusMessage = "Recording Codex session start"\n'
+      printf '# codex-for-tui-context-hook end\n'
+    fi
+  } > "$codex_hooks_cfg"
+  rm -f "$codex_hooks_strip_rtk" "$codex_hooks_strip_context"
+  chmod 600 "$codex_hooks_cfg" 2>/dev/null || true
+}
+
+codex_config_ensure_default_hooks() {
+  codex_hooks_cfg="$(codex_config_file)"
+  codex_hooks_home="$(codex_home)"
+  mkdir -p "$codex_hooks_home"
+  [ -f "$codex_hooks_cfg" ] || : > "$codex_hooks_cfg"
+  codex_config_set_hooks_feature "$codex_hooks_cfg" true
+  codex_config_append_default_hook_blocks "$codex_hooks_cfg"
+}
+
 codex_config_backup_current() {
   home_dir="$(codex_home)"
   state_root="$(codex_state_root)"
@@ -386,7 +518,7 @@ function flush_section_defaults() {
       print "goals = true"
     }
     if (!features_hooks_seen) {
-      print "hooks = false"
+      print "hooks = true"
     }
   } else if (section == "tui") {
     if (!tui_status_line_seen) {
@@ -455,6 +587,8 @@ function flush_section_defaults() {
       features_goals_seen = 1
     } else if ($0 ~ /^[[:space:]]*hooks[[:space:]]*=/) {
       features_hooks_seen = 1
+      print "hooks = true"
+      next
     }
   } else if (section == "tui") {
     if ($0 ~ /^[[:space:]]*status_line[[:space:]]*=/) {
@@ -477,7 +611,7 @@ END {
     print "auto_compaction = true"
     print "fast_mode = true"
     print "goals = true"
-    print "hooks = false"
+    print "hooks = true"
   }
   if (!tui_seen) {
     print ""
@@ -533,6 +667,7 @@ EOF
   mv "$config_tmp" "$cfg"
   chmod 600 "$cfg" 2>/dev/null || true
   codex_config_apply_full_permission "$cfg"
+  codex_config_ensure_default_hooks
 }
 
 codex_config_tty_read() {
@@ -722,6 +857,7 @@ codex_config_profile_use() {
   fi
 
   codex_config_clear_official_mode
+  codex_config_ensure_default_hooks
   codex_info "已切换配置：$name"
 }
 

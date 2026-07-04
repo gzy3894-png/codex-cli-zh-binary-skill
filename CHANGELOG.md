@@ -1,5 +1,25 @@
 # Changelog
 
+## Codex for TUI 2.0.8
+
+Codex for TUI 2.0.8 修复 RTK 默认启用、会话托盘耗时刷新和上下文压缩监测三类问题，让长会话在自动 compact 前后更容易交接。
+
+### 新功能
+
+- 新增 `codex-context status|events|hook|enable|disable|verify`，默认配置 `PreCompact`、`PostCompact` 和 `SessionStart(startup|resume|compact)` hook。
+- `codex-context` 会把自动/手动 compact 事件写入 `~/.codex/context-state/`，并追加到 App 会话事件流，后续 Agent 可用 `codex-context events` 或 `codex-session events` 追踪。
+
+### 修复
+
+- 配置模式默认写入 `hooks = true`，并保持 Codex for TUI 托管的 RTK/context hook；新建、编辑或切换第三方配置后不再丢失 RTK。
+- 会话托盘运行中耗时改为 UI ticker 自动刷新，不再依赖 Agent 主动传参，也不会每秒写状态文件。
+
+### 验证与回滚
+
+- 本地非 APK 门禁要求：`sh -n`、`sh tests/codex-for-tui-static-guards.sh`、`sh tests/codex-for-tui-installer-smoke.sh`、`git diff --check`、RTK/context hook 样例输入测试。
+- APK、签名校验、RTK 二进制和 release 资产仍只通过 GitHub Actions 构建。
+- 完整源码由 tag `codex-for-tui-v2.0.8` 固定保存；本轮实施前回滚锚点为 `rollback/2.0.7-before-2.0.8-5cac3a8` 和 `rollback-2.0.7-before-2.0.8`。
+
 ## Codex for TUI 2.0.7
 
 Codex for TUI 2.0.7 内置 RTK，并补齐会话托盘总折叠能力，重点减少之后 shell 输出刷屏，同时让 Agent 能明确感知会话时间线是否折叠。
