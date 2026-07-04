@@ -138,6 +138,7 @@ class TerminalBrowserSessionManager(
             when (action) {
                 "open", "navigate" -> navigate(request.requireValue("url"))
                 "present" -> present(request["reason"].orEmpty().ifBlank { "present" })
+                "collapse" -> JSONObject().put("collapsed", true)
                 "reload" -> {
                     activeTab().webView.reload()
                     publish("running", "刷新中")

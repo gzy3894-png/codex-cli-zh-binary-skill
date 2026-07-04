@@ -13,7 +13,9 @@ PREVIEW_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-preview"
 PUSH_IMAGE_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-push-image"
 PUSH_MEDIA_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-push-media"
 BROWSER_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-browser"
+PANEL_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-panel"
 TERMINAL_TOP_BAR="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalTopBar.kt"
+TERMINAL_SCREEN="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalScreen.kt"
 MEDIA_PREVIEW_PANE="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MediaPreviewPane.kt"
 MAIN_ACTIVITY="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/activities/terminal/MainActivity.kt"
 BROWSER_PANEL_PANE="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/BrowserPanelPane.kt"
@@ -61,8 +63,8 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 23'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.3"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 24'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.4"'
 }
 
 test_release_workflow_signature_gate() {
@@ -80,6 +82,7 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$MKSESSION" '"codex-push-image" to "codex-push-image"'
   assert_file_contains "$MKSESSION" '"codex-push-media" to "codex-push-media"'
   assert_file_contains "$MKSESSION" '"codex-browser" to "codex-browser"'
+  assert_file_contains "$MKSESSION" '"codex-panel" to "codex-panel"'
   assert_file_contains "$INIT_ASSET" 'ensure_codex_preview'
   assert_file_contains "$INIT_ASSET" '[ ! -r /etc/profile ] || . /etc/profile'
   assert_file_contains "$INIT_ASSET" 'export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"'
@@ -94,7 +97,10 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$MEDIA_PREVIEW_PANE" 'color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f)'
   assert_file_contains "$BROWSER_PANEL_PANE" '.height(28.dp)'
   assert_file_contains "$BROWSER_PANEL_PANE" 'BrowserTabChip'
-  assert_file_contains "$BROWSER_PANEL_PANE" 'onSelectTab = browserSessionManager::selectTabFromUi'
+  assert_file_not_contains "$BROWSER_PANEL_PANE" 'browserSessionManager::selectTabFromUi'
+  assert_file_not_contains "$BROWSER_PANEL_PANE" 'browserSessionManager::closeTabFromUi'
+  assert_file_contains "$TERMINAL_SCREEN" 'onSelectTab = mainActivity::selectBrowserTabFromUi'
+  assert_file_contains "$TERMINAL_SCREEN" 'onCloseTab = mainActivity::closeBrowserTabFromUi'
   assert_file_contains "$BROWSER_PANEL_PANE" 'color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f)'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'fun selectTabFromUi'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'fun closeTabFromUi'
@@ -102,6 +108,15 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$MAIN_ACTIVITY" 'writePreviewReference'
   assert_file_contains "$MAIN_ACTIVITY" 'sendComposerTextToAi'
   assert_file_contains "$MAIN_ACTIVITY" 'writeAgentPanelEvent'
+  assert_file_contains "$MAIN_ACTIVITY" 'selectBrowserTabFromUi'
+  assert_file_contains "$MAIN_ACTIVITY" 'closeBrowserTabFromUi'
+  assert_file_contains "$MAIN_ACTIVITY" 'mediaPreviewOpened'
+  assert_file_contains "$MAIN_ACTIVITY" 'mediaPreviewClosed'
+  assert_file_contains "$MAIN_ACTIVITY" 'mediaPreviewShared'
+  assert_file_contains "$MAIN_ACTIVITY" 'writeMediaPreviewResult'
+  assert_file_contains "$MAIN_ACTIVITY" 'writeBrowserNeedsUserTransition'
+  assert_file_contains "$MAIN_ACTIVITY" 'item_id='
+  assert_file_contains "$MAIN_ACTIVITY" 'active_item='
   assert_file_contains "$MAIN_ACTIVITY" 'private fun syncMediaPreviewStatus'
   assert_file_contains "$MAIN_ACTIVITY" 'syncMediaPreviewStatus(reason = "top_bar", state = "ready")'
   assert_file_contains "$MAIN_ACTIVITY" 'syncMediaPreviewStatus(reason = "collapse", state = "done")'
@@ -113,7 +128,8 @@ test_image_preview_bridge_asset() {
   assert_file_not_contains "$MAIN_ACTIVITY" '不要让我粘贴全文'
   assert_file_contains "$PREVIEW_ASSET" 'codex-preview path FILE_ID'
   assert_file_contains "$PREVIEW_ASSET" 'codex-preview [--present|--background] text --stdin'
-  assert_file_contains "$PREVIEW_ASSET" 'codex-preview status|events|wait|close'
+  assert_file_contains "$PREVIEW_ASSET" 'codex-preview present|collapse|toggle|done|cancel|clear|close [REASON]'
+  assert_file_contains "$PREVIEW_ASSET" 'codex-preview status|events|wait|result'
   assert_file_contains "$PREVIEW_ASSET" 'present=%s'
   assert_file_contains "$INIT_ASSET" 'codex-preview path FILE_ID'
   assert_file_contains "$INIT_ASSET" '[ -x "$bin_dir/codex-preview" ]'
@@ -131,6 +147,7 @@ test_image_preview_bridge_asset() {
   sh -n "$PUSH_IMAGE_ASSET" || fail "codex-push-image shell syntax failed"
   sh -n "$PUSH_MEDIA_ASSET" || fail "codex-push-media shell syntax failed"
   sh -n "$BROWSER_ASSET" || fail "codex-browser shell syntax failed"
+  sh -n "$PANEL_ASSET" || fail "codex-panel shell syntax failed"
   sh -n "$INIT_ASSET" || fail "init.sh shell syntax failed"
 
   tmp="${TMPDIR:-/tmp}/codex-tui-static-image-preview.$$"
@@ -213,7 +230,17 @@ test_image_preview_bridge_asset() {
     fail "codex-preview close should write a clear request"
   fi
   assert_file_contains "$tmp/prefix/local/media-preview/request" "action=clear"
-  printf '%s\n' "$output" | grep -F '已清空 Codex for TUI 文件面板' >/dev/null 2>&1 || fail "preview close did not report success"
+  printf '%s\n' "$output" | grep -F '已发送到 Codex for TUI 文件面板' >/dev/null 2>&1 || fail "preview close did not report success"
+
+  if ! PREFIX="$tmp/prefix" sh "$PREVIEW_ASSET" collapse agent_test >/dev/null; then
+    fail "codex-preview collapse should write a collapse request"
+  fi
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "action=collapse"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "reason=agent_test"
+
+  if ! PREFIX="$tmp/prefix" sh "$PREVIEW_ASSET" result >/dev/null; then
+    fail "codex-preview result should be safe without result file"
+  fi
   rm -rf "$tmp"
 }
 
@@ -252,6 +279,18 @@ test_browser_bridge_asset() {
   assert_file_contains "$tmp/prefix/local/browser/request" "action=present"
   assert_file_contains "$tmp/prefix/local/browser/request" "reason=user_review"
 
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait collapse agent_review >/dev/null; then
+    fail "codex-browser collapse should write a collapse request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=collapse"
+  assert_file_contains "$tmp/prefix/local/browser/request" "reason=agent_review"
+
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait toggle agent_toggle >/dev/null; then
+    fail "codex-browser toggle should write a toggle request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=toggle"
+  assert_file_contains "$tmp/prefix/local/browser/request" "reason=agent_toggle"
+
   if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait auth https://login.example.test >/dev/null; then
     fail "codex-browser should write an auth request"
   fi
@@ -287,15 +326,78 @@ test_browser_bridge_asset() {
 
   PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" status >/dev/null || fail "codex-browser status should be safe without status file"
   PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" events >/dev/null || fail "codex-browser events should be safe without events file"
+  PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" result >/dev/null || fail "codex-browser result should be safe without result file"
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'CustomTabsIntent.Builder'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'shouldHandleOutsideWebView'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'onShowFileChooser'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" '"present" -> present'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" '"collapse" -> JSONObject().put("collapsed", true)'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'activeUserRequestId'
   assert_file_contains "$MAIN_ACTIVITY" 'action == "present"'
+  assert_file_contains "$MAIN_ACTIVITY" 'action == "collapse"'
+  assert_file_contains "$MAIN_ACTIVITY" 'requestedAction) {'
+  assert_file_contains "$MAIN_ACTIVITY" 'val suppressPresent = action in setOf("collapse", "user_done", "user_cancelled", "close")'
   assert_file_contains "$MAIN_ACTIVITY" 'snapshot?.optBoolean("needsUser") == true'
-  assert_file_contains "$MAIN_ACTIVITY" 'val shouldCollapse = action == "user_done" || action == "user_cancelled"'
+  assert_file_contains "$MAIN_ACTIVITY" 'val shouldCollapse = action == "collapse" || action == "user_done" || action == "user_cancelled"'
   assert_file_contains "$MAIN_ACTIVITY" 'markBrowserUserDone(reason = "user_collapsed")'
+  rm -rf "$tmp"
+}
+
+test_agent_panel_bridge_asset() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-static-agent-panel.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/prefix/local/media-preview" "$tmp/prefix/local/browser" "$tmp/prefix/local/agent-panel"
+
+  assert_file_contains "$PANEL_ASSET" 'codex-panel present|collapse|toggle files|browser [REASON]'
+  assert_file_contains "$PANEL_ASSET" 'codex-panel done|cancel files|browser [REASON]'
+  assert_file_contains "$PANEL_ASSET" 'codex-panel clear files [REASON]'
+  assert_file_contains "$PANEL_ASSET" 'codex-panel close browser [REASON]'
+  assert_file_contains "$PANEL_ASSET" 'codex-panel select|remove files FILE_ID'
+
+  if ! output="$(PREFIX="$tmp/prefix" sh "$PANEL_ASSET" present files agent_review)"; then
+    fail "codex-panel should write files present request"
+  fi
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "action=present"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "present=1"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "reason=agent_review"
+  printf '%s\n' "$output" | grep -F '已发送到 Codex for TUI Agent 面板' >/dev/null 2>&1 || fail "codex-panel did not report success"
+
+  PREFIX="$tmp/prefix" sh "$PANEL_ASSET" collapse files agent_collapse >/dev/null || fail "codex-panel files collapse failed"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "action=collapse"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "present=0"
+
+  PREFIX="$tmp/prefix" sh "$PANEL_ASSET" select files abc.123 >/dev/null || fail "codex-panel files select failed"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "action=select"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "item_id=abc.123"
+
+  PREFIX="$tmp/prefix" sh "$PANEL_ASSET" remove files abc.123 >/dev/null || fail "codex-panel files remove failed"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "action=remove"
+
+  PREFIX="$tmp/prefix" sh "$PANEL_ASSET" clear files agent_clear >/dev/null || fail "codex-panel files clear failed"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "action=clear"
+
+  PREFIX="$tmp/prefix" sh "$PANEL_ASSET" present browser agent_browser >/dev/null || fail "codex-panel browser present failed"
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=present"
+  assert_file_contains "$tmp/prefix/local/browser/request" "present=1"
+
+  PREFIX="$tmp/prefix" sh "$PANEL_ASSET" collapse browser agent_browser >/dev/null || fail "codex-panel browser collapse failed"
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=collapse"
+  assert_file_contains "$tmp/prefix/local/browser/request" "present=0"
+
+  PREFIX="$tmp/prefix" sh "$PANEL_ASSET" done browser agent_done >/dev/null || fail "codex-panel browser done failed"
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=user_done"
+
+  PREFIX="$tmp/prefix" sh "$PANEL_ASSET" cancel browser agent_cancel >/dev/null || fail "codex-panel browser cancel failed"
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=user_cancelled"
+
+  PREFIX="$tmp/prefix" sh "$PANEL_ASSET" close browser agent_close >/dev/null || fail "codex-panel browser close failed"
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=close"
+
+  PREFIX="$tmp/prefix" sh "$PANEL_ASSET" status >/dev/null || fail "codex-panel status should be safe without status file"
+  PREFIX="$tmp/prefix" sh "$PANEL_ASSET" events >/dev/null || fail "codex-panel events should be safe without events file"
+  PREFIX="$tmp/prefix" sh "$PANEL_ASSET" result files >/dev/null || fail "codex-panel files result should be safe without result file"
+  PREFIX="$tmp/prefix" sh "$PANEL_ASSET" result browser >/dev/null || fail "codex-panel browser result should be safe without result file"
+
   rm -rf "$tmp"
 }
 
@@ -472,6 +574,7 @@ test_update_apply_installs_self_test_script_and_aliases() {
   [ -x "$tmp/bin/codex-test" ] || fail "codex-test alias was not installed"
   [ -x "$tmp/bin/codex-preview" ] || fail "codex-preview bridge wrapper was not installed by update"
   [ -x "$tmp/bin/codex-browser" ] || fail "codex-browser bridge wrapper was not installed by update"
+  [ -x "$tmp/bin/codex-panel" ] || fail "codex-panel bridge wrapper was not installed by update"
   assert_file_contains "$tmp/stdout" "已更新：codex-for-tui-self-test.sh"
   rm -rf "$tmp"
 }
@@ -547,6 +650,7 @@ run_step test_debug_build_uses_test_package_name
 run_step test_release_workflow_signature_gate
 run_step test_image_preview_bridge_asset
 run_step test_browser_bridge_asset
+run_step test_agent_panel_bridge_asset
 run_step test_generated_launcher_entrypoints_and_normal_path
 run_step test_generated_launcher_first_run_configures_then_runs
 run_step test_update_apply_installs_self_test_script_and_aliases

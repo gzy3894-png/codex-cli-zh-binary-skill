@@ -11,7 +11,7 @@ usage() {
   printf '%s\n' "      codex-browser scroll [up|down] [amount]"
   printf '%s\n' "      codex-browser get-text [CSS_SELECTOR]"
   printf '%s\n' "      codex-browser user-wait|wait-user [MESSAGE]"
-  printf '%s\n' "      codex-browser screenshot|snapshot|reload|back|forward|user-done|status|events|wait|close"
+  printf '%s\n' "      codex-browser screenshot|snapshot|reload|back|forward|present|collapse|toggle|user-done|done|cancel|status|events|wait|result|close"
 }
 
 find_prefix() {
@@ -55,7 +55,7 @@ wait_status() {
     if [ -s "$status_file" ] && grep -F "request_id=$request_id" "$status_file" >/dev/null 2>&1; then
       state="$(sed -n 's/^state=//p' "$status_file" | sed -n '1p')"
       case "$state" in
-        done|closed|ready)
+        done|closed|ready|cancelled)
           cat "$status_file"
           return 0
           ;;
@@ -154,15 +154,25 @@ case "$cmd" in
     reason="${*:-present}"
     request_id="$(write_request "$prefix" action present present 1 reason "$reason")"
     ;;
+  collapse|hide)
+    reason="${*:-collapse}"
+    request_id="$(write_request "$prefix" action collapse present 0 reason "$reason")"
+    ;;
+  toggle)
+    reason="${*:-toggle}"
+    request_id="$(write_request "$prefix" action toggle reason "$reason")"
+    ;;
   auth|external|custom-tab)
     [ "$#" -eq 1 ] || { usage >&2; exit 2; }
     action="$cmd"
     [ "$cmd" = "custom-tab" ] && action="custom_tab"
     request_id="$(write_request "$prefix" action "$action" url "$1")"
     ;;
-  reload|snapshot|screenshot|user-done|close)
+  reload|snapshot|screenshot|user-done|done|cancel|close)
     action="$cmd"
     [ "$cmd" = "user-done" ] && action="user_done"
+    [ "$cmd" = "done" ] && action="user_done"
+    [ "$cmd" = "cancel" ] && action="user_cancelled"
     request_id="$(write_request "$prefix" action "$action")"
     ;;
   status)
@@ -171,6 +181,10 @@ case "$cmd" in
     ;;
   events)
     print_file_if_readable "$prefix/local/agent-panel/events" || true
+    exit 0
+    ;;
+  result)
+    print_file_if_readable "$prefix/local/browser/result.json" || true
     exit 0
     ;;
   wait)

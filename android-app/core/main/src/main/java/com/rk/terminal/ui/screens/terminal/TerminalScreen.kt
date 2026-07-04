@@ -163,6 +163,8 @@ fun TerminalScreen(
                     onCollapse = mainActivity::collapseBrowserPanel,
                     onClose = mainActivity::closeBrowserSession,
                     onUserDone = { mainActivity.markBrowserUserDone() },
+                    onSelectTab = mainActivity::selectBrowserTabFromUi,
+                    onCloseTab = mainActivity::closeBrowserTabFromUi,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .padding(top = previewTrayTopPadding)
@@ -182,6 +184,9 @@ fun TerminalScreen(
                     onRemove = mainActivity::removeMediaPreview,
                     onSendToAi = mainActivity::sendPreviewToAi,
                     onSendText = mainActivity::sendComposerTextToAi,
+                    onPreviewOpened = mainActivity::mediaPreviewOpened,
+                    onPreviewClosed = mainActivity::mediaPreviewClosed,
+                    onPreviewShared = mainActivity::mediaPreviewShared,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .padding(top = previewTrayTopPadding)

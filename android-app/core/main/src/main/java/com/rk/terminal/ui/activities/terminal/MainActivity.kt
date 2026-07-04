@@ -31,6 +31,7 @@ import com.rk.libcommons.localDir
 import com.rk.libcommons.toast
 import com.rk.terminal.ui.navHosts.MainActivityNavHost
 import com.rk.terminal.ui.routes.MainActivityRoutes
+import com.rk.terminal.ui.screens.terminal.TerminalBrowserSnapshot
 import com.rk.terminal.ui.screens.terminal.TerminalBrowserSessionManager
 import com.rk.terminal.ui.screens.terminal.TerminalMediaPreview
 import com.rk.terminal.ui.screens.terminal.TerminalMediaPreviewKind
@@ -59,6 +60,7 @@ class MainActivity : ComponentActivity() {
     private var browserBridgeJob: Job? = null
     private var lastMediaPreviewRequest = ""
     private var lastBrowserRequest = ""
+    private var lastBrowserNeedsUserEventKey = ""
     private var browserFileChooserCallback: ((Array<Uri>?) -> Unit)? = null
 
     private val requestNotificationPermission =
@@ -70,10 +72,32 @@ class MainActivity : ComponentActivity() {
 
     private val pickPreviewFiles =
         registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-            if (uris.isEmpty()) return@registerForActivityResult
+            if (uris.isEmpty()) {
+                writeAgentPanelEvent(source = "files", type = "user_file_picker_cancelled", state = "cancelled", reason = "file_picker")
+                writeAgentPanelStatus(source = "files", state = "cancelled", reason = "file_picker")
+                return@registerForActivityResult
+            }
             lifecycleScope.launch {
                 uris.forEach { uri ->
-                    ingestPickedPreviewFile(uri)
+                    try {
+                        ingestPickedPreviewFile(uri)
+                    } catch (error: Exception) {
+                        val reason = error.message.orEmpty().ifBlank { error::class.java.simpleName }
+                        writeAgentPanelEvent(
+                            source = "files",
+                            type = "user_file_ingest_failed",
+                            state = "error",
+                            reason = reason,
+                            extra = mapOf("uri" to uri.toString())
+                        )
+                        writeAgentPanelStatus(
+                            source = "files",
+                            state = "error",
+                            reason = reason,
+                            extra = mapOf("uri" to uri.toString())
+                        )
+                        toast("无法读取文件：$reason")
+                    }
                 }
             }
         }
@@ -95,6 +119,19 @@ class MainActivity : ComponentActivity() {
             } else {
                 null
             }
+            writeAgentPanelEvent(
+                source = "browser",
+                type = if (uris.isNullOrEmpty()) "user_upload_cancelled" else "user_upload_selected",
+                state = if (uris.isNullOrEmpty()) "cancelled" else "done",
+                reason = "browser_file_chooser",
+                extra = mapOf("selected_count" to (uris?.size ?: 0).toString())
+            )
+            writeAgentPanelStatus(
+                source = "browser",
+                state = if (uris.isNullOrEmpty()) "cancelled" else "done",
+                reason = "browser_file_chooser",
+                extra = mapOf("selected_count" to (uris?.size ?: 0).toString())
+            )
             callback?.invoke(uris)
         }
 
@@ -105,7 +142,9 @@ class MainActivity : ComponentActivity() {
         browserSessionManager = TerminalBrowserSessionManager(
             context = this,
             onSnapshot = { snapshot ->
+                val previous = terminalViewModel.browserSnapshot
                 terminalViewModel.updateBrowserSnapshot(snapshot)
+                writeBrowserNeedsUserTransition(previous, snapshot)
             },
             launchFileChooser = ::launchBrowserFileChooser
         )
@@ -220,7 +259,8 @@ class MainActivity : ComponentActivity() {
         state: String,
         reason: String = "",
         requestId: String = "",
-        itemId: String = ""
+        itemId: String = "",
+        extra: Map<String, String> = emptyMap()
     ) {
         try {
             val visible = when (source) {
@@ -235,6 +275,7 @@ class MainActivity : ComponentActivity() {
                     terminalViewModel.mediaPreviews.lastOrNull()?.stamp.orEmpty()
                 }
             }
+            val extras = panelExtrasFor(source, itemId) + extra
             val status = buildString {
                 append("source=").append(source).append('\n')
                 append("mode=").append(mode).append('\n')
@@ -243,7 +284,9 @@ class MainActivity : ComponentActivity() {
                 append("collapsed=").append(if (visible) "0" else "1").append('\n')
                 append("reason=").append(refValue(reason)).append('\n')
                 append("request_id=").append(refValue(requestId)).append('\n')
+                append("item_id=").append(refValue(itemId)).append('\n')
                 append("active_item=").append(refValue(activeItem)).append('\n')
+                appendPanelExtras(extras)
                 append("stamp=").append(panelEventId()).append('\n')
             }
             localDir().child("agent-panel").apply { mkdirs() }.child("status").writeText(status)
@@ -258,13 +301,20 @@ class MainActivity : ComponentActivity() {
         state: String = "done",
         reason: String = "",
         requestId: String = "",
-        itemId: String = ""
+        itemId: String = "",
+        extra: Map<String, String> = emptyMap()
     ) {
         try {
             val visible = when (source) {
                 "browser" -> terminalViewModel.browserPanelExpanded
                 else -> terminalViewModel.mediaPreviewExpanded
             }
+            val activeItem = if (source == "browser") {
+                terminalViewModel.browserSnapshot.activeTabId?.toString().orEmpty()
+            } else {
+                terminalViewModel.mediaPreviews.lastOrNull()?.stamp.orEmpty()
+            }
+            val extras = panelExtrasFor(source, itemId) + extra
             val event = buildString {
                 append("event_id=").append(panelEventId()).append('\n')
                 append("source=").append(source).append('\n')
@@ -273,14 +323,80 @@ class MainActivity : ComponentActivity() {
                 append("reason=").append(refValue(reason)).append('\n')
                 append("request_id=").append(refValue(requestId)).append('\n')
                 append("item_id=").append(refValue(itemId)).append('\n')
+                append("active_item=").append(refValue(activeItem)).append('\n')
                 append("visible=").append(if (visible) "1" else "0").append('\n')
                 append("collapsed=").append(if (visible) "0" else "1").append('\n')
+                appendPanelExtras(extras)
                 append("---\n")
             }
             localDir().child("agent-panel").apply { mkdirs() }.child("events").appendText(event)
         } catch (_: Exception) {
             // Best-effort event bridge for terminal-side automation.
         }
+    }
+
+    private fun StringBuilder.appendPanelExtras(extras: Map<String, String>) {
+        val reserved = setOf(
+            "event_id", "source", "mode", "type", "state", "reason", "request_id",
+            "item_id", "active_item", "visible", "collapsed", "stamp"
+        )
+        extras.toSortedMap().forEach { (key, value) ->
+            if (key.isNotBlank() && key !in reserved) {
+                append(key).append('=').append(refValue(value)).append('\n')
+            }
+        }
+    }
+
+    private fun panelExtrasFor(source: String, itemId: String): Map<String, String> {
+        return if (source == "browser") {
+            browserSnapshotExtras(terminalViewModel.browserSnapshot)
+        } else {
+            val preview = mediaPreviewByRef(itemId) ?: terminalViewModel.mediaPreviews.lastOrNull()
+            mediaPreviewExtras(preview)
+        }
+    }
+
+    private fun mediaPreviewByRef(refId: String): TerminalMediaPreview? {
+        if (refId.isBlank()) return null
+        return terminalViewModel.mediaPreviews.firstOrNull {
+            it.stamp == refId || previewReferenceId(it) == refId
+        }
+    }
+
+    private fun mediaPreviewExtras(preview: TerminalMediaPreview?): Map<String, String> {
+        val extras = mutableMapOf(
+            "remaining" to terminalViewModel.mediaPreviews.size.toString()
+        )
+        if (preview != null) {
+            extras["kind"] = preview.kind.name.lowercase(Locale.ROOT)
+            extras["path"] = preview.path
+            extras["name"] = preview.name
+            extras["stamp"] = preview.stamp
+            extras["origin"] = preview.source.name.lowercase(Locale.ROOT)
+            preview.sizeBytes?.let { extras["size_bytes"] = it.toString() }
+            preview.textPreview?.let { extras["text_length"] = it.length.toString() }
+        }
+        return extras
+    }
+
+    private fun browserSnapshotExtras(snapshot: TerminalBrowserSnapshot): Map<String, String> {
+        return mapOf(
+            "tab_id" to snapshot.activeTabId?.toString().orEmpty(),
+            "url" to snapshot.currentUrl,
+            "title" to snapshot.title,
+            "needs_user" to if (snapshot.needsUser) "1" else "0",
+            "tabs_count" to snapshot.tabs.size.toString()
+        )
+    }
+
+    private fun browserJsonExtras(snapshot: JSONObject?): Map<String, String> {
+        return mapOf(
+            "tab_id" to snapshot?.opt("activeTabId")?.toString().orEmpty(),
+            "url" to snapshot?.optString("currentUrl").orEmpty(),
+            "title" to snapshot?.optString("title").orEmpty(),
+            "needs_user" to if (snapshot?.optBoolean("needsUser") == true) "1" else "0",
+            "tabs_count" to (snapshot?.optJSONArray("tabs")?.length() ?: 0).toString()
+        )
     }
 
     private fun setupKeyboardListener() {
@@ -308,6 +424,8 @@ class MainActivity : ComponentActivity() {
     }
 
     fun removeMediaPreview(preview: TerminalMediaPreview) {
+        val refId = previewReferenceId(preview)
+        val previewExtras = mediaPreviewExtras(preview)
         terminalViewModel.removeMediaPreview(preview.stamp)
         lifecycleScope.launch(Dispatchers.IO) {
             runCatching { File(preview.path).delete() }
@@ -319,12 +437,15 @@ class MainActivity : ComponentActivity() {
             type = "user_deleted",
             state = "ready",
             reason = "delete_item",
-            itemId = previewReferenceId(preview)
+            itemId = refId,
+            extra = previewExtras + mapOf("remaining" to terminalViewModel.mediaPreviews.size.toString())
         )
         writeAgentPanelStatus(source = "files", state = "ready", reason = "delete_item")
     }
 
     fun openPreviewFilePicker() {
+        writeAgentPanelEvent(source = "files", type = "user_file_picker_opened", state = "waiting_for_user", reason = "file_picker")
+        writeAgentPanelStatus(source = "files", state = "waiting_for_user", reason = "file_picker")
         runCatching {
             pickPreviewFiles.launch(
                 arrayOf(
@@ -337,6 +458,8 @@ class MainActivity : ComponentActivity() {
                 )
             )
         }.onFailure { error ->
+            writeAgentPanelEvent(source = "files", type = "user_file_picker_failed", state = "error", reason = error.message.orEmpty())
+            writeAgentPanelStatus(source = "files", state = "error", reason = error.message.orEmpty())
             toast("无法打开文件管理器：${error.message}")
         }
     }
@@ -367,11 +490,12 @@ class MainActivity : ComponentActivity() {
         }
         session.write(prompt)
         writeAgentPanelEvent(
-            source = if (preview.kind == TerminalMediaPreviewKind.TEXT) "text" else "files",
+            source = "files",
             type = "user_sent_file",
             state = "done",
             reason = cleanMessage,
-            itemId = refId
+            itemId = refId,
+            extra = mediaPreviewExtras(preview)
         )
         writeAgentPanelStatus(
             source = "files",
@@ -380,6 +504,45 @@ class MainActivity : ComponentActivity() {
             itemId = refId
         )
         toast("已发送：${shortenForTerminal(preview.name, 24)}")
+    }
+
+    fun mediaPreviewOpened(preview: TerminalMediaPreview) {
+        val refId = previewReferenceId(preview)
+        writeAgentPanelEvent(
+            source = "files",
+            type = "user_opened_preview",
+            state = "ready",
+            reason = "preview_dialog",
+            itemId = refId,
+            extra = mediaPreviewExtras(preview)
+        )
+        writeAgentPanelStatus(source = "files", state = "ready", reason = "preview_dialog", itemId = refId)
+    }
+
+    fun mediaPreviewClosed(preview: TerminalMediaPreview?) {
+        val refId = preview?.let { previewReferenceId(it) }.orEmpty()
+        writeAgentPanelEvent(
+            source = "files",
+            type = "user_closed_preview",
+            state = "ready",
+            reason = "preview_dialog",
+            itemId = refId,
+            extra = mediaPreviewExtras(preview)
+        )
+        writeAgentPanelStatus(source = "files", state = "ready", reason = "preview_dialog", itemId = refId)
+    }
+
+    fun mediaPreviewShared(preview: TerminalMediaPreview) {
+        val refId = previewReferenceId(preview)
+        writeAgentPanelEvent(
+            source = "files",
+            type = "user_shared_preview",
+            state = "done",
+            reason = "share",
+            itemId = refId,
+            extra = mediaPreviewExtras(preview)
+        )
+        writeAgentPanelStatus(source = "files", state = "done", reason = "share", itemId = refId)
     }
 
     fun sendComposerTextToAi(rawText: String): Boolean {
@@ -433,18 +596,20 @@ class MainActivity : ComponentActivity() {
             }
         )
         writeAgentPanelEvent(
-            source = "text",
+            source = "files",
             type = "user_sent_text",
             state = "done",
             reason = "composer",
-            itemId = refId
+            itemId = refId,
+            extra = mediaPreviewExtras(preview)
         )
         syncMediaPreviewStatus(reason = "composer_sent", state = "done")
         writeAgentPanelStatus(
-            source = "text",
+            source = "files",
             state = "done",
             reason = "composer_sent",
-            itemId = refId
+            itemId = refId,
+            extra = mediaPreviewExtras(preview)
         )
         toast("文本已发送")
         return true
@@ -504,11 +669,15 @@ class MainActivity : ComponentActivity() {
     ) {
         browserFileChooserCallback?.invoke(null)
         browserFileChooserCallback = callback
+        writeAgentPanelEvent(source = "browser", type = "user_upload_picker_opened", state = "waiting_for_user", reason = "browser_file_chooser")
+        writeAgentPanelStatus(source = "browser", state = "waiting_for_user", reason = "browser_file_chooser")
         runCatching {
             pickBrowserUploadFiles.launch(intent)
         }.onFailure { error ->
             browserFileChooserCallback = null
             callback(null)
+            writeAgentPanelEvent(source = "browser", type = "user_upload_picker_failed", state = "error", reason = error.message.orEmpty())
+            writeAgentPanelStatus(source = "browser", state = "error", reason = error.message.orEmpty())
             toast("无法打开文件选择器：${error.message}")
         }
     }
@@ -615,6 +784,74 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    fun selectBrowserTabFromUi(tabId: Int) {
+        browserSessionManager.selectTabFromUi(tabId)
+        writeAgentPanelEvent(
+            source = "browser",
+            type = "user_selected_tab",
+            state = terminalViewModel.browserSnapshot.status,
+            reason = "tab_select",
+            requestId = terminalViewModel.browserSnapshot.requestId,
+            itemId = tabId.toString(),
+            extra = browserSnapshotExtras(terminalViewModel.browserSnapshot)
+        )
+        writeAgentPanelStatus(
+            source = "browser",
+            state = terminalViewModel.browserSnapshot.status,
+            reason = "tab_select",
+            requestId = terminalViewModel.browserSnapshot.requestId,
+            itemId = tabId.toString()
+        )
+    }
+
+    fun closeBrowserTabFromUi(tabId: Int) {
+        browserSessionManager.closeTabFromUi(tabId)
+        writeAgentPanelEvent(
+            source = "browser",
+            type = "user_closed_tab",
+            state = terminalViewModel.browserSnapshot.status,
+            reason = "tab_close",
+            requestId = terminalViewModel.browserSnapshot.requestId,
+            itemId = tabId.toString(),
+            extra = browserSnapshotExtras(terminalViewModel.browserSnapshot)
+        )
+        writeAgentPanelStatus(
+            source = "browser",
+            state = terminalViewModel.browserSnapshot.status,
+            reason = "tab_close",
+            requestId = terminalViewModel.browserSnapshot.requestId,
+            itemId = tabId.toString()
+        )
+    }
+
+    private fun writeBrowserNeedsUserTransition(
+        previous: TerminalBrowserSnapshot,
+        current: TerminalBrowserSnapshot
+    ) {
+        val key = "${current.requestId}|${current.message}|${current.currentUrl}|${current.needsUser}"
+        if (!current.needsUser) {
+            lastBrowserNeedsUserEventKey = ""
+            return
+        }
+        if (previous.needsUser && key == lastBrowserNeedsUserEventKey) return
+        lastBrowserNeedsUserEventKey = key
+        writeAgentPanelEvent(
+            source = "browser",
+            type = "browser_needs_user",
+            state = "waiting_for_user",
+            reason = current.message,
+            requestId = current.requestId,
+            extra = browserSnapshotExtras(current)
+        )
+        writeAgentPanelStatus(
+            source = "browser",
+            state = "waiting_for_user",
+            reason = current.message,
+            requestId = current.requestId,
+            extra = browserSnapshotExtras(current)
+        )
+    }
+
     private fun primeMediaPreviewRequestCache() {
         lastMediaPreviewRequest = try {
             val requestFile = localDir().child("media-preview").child("request")
@@ -665,45 +902,57 @@ class MainActivity : ComponentActivity() {
         lastBrowserRequest = content
 
         val request = parseMediaPreviewRequest(content)
+        val requestedAction = request["action"].orEmpty()
+        val effectiveAction = when (requestedAction) {
+            "toggle" -> if (terminalViewModel.browserPanelExpanded) "collapse" else "present"
+            else -> requestedAction
+        }
+        val effectiveRequest = if (effectiveAction != requestedAction) {
+            request + ("action" to effectiveAction)
+        } else {
+            request
+        }
         val result = runCatching {
-            browserSessionManager.handleRequest(request, browserDir)
+            browserSessionManager.handleRequest(effectiveRequest, browserDir)
         }.getOrElse { error ->
             JSONObject()
                 .put("ok", false)
-                .put("requestId", request["request_id"] ?: request["stamp"] ?: content.hashCode().toString())
-                .put("action", request["action"] ?: "")
+                .put("requestId", effectiveRequest["request_id"] ?: effectiveRequest["stamp"] ?: content.hashCode().toString())
+                .put("action", effectiveRequest["action"] ?: "")
                 .put("error", error.message ?: error::class.java.simpleName)
                 .put("snapshot", JSONObject())
         }
-        val action = request["action"].orEmpty()
+        val action = effectiveAction
         val snapshot = result.optJSONObject("snapshot")
-        val shouldPresent = request["present"] == "1" ||
-            action == "present" ||
-            action == "user_wait" ||
-            snapshot?.optBoolean("needsUser") == true
-        val shouldCollapse = action == "user_done" || action == "user_cancelled"
+        val suppressPresent = action in setOf("collapse", "user_done", "user_cancelled", "close")
+        val shouldPresent = !suppressPresent && (
+            request["present"] == "1" ||
+                action == "present" ||
+                action == "user_wait" ||
+                snapshot?.optBoolean("needsUser") == true
+            )
+        val shouldCollapse = action == "collapse" || action == "user_done" || action == "user_cancelled"
         if (result.optBoolean("ok") && shouldCollapse) {
             terminalViewModel.browserPanelExpanded = false
-            writeAgentPanelEvent(
-                source = "browser",
-                type = action,
-                state = snapshot?.optString("status").orEmpty().ifBlank { "done" },
-                reason = action,
-                requestId = result.optString("requestId")
-            )
         }
         if (result.optBoolean("ok") && shouldPresent) {
             terminalViewModel.mediaPreviewExpanded = false
             terminalViewModel.browserPanelExpanded = true
-            writeAgentPanelEvent(
-                source = "browser",
-                type = if (action == "user_wait") "user_wait_started" else "agent_presented",
-                state = snapshot?.optString("status").orEmpty().ifBlank { "ready" },
-                reason = request["reason"] ?: request["message"] ?: action,
-                requestId = result.optString("requestId")
-            )
         }
         writeBrowserResult(browserDir, result)
+        val state = if (result.optBoolean("ok")) {
+            snapshot?.optString("status")?.takeIf { it.isNotBlank() } ?: "done"
+        } else {
+            "error"
+        }
+        writeAgentPanelEvent(
+            source = "browser",
+            type = browserAgentEventType(action),
+            state = state,
+            reason = request["reason"] ?: request["message"] ?: action,
+            requestId = result.optString("requestId"),
+            extra = browserJsonExtras(snapshot)
+        )
     }
 
     private suspend fun pollMediaPreviewRequest() {
@@ -718,21 +967,91 @@ class MainActivity : ComponentActivity() {
         lastMediaPreviewRequest = content
 
         val request = parseMediaPreviewRequest(content)
-        if (request["action"] == "clear") {
+        val action = request["action"].orEmpty().ifBlank { "show" }
+        val requestId = panelRequestId(request, content)
+        val reason = request["reason"] ?: action
+        if (action == "clear") {
             terminalViewModel.clearMediaPreviews()
             withContext(Dispatchers.IO) {
                 runCatching { previewDir.child("files").deleteRecursively() }
                 runCatching { previewDir.child("refs").deleteRecursively() }
             }
             writeMediaPreviewStatus(previewDir, "cleared=1\n")
-            writeAgentPanelEvent(source = "files", type = "panel_cleared", state = "closed", reason = "request")
-            writeAgentPanelStatus(source = "files", state = "closed", reason = "request")
+            writeMediaPreviewResult(previewDir, requestId, action, ok = true, state = "closed", reason = reason)
+            writeAgentPanelEvent(source = "files", type = "agent_cleared", state = "closed", reason = reason, requestId = requestId)
+            writeAgentPanelStatus(source = "files", state = "closed", reason = reason, requestId = requestId)
+            return
+        }
+
+        if (action in setOf("present", "collapse", "toggle", "done", "cancel", "select", "remove")) {
+            val selected = request["item_id"]?.let { mediaPreviewByRef(it) }
+            when (action) {
+                "present" -> {
+                    terminalViewModel.browserPanelExpanded = false
+                    terminalViewModel.mediaPreviewExpanded = true
+                }
+                "collapse" -> terminalViewModel.mediaPreviewExpanded = false
+                "toggle" -> {
+                    if (terminalViewModel.mediaPreviewExpanded) {
+                        terminalViewModel.mediaPreviewExpanded = false
+                    } else {
+                        terminalViewModel.browserPanelExpanded = false
+                        terminalViewModel.mediaPreviewExpanded = true
+                    }
+                }
+                "done", "cancel" -> terminalViewModel.mediaPreviewExpanded = false
+                "select" -> {
+                    if (selected == null) {
+                        writeMediaPreviewStatus(previewDir, "error=item-not-found\nrequest_id=$requestId\nitem_id=${request["item_id"].orEmpty()}\n")
+                        writeMediaPreviewResult(previewDir, requestId, action, ok = false, state = "error", reason = "item_not_found", itemId = request["item_id"].orEmpty())
+                        writeAgentPanelEvent(source = "files", type = "agent_error", state = "error", reason = "item_not_found", requestId = requestId, itemId = request["item_id"].orEmpty())
+                        writeAgentPanelStatus(source = "files", state = "error", reason = "item_not_found", requestId = requestId, itemId = request["item_id"].orEmpty())
+                        return
+                    }
+                    terminalViewModel.mediaPreviews.removeAll { it.stamp == selected.stamp }
+                    terminalViewModel.mediaPreviews.add(selected)
+                }
+                "remove" -> {
+                    if (selected == null) {
+                        writeMediaPreviewStatus(previewDir, "error=item-not-found\nrequest_id=$requestId\nitem_id=${request["item_id"].orEmpty()}\n")
+                        writeMediaPreviewResult(previewDir, requestId, action, ok = false, state = "error", reason = "item_not_found", itemId = request["item_id"].orEmpty())
+                        writeAgentPanelEvent(source = "files", type = "agent_error", state = "error", reason = "item_not_found", requestId = requestId, itemId = request["item_id"].orEmpty())
+                        writeAgentPanelStatus(source = "files", state = "error", reason = "item_not_found", requestId = requestId, itemId = request["item_id"].orEmpty())
+                        return
+                    }
+                    val refId = previewReferenceId(selected)
+                    terminalViewModel.removeMediaPreview(selected.stamp)
+                    withContext(Dispatchers.IO) {
+                        runCatching { File(selected.path).delete() }
+                        runCatching { removePreviewReference(selected) }
+                    }
+                    syncMediaPreviewStatus(reason = reason, state = "ready")
+                    writeMediaPreviewResult(previewDir, requestId, action, ok = true, state = "ready", reason = reason, itemId = refId, extra = mediaPreviewExtras(selected))
+                    writeAgentPanelEvent(source = "files", type = "agent_removed", state = "ready", reason = reason, requestId = requestId, itemId = refId, extra = mediaPreviewExtras(selected))
+                    writeAgentPanelStatus(source = "files", state = "ready", reason = reason, requestId = requestId, itemId = refId)
+                    return
+                }
+            }
+            val itemId = selected?.let { previewReferenceId(it) }.orEmpty()
+            val state = when (action) {
+                "present", "select" -> "ready"
+                "toggle" -> if (terminalViewModel.mediaPreviewExpanded) "ready" else "done"
+                "cancel" -> "cancelled"
+                else -> "done"
+            }
+            syncMediaPreviewStatus(reason = reason, state = state)
+            writeMediaPreviewResult(previewDir, requestId, action, ok = true, state = state, reason = reason, itemId = itemId)
+            writeAgentPanelEvent(source = "files", type = mediaAgentEventType(action), state = state, reason = reason, requestId = requestId, itemId = itemId)
+            writeAgentPanelStatus(source = "files", state = state, reason = reason, requestId = requestId, itemId = itemId)
             return
         }
 
         val mediaPath = request["path"]?.takeIf { it.isNotBlank() }
         if (mediaPath == null) {
             writeMediaPreviewStatus(previewDir, "error=missing-path\n")
+            writeMediaPreviewResult(previewDir, requestId, action, ok = false, state = "error", reason = "missing_path", error = "missing_path")
+            writeAgentPanelEvent(source = "files", type = "agent_error", state = "error", reason = "missing_path", requestId = requestId)
+            writeAgentPanelStatus(source = "files", state = "error", reason = "missing_path", requestId = requestId)
             return
         }
 
@@ -742,6 +1061,9 @@ class MainActivity : ComponentActivity() {
         }
         if (!canRead) {
             writeMediaPreviewStatus(previewDir, "error=unreadable\npath=$mediaPath\n")
+            writeMediaPreviewResult(previewDir, requestId, action, ok = false, state = "error", reason = "unreadable", error = "unreadable", extra = mapOf("path" to mediaPath))
+            writeAgentPanelEvent(source = "files", type = "agent_error", state = "error", reason = "unreadable", requestId = requestId, extra = mapOf("path" to mediaPath))
+            writeAgentPanelStatus(source = "files", state = "error", reason = "unreadable", requestId = requestId, extra = mapOf("path" to mediaPath))
             return
         }
 
@@ -751,6 +1073,9 @@ class MainActivity : ComponentActivity() {
             "text" -> TerminalMediaPreviewKind.TEXT
             else -> {
                 writeMediaPreviewStatus(previewDir, "error=unsupported-kind\npath=$mediaPath\n")
+                writeMediaPreviewResult(previewDir, requestId, action, ok = false, state = "error", reason = "unsupported_kind", error = "unsupported_kind", extra = mapOf("path" to mediaPath))
+                writeAgentPanelEvent(source = "files", type = "agent_error", state = "error", reason = "unsupported_kind", requestId = requestId, extra = mapOf("path" to mediaPath))
+                writeAgentPanelStatus(source = "files", state = "error", reason = "unsupported_kind", requestId = requestId, extra = mapOf("path" to mediaPath))
                 return
             }
         }
@@ -778,14 +1103,14 @@ class MainActivity : ComponentActivity() {
                 textPreview = textPreview
             )
         )
-        val refId = request["stamp"] ?: content.hashCode().toString()
+        val refId = request["stamp"] ?: requestId
         val shouldPresent = request["present"] != "0"
         if (shouldPresent) {
             terminalViewModel.browserPanelExpanded = false
             terminalViewModel.mediaPreviewExpanded = true
         }
         writeAgentPanelEvent(
-            source = if (kind == TerminalMediaPreviewKind.TEXT) "text" else "files",
+            source = "files",
             type = if (shouldPresent) "agent_presented" else "agent_added",
             state = "ready",
             reason = if (shouldPresent) "present" else "background",
@@ -794,10 +1119,11 @@ class MainActivity : ComponentActivity() {
         )
         writeMediaPreviewStatus(
             previewDir,
-            "shown=1\nkind=${request["kind"]}\npath=${mediaFile.absolutePath}\n"
+            "shown=1\nrequest_id=$requestId\nkind=${request["kind"]}\npath=${mediaFile.absolutePath}\n"
         )
+        writeMediaPreviewResult(previewDir, requestId, action, ok = true, state = "ready", reason = if (shouldPresent) "present" else "background", itemId = refId)
         writeAgentPanelStatus(
-            source = if (kind == TerminalMediaPreviewKind.TEXT) "text" else "files",
+            source = "files",
             state = "ready",
             reason = if (shouldPresent) "present" else "background",
             requestId = refId,
@@ -811,6 +1137,19 @@ class MainActivity : ComponentActivity() {
         val info = queryPickedFileInfo(uri)
         val kind = detectPickedPreviewKind(info.name, info.mimeType)
         if (kind == null) {
+            writeAgentPanelEvent(
+                source = "files",
+                type = "user_file_unsupported",
+                state = "error",
+                reason = "unsupported_kind",
+                extra = mapOf("name" to info.name, "mime_type" to info.mimeType)
+            )
+            writeAgentPanelStatus(
+                source = "files",
+                state = "error",
+                reason = "unsupported_kind",
+                extra = mapOf("name" to info.name, "mime_type" to info.mimeType)
+            )
             toast("暂不支持此文件类型：${info.name}")
             return
         }
@@ -864,7 +1203,7 @@ class MainActivity : ComponentActivity() {
             )
         )
         writeAgentPanelEvent(
-            source = if (kind == TerminalMediaPreviewKind.TEXT) "text" else "files",
+            source = "files",
             type = "user_selected_file",
             state = "ready",
             reason = "file_picker",
@@ -875,7 +1214,7 @@ class MainActivity : ComponentActivity() {
             "picked=1\nkind=${kind.name.lowercase(Locale.ROOT)}\npath=${target.absolutePath}\n"
         )
         writeAgentPanelStatus(
-            source = if (kind == TerminalMediaPreviewKind.TEXT) "text" else "files",
+            source = "files",
             state = "ready",
             reason = "file_picker",
             itemId = stamp
@@ -1015,6 +1354,72 @@ class MainActivity : ComponentActivity() {
         writeMediaPreviewStatus(localDir().child("media-preview"), status)
     }
 
+    private fun panelRequestId(request: Map<String, String>, content: String): String {
+        return request["request_id"] ?: request["stamp"] ?: content.hashCode().toString()
+    }
+
+    private fun mediaAgentEventType(action: String): String {
+        return when (action) {
+            "present" -> "agent_presented"
+            "collapse" -> "agent_collapsed"
+            "toggle" -> if (terminalViewModel.mediaPreviewExpanded) "agent_presented" else "agent_collapsed"
+            "done" -> "agent_done"
+            "cancel" -> "agent_cancelled"
+            "select" -> "agent_selected"
+            "remove" -> "agent_removed"
+            "clear" -> "agent_cleared"
+            else -> "agent_${action.ifBlank { "request" }}"
+        }
+    }
+
+    private fun browserAgentEventType(action: String): String {
+        return when (action) {
+            "present" -> "agent_presented"
+            "collapse" -> "agent_collapsed"
+            "user_wait" -> "agent_user_wait"
+            "user_done" -> "agent_done"
+            "user_cancelled" -> "agent_cancelled"
+            "close" -> "agent_closed"
+            else -> "agent_${action.ifBlank { "request" }}"
+        }
+    }
+
+    private fun writeMediaPreviewResult(
+        previewDir: File,
+        requestId: String,
+        action: String,
+        ok: Boolean,
+        state: String,
+        reason: String,
+        itemId: String = "",
+        error: String = "",
+        extra: Map<String, String> = emptyMap()
+    ) {
+        try {
+            previewDir.mkdirs()
+            val visible = terminalViewModel.mediaPreviewExpanded
+            val activeItem = itemId.ifBlank { terminalViewModel.mediaPreviews.lastOrNull()?.stamp.orEmpty() }
+            val extras = panelExtrasFor("files", itemId) + extra
+            previewDir.child("result").writeText(
+                buildString {
+                    append("request_id=").append(refValue(requestId)).append('\n')
+                    append("action=").append(refValue(action)).append('\n')
+                    append("ok=").append(if (ok) "1" else "0").append('\n')
+                    append("state=").append(refValue(state)).append('\n')
+                    append("reason=").append(refValue(reason)).append('\n')
+                    append("item_id=").append(refValue(itemId)).append('\n')
+                    append("active_item=").append(refValue(activeItem)).append('\n')
+                    append("visible=").append(if (visible) "1" else "0").append('\n')
+                    append("collapsed=").append(if (visible) "0" else "1").append('\n')
+                    if (error.isNotBlank()) append("error=").append(refValue(error)).append('\n')
+                    appendPanelExtras(extras)
+                }
+            )
+        } catch (_: Exception) {
+            // Best-effort bridge result for terminal-side automation.
+        }
+    }
+
     private fun writeBrowserResult(browserDir: File, result: JSONObject) {
         try {
             browserDir.mkdirs()
@@ -1046,7 +1451,8 @@ class MainActivity : ComponentActivity() {
                 source = "browser",
                 state = state,
                 reason = result.optString("action"),
-                requestId = result.optString("requestId")
+                requestId = result.optString("requestId"),
+                extra = browserJsonExtras(snapshot)
             )
         } catch (_: Exception) {
             // Best-effort bridge result for terminal-side troubleshooting.

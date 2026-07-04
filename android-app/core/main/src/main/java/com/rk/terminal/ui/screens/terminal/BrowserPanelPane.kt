@@ -97,6 +97,8 @@ fun TerminalBrowserTray(
     onCollapse: () -> Unit,
     onClose: () -> Unit,
     onUserDone: () -> Unit,
+    onSelectTab: (Int) -> Unit,
+    onCloseTab: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     if (!snapshot.available) return
@@ -120,8 +122,8 @@ fun TerminalBrowserTray(
                 onCollapse = onCollapse,
                 onClose = onClose,
                 onUserDone = onUserDone,
-                onSelectTab = browserSessionManager::selectTabFromUi,
-                onCloseTab = browserSessionManager::closeTabFromUi
+                onSelectTab = onSelectTab,
+                onCloseTab = onCloseTab
             )
             HorizontalDivider(thickness = 0.5.dp)
             BrowserWebViewHost(

@@ -24,6 +24,7 @@ object MkSession {
         "codex-push-image" to "codex-push-image",
         "codex-push-media" to "codex-push-media",
         "codex-browser" to "codex-browser",
+        "codex-panel" to "codex-panel",
     )
     private val obsoleteScripts = listOf(
         "install-reterminal-alpine.sh",

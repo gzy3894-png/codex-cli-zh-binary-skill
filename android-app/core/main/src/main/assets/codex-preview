@@ -5,7 +5,9 @@ usage() {
   printf '%s\n' "用法: codex-preview [--present|--background] /path/to/image-video-or-text"
   printf '%s\n' "      codex-preview [--present|--background] text --stdin [--name NAME]"
   printf '%s\n' "      codex-preview path FILE_ID"
-  printf '%s\n' "      codex-preview status|events|wait|close"
+  printf '%s\n' "      codex-preview present|collapse|toggle|done|cancel|clear|close [REASON]"
+  printf '%s\n' "      codex-preview select|remove FILE_ID"
+  printf '%s\n' "      codex-preview status|events|wait|result"
 }
 
 find_prefix() {
@@ -28,16 +30,39 @@ find_prefix() {
   return 1
 }
 
-write_clear_request() {
+write_panel_request() {
   bridge_dir="$1/local/media-preview"
+  action="$2"
+  reason="${3:-$2}"
   request_file="$bridge_dir/request"
   mkdir -p "$bridge_dir"
+  request_id="$(date +%s 2>/dev/null || printf 0).$$"
   {
-    printf 'action=clear\n'
-    printf 'stamp=%s.%s\n' "$(date +%s 2>/dev/null || printf 0)" "$$"
+    printf 'action=%s\n' "$action"
+    printf 'request_id=%s\n' "$request_id"
+    printf 'stamp=%s\n' "$request_id"
+    printf 'reason=%s\n' "$reason"
   } > "$request_file.tmp.$$"
   mv "$request_file.tmp.$$" "$request_file"
-  printf '%s\n' "已清空 Codex for TUI 文件面板"
+  printf '%s\n' "已发送到 Codex for TUI 文件面板: $request_id"
+}
+
+write_item_request() {
+  bridge_dir="$1/local/media-preview"
+  action="$2"
+  item_id="$3"
+  request_file="$bridge_dir/request"
+  mkdir -p "$bridge_dir"
+  request_id="$(date +%s 2>/dev/null || printf 0).$$"
+  {
+    printf 'action=%s\n' "$action"
+    printf 'request_id=%s\n' "$request_id"
+    printf 'stamp=%s\n' "$request_id"
+    printf 'item_id=%s\n' "$item_id"
+    printf 'reason=%s\n' "$action"
+  } > "$request_file.tmp.$$"
+  mv "$request_file.tmp.$$" "$request_file"
+  printf '%s\n' "已发送到 Codex for TUI 文件面板: $request_id"
 }
 
 write_ref_file() {
@@ -143,8 +168,37 @@ esac
 
 [ "$#" -ge 1 ] || { usage >&2; exit 2; }
 
-if [ "$1" = "close" ] || [ "$1" = "--close" ]; then
-  write_clear_request "$prefix"
+case "$1" in
+  close|clear|--close)
+    write_panel_request "$prefix" clear "${2:-clear}"
+    exit 0
+    ;;
+  present|show)
+    write_panel_request "$prefix" present "${2:-present}"
+    exit 0
+    ;;
+  collapse|hide)
+    write_panel_request "$prefix" collapse "${2:-collapse}"
+    exit 0
+    ;;
+  toggle)
+    write_panel_request "$prefix" toggle "${2:-toggle}"
+    exit 0
+    ;;
+  done)
+    write_panel_request "$prefix" done "${2:-done}"
+    exit 0
+    ;;
+  cancel)
+    write_panel_request "$prefix" cancel "${2:-cancel}"
+    exit 0
+    ;;
+esac
+
+if [ "$#" -eq 2 ] && { [ "$1" = "select" ] || [ "$1" = "remove" ] || [ "$1" = "delete" ]; }; then
+  action="$1"
+  [ "$action" = "delete" ] && action="remove"
+  write_item_request "$prefix" "$action" "$2"
   exit 0
 fi
 
@@ -155,6 +209,11 @@ fi
 
 if [ "$1" = "events" ]; then
   print_file_if_readable "$prefix/local/agent-panel/events" || true
+  exit 0
+fi
+
+if [ "$1" = "result" ]; then
+  print_file_if_readable "$prefix/local/media-preview/result" || true
   exit 0
 fi
 
@@ -222,6 +281,7 @@ chmod 600 "$dest" 2>/dev/null || true
 
 {
   printf 'action=show\n'
+  printf 'request_id=%s\n' "$stamp"
   printf 'present=%s\n' "$present"
   printf 'kind=%s\n' "$kind"
   printf 'path=%s\n' "$dest"

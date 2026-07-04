@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.0.3-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.0.3)
+[![Release](https://img.shields.io/badge/release-v2.0.4-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.0.4)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.142.4-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,9 +9,11 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.0 用户脚本更新
+## 重要：2.0.4 更新
 
-已经安装 Codex for TUI 2.0 的用户 **不需要重装 APK**。但如果你已经打开过 App 并完成首次安装，普通启动不会自动拉取最新脚本，需要在终端里手动执行一次：
+2.0.4 改动包含 Android App 内的文件/浏览器托盘事件桥，已经安装 2.0.x 的用户需要从 Releases 下载并覆盖安装 2.0.4 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview` 和 `codex-browser` 桥接命令。
+
+如果你在旧 resume 会话里遇到裸命令不可见，再手动执行一次：
 
 ```sh
 codex 更新
@@ -26,11 +28,12 @@ codex 配置模式
 
 如果菜单里能看到 `6. 修复全权限授权`，说明脚本已经更新到包含配置菜单和授权持久化修复的版本。需要修复授权时选择该项；它会把全权限模式持久写入为 `approval_policy = "never"` + `sandbox_mode = "danger-full-access"`。
 
-新安装、尚未完成首次安装的 2.0 用户，首次安装时会拉取当前分支的最新脚本；普通启动仍然不会隐藏联网更新、不会刷新模型、不会覆盖用户配置。
+新安装、尚未完成首次安装的 2.0.4 用户，首次安装时会拉取当前分支的最新脚本；普通启动仍然不会隐藏联网更新、不会刷新模型、不会覆盖用户配置。
 
 ## 2.0 新功能
 
-- 2.0.3 补丁：修复文件托盘由用户展开、折叠、删除文件或发送长文本后，终端侧 `codex-preview status` 可能读到旧可见状态的问题。
+- 2.0.4 补丁：新增统一 `codex-panel` Agent 面板入口，文件托盘和协作浏览器的展示、折叠、切换、完成、取消、清空、关闭、选择、删除都能通过同一套命令和结构化事件读写。
+- 双向事件：用户展开/折叠托盘、打开/关闭预览、长按分享、选择/删除/发送文件、发送长文本、浏览器标签选择/关闭、等待用户协作和用户完成都会写入 `status/events/result`。
 - 文件托盘：终端可以推送图片、视频和文本到顶部托盘，用户也可以从系统文件管理器添加文件，第一格常驻文本框可发送长文本。
 - 隐私友好的文件引用：发送到终端时只展示短编号和 `codex-preview path <编号>`，不再把应用私有目录完整刷到屏幕里。
 - 协作浏览器：内置 WebView 默认后台运行，只有 `present` / `user-wait`（兼容 `wait-user`）或用户点顶栏时才展示；支持 Agent 读取页面、点击、输入、执行 JS、截图、文件上传、用户接管和多标签切换。
@@ -55,7 +58,7 @@ codex 配置模式
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.0.3` |
+| Android App | `2.0.4` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug 包名 | `com.gzy3894.codexfortui.debug` |
 | Codex CLI | `0.142.4` 中文版 |
@@ -169,6 +172,22 @@ codex-preview path <编号>
 codex-preview status
 codex-preview events
 ```
+
+统一 Agent 面板入口适合自动化脚本使用，`files` 指文件/文本托盘，`browser` 指协作浏览器：
+
+```sh
+codex-panel status
+codex-panel events
+codex-panel present files 查看文件
+codex-panel collapse files 已读取
+codex-panel clear files 清理托盘
+codex-panel present browser 展示页面
+codex-panel collapse browser 后台继续
+codex-panel done browser 用户已完成
+codex-panel result browser
+```
+
+事件和结果会包含 `visible`、`collapsed`、`request_id`、`item_id`、`active_item`、`reason`，并附带文件类型、路径、浏览器 URL、标题、标签数、是否等待用户等参数。
 
 协作浏览器由应用内桥接驱动。`open` 默认后台加载，不会立刻弹出；需要展示给用户时再调用 `present`，需要用户协作时用 `user-wait`（也兼容 `wait-user`）：
 

@@ -1,5 +1,28 @@
 # Changelog
 
+## Codex for TUI 2.0.4
+
+Codex for TUI 2.0.4 完整化 Agent 面板双向协议，让文件托盘和协作浏览器都能被 Agent 稳定控制，也能把用户操作结构化回传给终端侧。
+
+### 新功能
+
+- 新增统一 `codex-panel` 命令：支持 `status/events/wait/result`，以及对 `files`、`browser` 的 `present`、`collapse`、`toggle`、`done`、`cancel`、`clear/close`、`select/remove` 等操作。
+- `codex-preview` 兼容新增 `present`、`collapse`、`toggle`、`done`、`cancel`、`result`、`select/remove`，继续保留图片、视频、文本推送和短编号路径解析。
+- `codex-browser` 兼容新增 `collapse`、`toggle`、`done/cancel`、`result`，浏览器托盘折叠和用户协作完成都能被 Agent 明确感知。
+- 用户侧动作会写入统一事件字段：`visible`、`collapsed`、`request_id`、`item_id`、`active_item`、`reason`，并附带文件类型、路径、浏览器 URL、标题、标签数、是否等待用户等参数。
+
+### 修复
+
+- 浏览器标签选择/关闭改为通过 `MainActivity` 回写事件，不再由 UI 直接调用底层会话方法后让 Agent 猜状态。
+- 文件预览打开、关闭、长按分享、系统文件选择器打开/取消/失败、用户发送文件/长文本都会同步写入事件流。
+- 文本文件继续归入 `files` 面板源，用 `kind=text` 区分，避免出现 `codex-panel status files|browser` 之外的第三种面板源。
+- 更新脚本生成的桥接 wrapper 包含 `codex-panel`，减少 resume/旧 PATH 环境下命令不可见的问题。
+
+### 验证
+
+- 本地非 APK 构建门禁：APK asset shell 语法、`codex-panel` 请求写入、文件/浏览器桥接静态 guards 和 `git diff --check`。
+- APK 构建、签名校验和 release 资产仍只通过 GitHub Actions 完成。
+
 ## Codex for TUI 2.0.2
 
 Codex for TUI 2.0.2 修复正式包自测中发现的桥接命令入口和浏览器协作状态问题。

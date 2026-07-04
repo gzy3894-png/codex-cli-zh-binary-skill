@@ -188,6 +188,9 @@ fun TerminalMediaPreviewTray(
     onRemove: (TerminalMediaPreview) -> Unit,
     onSendToAi: (TerminalMediaPreview, String) -> Unit,
     onSendText: (String) -> Boolean,
+    onPreviewOpened: (TerminalMediaPreview) -> Unit,
+    onPreviewClosed: (TerminalMediaPreview?) -> Unit,
+    onPreviewShared: (TerminalMediaPreview) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
@@ -195,6 +198,10 @@ fun TerminalMediaPreviewTray(
     var dialogState by remember { mutableStateOf<PreviewDialogState?>(null) }
     var sendTarget by remember { mutableStateOf<TerminalMediaPreview?>(null) }
     val imagePreviews = previews.filter { it.kind == TerminalMediaPreviewKind.IMAGE }
+    val openPreview = { preview: TerminalMediaPreview, state: PreviewDialogState ->
+        dialogState = state
+        onPreviewOpened(preview)
+    }
 
     Surface(
         modifier = modifier
@@ -234,9 +241,10 @@ fun TerminalMediaPreviewTray(
                     PreviewThumbTile(
                         preview = preview,
                         imagePreviews = imagePreviews,
-                        onOpen = { dialogState = it },
+                        onOpen = { openPreview(preview, it) },
                         onRemove = { onRemove(preview) },
-                        onSendToAi = { sendTarget = preview }
+                        onSendToAi = { sendTarget = preview },
+                        onShare = { onPreviewShared(preview) }
                     )
                 }
             }
@@ -246,7 +254,11 @@ fun TerminalMediaPreviewTray(
     dialogState?.let { state ->
         MediaPreviewDialog(
             state = state,
-            onDismiss = { dialogState = null }
+            onDismiss = {
+                onPreviewClosed(state.primaryPreview())
+                dialogState = null
+            },
+            onShare = onPreviewShared
         )
     }
 
@@ -436,7 +448,8 @@ private fun PreviewThumbTile(
     imagePreviews: List<TerminalMediaPreview>,
     onOpen: (PreviewDialogState) -> Unit,
     onRemove: () -> Unit,
-    onSendToAi: () -> Unit
+    onSendToAi: () -> Unit,
+    onShare: () -> Unit
 ) {
     val context = LocalContext.current
     val sourceLabel = when (preview.source) {
@@ -475,7 +488,9 @@ private fun PreviewThumbTile(
                         onClick = open,
                         onLongClick = {
                             if (preview.kind != TerminalMediaPreviewKind.TEXT) {
-                                sharePreview(context, preview)
+                                if (sharePreview(context, preview)) {
+                                    onShare()
+                                }
                             }
                         }
                     )
@@ -580,7 +595,8 @@ private fun PreviewFeedCard(
     imagePreviews: List<TerminalMediaPreview>,
     onOpen: (PreviewDialogState) -> Unit,
     onRemove: () -> Unit,
-    onSendToAi: () -> Unit
+    onSendToAi: () -> Unit,
+    onShare: (TerminalMediaPreview) -> Unit
 ) {
     val kindLabel = when (preview.kind) {
         TerminalMediaPreviewKind.IMAGE -> "图片"
@@ -636,7 +652,8 @@ private fun PreviewFeedCard(
                                     initialIndex = initialIndex
                                 )
                             )
-                        }
+                        },
+                        onShare = onShare
                     )
                 }
                 TerminalMediaPreviewKind.VIDEO -> {
@@ -658,7 +675,11 @@ private fun PreviewFeedCard(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ImagePreviewCard(preview: TerminalMediaPreview, onClick: () -> Unit) {
+private fun ImagePreviewCard(
+    preview: TerminalMediaPreview,
+    onClick: () -> Unit,
+    onShare: (TerminalMediaPreview) -> Unit
+) {
     val context = LocalContext.current
     val mediaFile = remember(preview.path) { File(preview.path) }
     val ratio = remember(preview.width, preview.height) {
@@ -677,7 +698,11 @@ private fun ImagePreviewCard(preview: TerminalMediaPreview, onClick: () -> Unit)
             .clip(RoundedCornerShape(8.dp))
             .combinedClickable(
                 onClick = onClick,
-                onLongClick = { sharePreview(context, preview) }
+                onLongClick = {
+                    if (sharePreview(context, preview)) {
+                        onShare(preview)
+                    }
+                }
             )
             .background(MaterialTheme.colorScheme.surface)
     ) {
@@ -775,7 +800,8 @@ private fun TextPreviewCard(
 @Composable
 private fun MediaPreviewDialog(
     state: PreviewDialogState,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onShare: (TerminalMediaPreview) -> Unit
 ) {
     Dialog(
         onDismissRequest = onDismiss,
@@ -787,11 +813,13 @@ private fun MediaPreviewDialog(
         when (state) {
             is PreviewDialogState.Images -> ImagePreviewDialogContent(
                 state = state,
-                onDismiss = onDismiss
+                onDismiss = onDismiss,
+                onShare = onShare
             )
             is PreviewDialogState.Video -> VideoPreviewDialogContent(
                 preview = state.preview,
-                onDismiss = onDismiss
+                onDismiss = onDismiss,
+                onShare = onShare
             )
             is PreviewDialogState.Text -> TextPreviewDialogContent(
                 preview = state.preview,
@@ -804,7 +832,8 @@ private fun MediaPreviewDialog(
 @Composable
 private fun ImagePreviewDialogContent(
     state: PreviewDialogState.Images,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onShare: (TerminalMediaPreview) -> Unit
 ) {
     if (state.images.isEmpty()) {
         Box(
@@ -835,7 +864,11 @@ private fun ImagePreviewDialogContent(
             val preview = state.images[page]
             PhotoViewSurface(
                 preview = preview,
-                onLongPress = { sharePreview(context, preview) },
+                onLongPress = {
+                    if (sharePreview(context, preview)) {
+                        onShare(preview)
+                    }
+                },
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -845,7 +878,12 @@ private fun ImagePreviewDialogContent(
             } else {
                 state.images.firstOrNull()?.name ?: "图片"
             },
-            onShare = { sharePreview(context, state.images[pagerState.currentPage]) },
+            onShare = {
+                val preview = state.images[pagerState.currentPage]
+                if (sharePreview(context, preview)) {
+                    onShare(preview)
+                }
+            },
             onDismiss = onDismiss
         )
     }
@@ -854,7 +892,8 @@ private fun ImagePreviewDialogContent(
 @Composable
 private fun VideoPreviewDialogContent(
     preview: TerminalMediaPreview,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onShare: (TerminalMediaPreview) -> Unit
 ) {
     val context = LocalContext.current
     Box(
@@ -868,7 +907,11 @@ private fun VideoPreviewDialogContent(
         )
         PreviewDialogTopBar(
             title = preview.name,
-            onShare = { sharePreview(context, preview) },
+            onShare = {
+                if (sharePreview(context, preview)) {
+                    onShare(preview)
+                }
+            },
             onDismiss = onDismiss
         )
     }
@@ -1018,12 +1061,12 @@ private fun VideoPlayerSurface(
     )
 }
 
-private fun sharePreview(context: Context, preview: TerminalMediaPreview) {
+private fun sharePreview(context: Context, preview: TerminalMediaPreview): Boolean {
     try {
         val source = File(preview.path)
         if (!source.isFile || !source.canRead()) {
             toast("文件不可读，无法分享")
-            return
+            return false
         }
         val shareDir = File(context.cacheDir, "media-preview-share").apply { mkdirs() }
         val fileName = preview.name
@@ -1042,8 +1085,10 @@ private fun sharePreview(context: Context, preview: TerminalMediaPreview) {
             .putExtra(Intent.EXTRA_STREAM, uri)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         context.startActivity(Intent.createChooser(intent, "分享预览"))
+        return true
     } catch (error: Exception) {
         toast("分享失败：${error.message}")
+        return false
     }
 }
 
@@ -1091,4 +1136,12 @@ private sealed class PreviewDialogState {
     data class Video(val preview: TerminalMediaPreview) : PreviewDialogState()
 
     data class Text(val preview: TerminalMediaPreview) : PreviewDialogState()
+}
+
+private fun PreviewDialogState.primaryPreview(): TerminalMediaPreview? {
+    return when (this) {
+        is PreviewDialogState.Images -> images.getOrNull(initialIndex)
+        is PreviewDialogState.Video -> preview
+        is PreviewDialogState.Text -> preview
+    }
 }
