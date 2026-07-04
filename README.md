@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.0.4-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.0.4)
+[![Release](https://img.shields.io/badge/release-v2.0.5-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.0.5)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.142.4-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,9 +9,9 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.0.4 更新
+## 重要：2.0.5 更新
 
-2.0.4 改动包含 Android App 内的文件/浏览器托盘事件桥，已经安装 2.0.x 的用户需要从 Releases 下载并覆盖安装 2.0.4 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview` 和 `codex-browser` 桥接命令。
+2.0.5 改动包含 Android App 内的文件/浏览器托盘事件桥字段修复，已经安装 2.0.x 的用户需要从 Releases 下载并覆盖安装 2.0.5 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview` 和 `codex-browser` 桥接命令。
 
 如果你在旧 resume 会话里遇到裸命令不可见，再手动执行一次：
 
@@ -28,10 +28,11 @@ codex 配置模式
 
 如果菜单里能看到 `6. 修复全权限授权`，说明脚本已经更新到包含配置菜单和授权持久化修复的版本。需要修复授权时选择该项；它会把全权限模式持久写入为 `approval_policy = "never"` + `sandbox_mode = "danger-full-access"`。
 
-新安装、尚未完成首次安装的 2.0.4 用户，首次安装时会拉取当前分支的最新脚本；普通启动仍然不会隐藏联网更新、不会刷新模型、不会覆盖用户配置。
+新安装、尚未完成首次安装的 2.0.5 用户，首次安装时会拉取当前分支的最新脚本；普通启动仍然不会隐藏联网更新、不会刷新模型、不会覆盖用户配置。
 
 ## 2.0 新功能
 
+- 2.0.5 补丁：修复运行时调试发现的协议字段一致性问题，后台加入文件时 `status files` 会带上 `item_id/name/stamp`，删除文件后的 `active_item` 会反映真实当前项，浏览器 `status/result` 会带上 `active_item/tab_id/tabs_count`。
 - 2.0.4 补丁：新增统一 `codex-panel` Agent 面板入口，文件托盘和协作浏览器的展示、折叠、切换、完成、取消、清空、关闭、选择、删除都能通过同一套命令和结构化事件读写。
 - 双向事件：用户展开/折叠托盘、打开/关闭预览、长按分享、选择/删除/发送文件、发送长文本、浏览器标签选择/关闭、等待用户协作和用户完成都会写入 `status/events/result`。
 - 文件托盘：终端可以推送图片、视频和文本到顶部托盘，用户也可以从系统文件管理器添加文件，第一格常驻文本框可发送长文本。
@@ -58,7 +59,7 @@ codex 配置模式
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.0.4` |
+| Android App | `2.0.5` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug 包名 | `com.gzy3894.codexfortui.debug` |
 | Codex CLI | `0.142.4` 中文版 |

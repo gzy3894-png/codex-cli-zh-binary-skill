@@ -1,5 +1,21 @@
 # Changelog
 
+## Codex for TUI 2.0.5
+
+Codex for TUI 2.0.5 修复 2.0.4 安装后运行时调试发现的 Agent 面板协议字段一致性问题。
+
+### 修复
+
+- 文件托盘后台加入图片、视频或文本时，`codex-panel status files` 会立即带上 `item_id`、`name`、`stamp`，不必等到 `present` 后才能拿到编号。
+- 文件删除后的 `result` 不再把被删除项继续写成 `active_item`，避免 Agent 误判当前仍选中旧文件。
+- 浏览器 `status` 和 `result` 补齐 `active_item`、`tab_id`、`tabs_count`、`visible`、`collapsed` 等字段，和统一事件流保持一致。
+- 显式 `present` / `user-wait` 会在处理请求前先标记浏览器面板展开，避免 `browser_needs_user` 事件先出现一条错误的 `visible=0`。
+
+### 验证
+
+- 本地非 APK 构建门禁：静态 guards、APK asset shell 语法、脚本库 `sh -n` 和 `git diff --check`。
+- APK 构建、签名校验和 release 资产仍只通过 GitHub Actions 完成。
+
 ## Codex for TUI 2.0.4
 
 Codex for TUI 2.0.4 完整化 Agent 面板双向协议，让文件托盘和协作浏览器都能被 Agent 稳定控制，也能把用户操作结构化回传给终端侧。

@@ -63,8 +63,8 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 24'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.4"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 25'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.5"'
 }
 
 test_release_workflow_signature_gate() {
@@ -337,9 +337,14 @@ test_browser_bridge_asset() {
   assert_file_contains "$MAIN_ACTIVITY" 'action == "collapse"'
   assert_file_contains "$MAIN_ACTIVITY" 'requestedAction) {'
   assert_file_contains "$MAIN_ACTIVITY" 'val suppressPresent = action in setOf("collapse", "user_done", "user_cancelled", "close")'
+  assert_file_contains "$MAIN_ACTIVITY" 'effectiveAction in setOf("present", "user_wait")'
   assert_file_contains "$MAIN_ACTIVITY" 'snapshot?.optBoolean("needsUser") == true'
   assert_file_contains "$MAIN_ACTIVITY" 'val shouldCollapse = action == "collapse" || action == "user_done" || action == "user_cancelled"'
   assert_file_contains "$MAIN_ACTIVITY" 'markBrowserUserDone(reason = "user_collapsed")'
+  assert_file_contains "$MAIN_ACTIVITY" '.put("activeItem", activeItem)'
+  assert_file_contains "$MAIN_ACTIVITY" 'append("active_item=").append(refValue(activeItem))'
+  assert_file_contains "$MAIN_ACTIVITY" 'append("tabs_count=").append(tabsCount)'
+  assert_file_contains "$MAIN_ACTIVITY" 'append("item_id=").append(refId)'
   rm -rf "$tmp"
 }
 

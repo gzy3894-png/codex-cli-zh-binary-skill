@@ -912,6 +912,13 @@ class MainActivity : ComponentActivity() {
         } else {
             request
         }
+        if (effectiveAction in setOf("present", "user_wait") || request["present"] == "1") {
+            terminalViewModel.mediaPreviewExpanded = false
+            terminalViewModel.browserPanelExpanded = true
+        }
+        if (effectiveAction in setOf("collapse", "user_done", "user_cancelled", "close")) {
+            terminalViewModel.browserPanelExpanded = false
+        }
         val result = runCatching {
             browserSessionManager.handleRequest(effectiveRequest, browserDir)
         }.getOrElse { error ->
@@ -1091,19 +1098,18 @@ class MainActivity : ComponentActivity() {
             null
         }
 
-        terminalViewModel.addMediaPreview(
-            TerminalMediaPreview(
-                path = mediaFile.absolutePath,
-                name = request["name"]?.takeIf { it.isNotBlank() } ?: mediaFile.name,
-                kind = kind,
-                stamp = request["stamp"] ?: content.hashCode().toString(),
-                width = bounds?.first,
-                height = bounds?.second,
-                sizeBytes = mediaFile.length(),
-                textPreview = textPreview
-            )
+        val preview = TerminalMediaPreview(
+            path = mediaFile.absolutePath,
+            name = request["name"]?.takeIf { it.isNotBlank() } ?: mediaFile.name,
+            kind = kind,
+            stamp = request["stamp"] ?: content.hashCode().toString(),
+            width = bounds?.first,
+            height = bounds?.second,
+            sizeBytes = mediaFile.length(),
+            textPreview = textPreview
         )
-        val refId = request["stamp"] ?: requestId
+        terminalViewModel.addMediaPreview(preview)
+        val refId = previewReferenceId(preview)
         val shouldPresent = request["present"] != "0"
         if (shouldPresent) {
             terminalViewModel.browserPanelExpanded = false
@@ -1119,7 +1125,17 @@ class MainActivity : ComponentActivity() {
         )
         writeMediaPreviewStatus(
             previewDir,
-            "shown=1\nrequest_id=$requestId\nkind=${request["kind"]}\npath=${mediaFile.absolutePath}\n"
+            buildString {
+                append("state=ready\n")
+                append("reason=").append(if (shouldPresent) "present" else "background").append('\n')
+                append("shown=1\n")
+                append("request_id=").append(refValue(requestId)).append('\n')
+                append("kind=").append(preview.kind.name.lowercase(Locale.ROOT)).append('\n')
+                append("path=").append(refValue(preview.path)).append('\n')
+                append("name=").append(refValue(preview.name)).append('\n')
+                append("stamp=").append(refValue(preview.stamp)).append('\n')
+                append("item_id=").append(refId).append('\n')
+            }
         )
         writeMediaPreviewResult(previewDir, requestId, action, ok = true, state = "ready", reason = if (shouldPresent) "present" else "background", itemId = refId)
         writeAgentPanelStatus(
@@ -1398,7 +1414,7 @@ class MainActivity : ComponentActivity() {
         try {
             previewDir.mkdirs()
             val visible = terminalViewModel.mediaPreviewExpanded
-            val activeItem = itemId.ifBlank { terminalViewModel.mediaPreviews.lastOrNull()?.stamp.orEmpty() }
+            val activeItem = terminalViewModel.mediaPreviews.lastOrNull()?.let { previewReferenceId(it) }.orEmpty()
             val extras = panelExtrasFor("files", itemId) + extra
             previewDir.child("result").writeText(
                 buildString {
@@ -1423,21 +1439,36 @@ class MainActivity : ComponentActivity() {
     private fun writeBrowserResult(browserDir: File, result: JSONObject) {
         try {
             browserDir.mkdirs()
-            browserDir.child("result.json").writeText(result.toString(2))
             val snapshot = result.optJSONObject("snapshot")
             val state = if (result.optBoolean("ok")) {
                 snapshot?.optString("status")?.takeIf { it.isNotBlank() } ?: "done"
             } else {
                 "error"
             }
+            val visible = terminalViewModel.browserPanelExpanded
+            val activeItem = snapshot?.opt("activeTabId")?.toString().orEmpty()
+            val tabsCount = (snapshot?.optJSONArray("tabs")?.length() ?: 0).toString()
+            result
+                .put("visible", visible)
+                .put("collapsed", !visible)
+                .put("itemId", "")
+                .put("activeItem", activeItem)
+                .put("reason", result.optString("action"))
+                .put("needsUser", snapshot?.optBoolean("needsUser") == true)
+                .put("tabsCount", tabsCount)
+            browserDir.child("result.json").writeText(result.toString(2))
             val text = buildString {
                 append("request_id=").append(result.optString("requestId")).append('\n')
                 append("state=").append(state).append('\n')
                 append("action=").append(result.optString("action")).append('\n')
                 append("ok=").append(if (result.optBoolean("ok")) "1" else "0").append('\n')
                 append("needs_user=").append(if (snapshot?.optBoolean("needsUser") == true) "1" else "0").append('\n')
-                append("visible=").append(if (terminalViewModel.browserPanelExpanded) "1" else "0").append('\n')
-                append("collapsed=").append(if (terminalViewModel.browserPanelExpanded) "0" else "1").append('\n')
+                append("visible=").append(if (visible) "1" else "0").append('\n')
+                append("collapsed=").append(if (visible) "0" else "1").append('\n')
+                append("item_id=\n")
+                append("active_item=").append(refValue(activeItem)).append('\n')
+                append("tab_id=").append(refValue(activeItem)).append('\n')
+                append("tabs_count=").append(tabsCount).append('\n')
                 append("url=").append(snapshot?.optString("currentUrl").orEmpty()).append('\n')
                 append("title=").append(snapshot?.optString("title").orEmpty()).append('\n')
                 result.optString("error").takeIf { it.isNotBlank() && it != "null" }?.let {
