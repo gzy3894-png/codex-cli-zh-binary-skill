@@ -110,6 +110,25 @@ export HOME="${HOME:-/root}"
 export CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
 
+codex_for_tui_prefix_bin() {
+  if [ -n "${PREFIX:-}" ] && [ -d "${PREFIX%/}/local/bin" ]; then
+    printf '%s\n' "${PREFIX%/}/local/bin"
+    return 0
+  fi
+
+  if [ -n "${PKG:-}" ]; then
+    for prefix in "/data/user/0/$PKG" "/data/data/$PKG"; do
+      [ -d "$prefix/local/bin" ] && { printf '%s\n' "$prefix/local/bin"; return 0; }
+    done
+  fi
+
+  return 1
+}
+
+if prefix_bin="$(codex_for_tui_prefix_bin 2>/dev/null)"; then
+  export PATH="$prefix_bin:$PATH"
+fi
+
 codex_for_tui_find_lib_dir() {
   for dir in \
     "${CODEX_ZH_SCRIPT_INSTALL_ROOT:-}/lib" \
@@ -183,6 +202,7 @@ EOF
   } > "$launcher"
   chmod 755 "$launcher"
   codex_install_case_variants "$install_dir" "$launcher"
+  codex_install_app_bridge_wrappers
   codex_persist_path "$install_dir"
 }
 
@@ -224,6 +244,7 @@ codex_local_install_support_scripts() {
   [ -s "$dest_root/codex-for-tui-bootstrap.sh" ] && cp "$dest_root/codex-for-tui-bootstrap.sh" "$install_dir/codex-for-tui-bootstrap" && chmod 755 "$install_dir/codex-for-tui-bootstrap"
   [ -s "$dest_root/codex-for-tui-self-test.sh" ] && cp "$dest_root/codex-for-tui-self-test.sh" "$install_dir/codex-self-test" && chmod 755 "$install_dir/codex-self-test"
   [ -s "$dest_root/codex-for-tui-self-test.sh" ] && cp "$dest_root/codex-for-tui-self-test.sh" "$install_dir/codex-test" && chmod 755 "$install_dir/codex-test"
+  codex_install_app_bridge_wrappers
 }
 
 codex_local_setup_agents() {

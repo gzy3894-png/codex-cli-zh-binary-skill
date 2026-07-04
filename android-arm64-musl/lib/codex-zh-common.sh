@@ -28,6 +28,84 @@ codex_init_env() {
   export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin:${PREFIX:-}/local/bin:${PATH:-}"
 }
 
+codex_app_bridge_bin_dir() {
+  if [ -n "${PREFIX:-}" ] && [ -d "${PREFIX%/}/local/bin" ]; then
+    printf '%s\n' "${PREFIX%/}/local/bin"
+    return 0
+  fi
+
+  if [ -n "${PKG:-}" ]; then
+    for prefix in "/data/user/0/$PKG" "/data/data/$PKG"; do
+      [ -d "$prefix/local/bin" ] && { printf '%s\n' "$prefix/local/bin"; return 0; }
+    done
+  fi
+
+  for prefix in \
+    /data/user/0/com.gzy3894.codexfortui \
+    /data/data/com.gzy3894.codexfortui \
+    /data/user/0/com.gzy3894.codexfortui.test \
+    /data/data/com.gzy3894.codexfortui.test \
+    /data/user/0/com.gzy3894.codexfortui.debug \
+    /data/data/com.gzy3894.codexfortui.debug
+  do
+    [ -d "$prefix/local/bin" ] && { printf '%s\n' "$prefix/local/bin"; return 0; }
+  done
+
+  return 1
+}
+
+codex_install_app_bridge_wrappers() {
+  install_dir="$(codex_install_dir)"
+  mkdir -p "$install_dir"
+  for tool in codex-preview codex-push-image codex-push-media codex-browser; do
+    wrapper="$install_dir/$tool"
+    cat > "$wrapper" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+
+find_bridge_bin_dir() {
+  if [ -n "${PREFIX:-}" ] && [ -d "${PREFIX%/}/local/bin" ]; then
+    printf '%s\n' "${PREFIX%/}/local/bin"
+    return 0
+  fi
+
+  if [ -n "${PKG:-}" ]; then
+    for prefix in "/data/user/0/$PKG" "/data/data/$PKG"; do
+      [ -d "$prefix/local/bin" ] && { printf '%s\n' "$prefix/local/bin"; return 0; }
+    done
+  fi
+
+  for prefix in \
+    /data/user/0/com.gzy3894.codexfortui \
+    /data/data/com.gzy3894.codexfortui \
+    /data/user/0/com.gzy3894.codexfortui.test \
+    /data/data/com.gzy3894.codexfortui.test \
+    /data/user/0/com.gzy3894.codexfortui.debug \
+    /data/data/com.gzy3894.codexfortui.debug
+  do
+    [ -d "$prefix/local/bin" ] && { printf '%s\n' "$prefix/local/bin"; return 0; }
+  done
+
+  return 1
+}
+
+tool="$(basename "$0")"
+bridge_bin="$(find_bridge_bin_dir)" || {
+  printf '找不到 Codex for TUI 桥接命令目录，请在 App 终端内运行: %s\n' "$tool" >&2
+  exit 1
+}
+target="$bridge_bin/$tool"
+[ -x "$target" ] || {
+  printf '桥接命令不可执行: %s\n' "$target" >&2
+  exit 1
+}
+export PREFIX="$(dirname "$(dirname "$bridge_bin")")"
+exec "$target" "$@"
+EOF
+    chmod 755 "$wrapper" 2>/dev/null || true
+  done
+}
+
 codex_shell_quote() {
   printf "'"
   printf '%s' "$1" | sed "s/'/'\\\\''/g"

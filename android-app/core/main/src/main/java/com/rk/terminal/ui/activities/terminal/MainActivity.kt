@@ -677,6 +677,17 @@ class MainActivity : ComponentActivity() {
             action == "present" ||
             action == "user_wait" ||
             snapshot?.optBoolean("needsUser") == true
+        val shouldCollapse = action == "user_done" || action == "user_cancelled"
+        if (result.optBoolean("ok") && shouldCollapse) {
+            terminalViewModel.browserPanelExpanded = false
+            writeAgentPanelEvent(
+                source = "browser",
+                type = action,
+                state = snapshot?.optString("status").orEmpty().ifBlank { "done" },
+                reason = action,
+                requestId = result.optString("requestId")
+            )
+        }
         if (result.optBoolean("ok") && shouldPresent) {
             terminalViewModel.mediaPreviewExpanded = false
             terminalViewModel.browserPanelExpanded = true

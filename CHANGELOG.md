@@ -1,5 +1,21 @@
 # Changelog
 
+## Codex for TUI 2.0.2
+
+Codex for TUI 2.0.2 修复正式包自测中发现的桥接命令入口和浏览器协作状态问题。
+
+### 修复
+
+- 新增 `codex-preview`、`codex-push-image`、`codex-push-media`、`codex-browser` 的安装目录包装入口；即使当前 Codex 会话没有继承 App 的 `$PREFIX/local/bin`，Agent 和用户也能直接调用裸命令。
+- `codex` 启动器会在运行时识别 App 桥接命令目录，并把它加入 PATH，减少 resume/旧会话环境下的命令不可见问题。
+- `codex-browser user-done` 和 `user-cancelled` 现在会同步收起浏览器托盘并写入面板事件，避免 Agent 只能看到 `needs_user=0` 却无法判断托盘是否已经结束接管。
+
+### 验证
+
+- 本地非构建门禁：APK asset shell 语法、静态 guards 和脚本语法检查。
+- 已在正式包数据目录中手动验证裸 `codex-browser`、`codex-preview`、图片/视频/文本托盘、浏览器静默打开、展示和关闭信号。
+- APK 仍只通过 GitHub Actions 构建发布。
+
 ## Codex for TUI 2.0.1
 
 Codex for TUI 2.0.1 修复 2.0 正式版后续测试中发现的浏览器和文件托盘协作问题。

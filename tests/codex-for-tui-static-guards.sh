@@ -61,8 +61,8 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 21'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.1"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 22'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.2"'
 }
 
 test_release_workflow_signature_gate() {
@@ -289,6 +289,7 @@ test_browser_bridge_asset() {
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'activeUserRequestId'
   assert_file_contains "$MAIN_ACTIVITY" 'action == "present"'
   assert_file_contains "$MAIN_ACTIVITY" 'snapshot?.optBoolean("needsUser") == true'
+  assert_file_contains "$MAIN_ACTIVITY" 'val shouldCollapse = action == "user_done" || action == "user_cancelled"'
   assert_file_contains "$MAIN_ACTIVITY" 'markBrowserUserDone(reason = "user_collapsed")'
   rm -rf "$tmp"
 }
@@ -296,14 +297,20 @@ test_browser_bridge_asset() {
 test_generated_launcher_entrypoints_and_normal_path() {
   tmp="${TMPDIR:-/tmp}/codex-tui-static-launcher.$$"
   rm -rf "$tmp"
-  mkdir -p "$tmp/home/.codex" "$tmp/home/.local/bin" "$tmp/bin" "$tmp/state" "$tmp/curl"
+  mkdir -p "$tmp/home/.codex" "$tmp/home/.local/bin" "$tmp/bin" "$tmp/state" "$tmp/curl" "$tmp/prefix/local/bin"
   printf 'configured = true\n' > "$tmp/home/.codex/config.toml"
 
   cat > "$tmp/bin/codex-zh-bin" <<'EOF'
 #!/usr/bin/env sh
-printf 'real-codex:%s:%s:%s\n' "$HOME" "$CODEX_HOME" "$*"
+printf 'real-codex:%s:%s:%s:%s\n' "$HOME" "$CODEX_HOME" "$PATH" "$*"
 EOF
   chmod +x "$tmp/bin/codex-zh-bin"
+
+  cat > "$tmp/prefix/local/bin/codex-preview" <<'EOF'
+#!/usr/bin/env sh
+printf 'bridge-preview:%s:%s\n' "$PREFIX" "$*"
+EOF
+  chmod +x "$tmp/prefix/local/bin/codex-preview"
 
   cat > "$tmp/bin/codex-update" <<'EOF'
 #!/usr/bin/env sh
@@ -325,14 +332,22 @@ EOF
   assert_file_contains "$tmp/bin/codex" '更新'
   assert_file_contains "$tmp/bin/codex" 'codex_config_menu'
   assert_file_contains "$tmp/bin/codex" 'CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"'
+  assert_file_contains "$tmp/bin/codex" 'codex_for_tui_prefix_bin'
+  [ -x "$tmp/bin/codex-preview" ] || fail "codex-preview bridge wrapper was not installed"
   assert_file_not_contains "$tmp/bin/codex" '--preflight'
   assert_file_not_contains "$tmp/bin/codex" '--refresh-current-profile'
   assert_file_not_contains "$tmp/bin/codex" 'refresh-models'
   assert_file_not_contains "$tmp/bin/codex" 'AGENTS.md'
 
+  if ! output="$(PREFIX="$tmp/prefix" "$tmp/bin/codex-preview" probe)"; then
+    fail "codex-preview bridge wrapper failed"
+  fi
+  printf '%s\n' "$output" | grep -F "bridge-preview:$tmp/prefix:probe" >/dev/null 2>&1 || fail "codex-preview bridge wrapper did not forward to app bridge"
+
   if ! output="$(
     HOME="$tmp/home" \
     CODEX_HOME="$tmp/home/.codex" \
+    PREFIX="$tmp/prefix" \
     CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR" \
     PATH="$tmp/bin:/bin:/usr/bin" \
     "$tmp/bin/codex" hello
@@ -340,6 +355,7 @@ EOF
     fail "normal codex launcher command failed"
   fi
   printf '%s\n' "$output" | grep -F 'real-codex:' >/dev/null 2>&1 || fail "normal codex did not run real binary"
+  printf '%s\n' "$output" | grep -F "$tmp/prefix/local/bin" >/dev/null 2>&1 || fail "normal codex did not carry app bridge bin in PATH"
   printf '%s\n' "$output" | grep -F 'update-ran' >/dev/null 2>&1 && fail "normal codex invoked update path"
   printf '%s\n' "$output" | grep -F ':/root:' >/dev/null 2>&1 && fail "test did not isolate HOME"
 
@@ -449,6 +465,8 @@ test_update_apply_installs_self_test_script_and_aliases() {
   [ -s "$tmp/share/codex-for-tui-self-test.sh" ] || fail "self-test script was not installed into script share"
   [ -x "$tmp/bin/codex-self-test" ] || fail "codex-self-test alias was not installed"
   [ -x "$tmp/bin/codex-test" ] || fail "codex-test alias was not installed"
+  [ -x "$tmp/bin/codex-preview" ] || fail "codex-preview bridge wrapper was not installed by update"
+  [ -x "$tmp/bin/codex-browser" ] || fail "codex-browser bridge wrapper was not installed by update"
   assert_file_contains "$tmp/stdout" "已更新：codex-for-tui-self-test.sh"
   rm -rf "$tmp"
 }
