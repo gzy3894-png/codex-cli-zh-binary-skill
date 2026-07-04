@@ -15,6 +15,7 @@ PUSH_MEDIA_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-push-med
 BROWSER_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-browser"
 PANEL_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-panel"
 SESSION_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-session"
+RTK_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-rtk"
 TERMINAL_TOP_BAR="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalTopBar.kt"
 TERMINAL_SCREEN="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalScreen.kt"
 MEDIA_PREVIEW_PANE="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MediaPreviewPane.kt"
@@ -64,8 +65,8 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 26'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.6"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 27'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.7"'
 }
 
 test_release_workflow_signature_gate() {
@@ -75,6 +76,12 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'Signer #1 certificate SHA-256 digest:'
   assert_file_contains "$BUILD_WORKFLOW" 'Release APK signing certificate mismatch'
   assert_file_contains "$BUILD_WORKFLOW" 'artifact_name=codex-for-tui-release-apk'
+  assert_file_contains "$BUILD_WORKFLOW" 'name: Build RTK aarch64 musl'
+  assert_file_contains "$BUILD_WORKFLOW" 'repository: rtk-ai/rtk'
+  assert_file_contains "$BUILD_WORKFLOW" 'ref: v0.43.0'
+  assert_file_contains "$BUILD_WORKFLOW" 'cross build --release --target aarch64-unknown-linux-musl'
+  assert_file_contains "$BUILD_WORKFLOW" 'qemu-aarch64 /tmp/rtk --version'
+  assert_file_contains "$BUILD_WORKFLOW" 'cp /tmp/codex-for-tui-rtk/rtk core/main/src/main/assets/rtk'
   assert_file_not_contains "$BUILD_WORKFLOW" 'codex-for-tui-unsigned-or-test-signed-release-apk'
 }
 
@@ -85,6 +92,9 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$MKSESSION" '"codex-browser" to "codex-browser"'
   assert_file_contains "$MKSESSION" '"codex-panel" to "codex-panel"'
   assert_file_contains "$MKSESSION" '"codex-session" to "codex-session"'
+  assert_file_contains "$MKSESSION" '"codex-rtk" to "codex-rtk"'
+  assert_file_contains "$MKSESSION" '"rtk" to "rtk"'
+  assert_file_contains "$MKSESSION" 'input.copyTo(output)'
   assert_file_contains "$INIT_ASSET" 'ensure_codex_preview'
   assert_file_contains "$INIT_ASSET" '[ ! -r /etc/profile ] || . /etc/profile'
   assert_file_contains "$INIT_ASSET" 'export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"'
@@ -151,6 +161,7 @@ test_image_preview_bridge_asset() {
   sh -n "$BROWSER_ASSET" || fail "codex-browser shell syntax failed"
   sh -n "$PANEL_ASSET" || fail "codex-panel shell syntax failed"
   sh -n "$SESSION_ASSET" || fail "codex-session shell syntax failed"
+  sh -n "$RTK_ASSET" || fail "codex-rtk shell syntax failed"
   sh -n "$INIT_ASSET" || fail "init.sh shell syntax failed"
 
   tmp="${TMPDIR:-/tmp}/codex-tui-static-image-preview.$$"
@@ -416,14 +427,20 @@ test_session_fold_bridge_asset() {
 
   assert_file_contains "$SESSION_ASSET" 'codex-session start [--run RUN_ID] [TITLE]'
   assert_file_contains "$SESSION_ASSET" 'codex-session add thinking|tool|text|file|browser|final --run RUN_ID'
+  assert_file_contains "$SESSION_ASSET" 'codex-session timeline collapse|expand|toggle [REASON]'
   assert_file_contains "$SESSION_ASSET" 'codex-session status|events|wait|result'
   assert_file_contains "$TERMINAL_VIEW_MODEL" 'val sessionFoldRuns'
+  assert_file_contains "$TERMINAL_VIEW_MODEL" 'sessionFoldTimelineCollapsed'
   assert_file_contains "$TERMINAL_VIEW_MODEL" 'data class TerminalSessionFoldRun'
   assert_file_contains "$TERMINAL_VIEW_MODEL" 'data class TerminalSessionFoldItem'
   assert_file_contains "$TERMINAL_SCREEN" 'SessionFoldTimeline'
+  assert_file_contains "$TERMINAL_SCREEN" 'onTimelineToggle = mainActivity::toggleSessionFoldTimeline'
   assert_file_contains "$MAIN_ACTIVITY" 'private suspend fun pollSessionFoldRequest'
   assert_file_contains "$MAIN_ACTIVITY" 'writeSessionFoldEvent'
   assert_file_contains "$MAIN_ACTIVITY" 'toggleSessionFoldRun'
+  assert_file_contains "$MAIN_ACTIVITY" 'toggleSessionFoldTimeline'
+  assert_file_contains "$MAIN_ACTIVITY" 'timeline_collapsed='
+  assert_file_contains "$MAIN_ACTIVITY" '"timeline_collapse", "timeline_expand", "timeline_toggle"'
   assert_file_contains "$MAIN_ACTIVITY" 'clearSessionFoldTimeline'
 
   if ! output="$(PREFIX="$tmp/prefix" sh "$SESSION_ASSET" start --run run-1 '测试会话')"; then
@@ -452,6 +469,12 @@ test_session_fold_bridge_asset() {
   assert_file_contains "$tmp/prefix/local/session-fold/request" "action=done"
   PREFIX="$tmp/prefix" sh "$SESSION_ASSET" collapse run-1 >/dev/null || fail "codex-session collapse failed"
   assert_file_contains "$tmp/prefix/local/session-fold/request" "action=collapse"
+  PREFIX="$tmp/prefix" sh "$SESSION_ASSET" timeline collapse agent_fold >/dev/null || fail "codex-session timeline collapse failed"
+  assert_file_contains "$tmp/prefix/local/session-fold/request" "action=timeline_collapse"
+  PREFIX="$tmp/prefix" sh "$SESSION_ASSET" timeline expand agent_expand >/dev/null || fail "codex-session timeline expand failed"
+  assert_file_contains "$tmp/prefix/local/session-fold/request" "action=timeline_expand"
+  PREFIX="$tmp/prefix" sh "$SESSION_ASSET" timeline toggle agent_toggle >/dev/null || fail "codex-session timeline toggle failed"
+  assert_file_contains "$tmp/prefix/local/session-fold/request" "action=timeline_toggle"
   PREFIX="$tmp/prefix" sh "$SESSION_ASSET" remove run-1 >/dev/null || fail "codex-session remove failed"
   assert_file_contains "$tmp/prefix/local/session-fold/request" "action=remove"
   PREFIX="$tmp/prefix" sh "$SESSION_ASSET" clear test_clear >/dev/null || fail "codex-session clear failed"
@@ -460,6 +483,55 @@ test_session_fold_bridge_asset() {
   PREFIX="$tmp/prefix" sh "$SESSION_ASSET" status >/dev/null || fail "codex-session status should be safe without status file"
   PREFIX="$tmp/prefix" sh "$SESSION_ASSET" events >/dev/null || fail "codex-session events should be safe without events file"
   PREFIX="$tmp/prefix" sh "$SESSION_ASSET" result >/dev/null || fail "codex-session result should be safe without result file"
+  rm -rf "$tmp"
+}
+
+test_codex_rtk_bridge_asset() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-static-rtk.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.codex" "$tmp/bin" "$tmp/empty"
+
+  assert_file_contains "$RTK_ASSET" 'codex-rtk status|enable|disable|verify|hook'
+  assert_file_contains "$RTK_ASSET" 'permissionDecision":"allow"'
+  assert_file_contains "$RTK_ASSET" 'updatedInput'
+  assert_file_contains "$RTK_ASSET" 'RTK_DISABLED'
+  assert_file_contains "$RTK_ASSET" 'codex-for-tui-rtk-hook begin'
+
+  sample='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status"}}'
+  output="$(printf '%s' "$sample" | PATH="$tmp/empty:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" hook)"
+  [ -z "$output" ] || fail "codex-rtk hook should fail open when rtk is missing"
+
+  cat > "$tmp/bin/rtk" <<'EOF'
+#!/usr/bin/env sh
+case "$1" in
+  --version)
+    printf '%s\n' 'rtk 0.43.0'
+    ;;
+  rewrite)
+    if [ "${2:-}" = "git status" ]; then
+      printf '%s\n' 'rtk git status'
+      exit 3
+    fi
+    exit 1
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+EOF
+  chmod 755 "$tmp/bin/rtk"
+
+  output="$(printf '%s' "$sample" | PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" hook)"
+  printf '%s\n' "$output" | grep -F '"updatedInput":{"command":"rtk git status"}' >/dev/null 2>&1 || fail "codex-rtk hook did not return updatedInput"
+
+  PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" enable >/dev/null || fail "codex-rtk enable failed"
+  assert_file_contains "$tmp/home/.codex/config.toml" 'hooks = true'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'codex-for-tui-rtk-hook begin'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'command = "codex-rtk hook"'
+
+  PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" disable >/dev/null || fail "codex-rtk disable failed"
+  assert_file_not_contains "$tmp/home/.codex/config.toml" 'codex-for-tui-rtk-hook begin'
+
   rm -rf "$tmp"
 }
 
@@ -638,6 +710,7 @@ test_update_apply_installs_self_test_script_and_aliases() {
   [ -x "$tmp/bin/codex-browser" ] || fail "codex-browser bridge wrapper was not installed by update"
   [ -x "$tmp/bin/codex-panel" ] || fail "codex-panel bridge wrapper was not installed by update"
   [ -x "$tmp/bin/codex-session" ] || fail "codex-session bridge wrapper was not installed by update"
+  [ -x "$tmp/bin/codex-rtk" ] || fail "codex-rtk bridge wrapper was not installed by update"
   assert_file_contains "$tmp/stdout" "已更新：codex-for-tui-self-test.sh"
   rm -rf "$tmp"
 }
@@ -715,6 +788,7 @@ run_step test_image_preview_bridge_asset
 run_step test_browser_bridge_asset
 run_step test_agent_panel_bridge_asset
 run_step test_session_fold_bridge_asset
+run_step test_codex_rtk_bridge_asset
 run_step test_generated_launcher_entrypoints_and_normal_path
 run_step test_generated_launcher_first_run_configures_then_runs
 run_step test_update_apply_installs_self_test_script_and_aliases

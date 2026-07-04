@@ -431,6 +431,7 @@ class MainActivity : ComponentActivity() {
                     append("item_id=").append(refValue(itemId)).append('\n')
                     append("active_run=").append(refValue(terminalViewModel.activeSessionFoldRunId)).append('\n')
                     append("collapsed=").append(if (run?.collapsed == true) "1" else "0").append('\n')
+                    append("timeline_collapsed=").append(if (terminalViewModel.sessionFoldTimelineCollapsed) "1" else "0").append('\n')
                     append("runs=").append(terminalViewModel.sessionFoldRuns.size).append('\n')
                     append("items=").append(totalItems).append('\n')
                     appendSessionFoldExtras(extra)
@@ -464,6 +465,7 @@ class MainActivity : ComponentActivity() {
                 append("item_id=").append(refValue(itemId)).append('\n')
                 append("active_run=").append(refValue(terminalViewModel.activeSessionFoldRunId)).append('\n')
                 append("collapsed=").append(if (run?.collapsed == true) "1" else "0").append('\n')
+                append("timeline_collapsed=").append(if (terminalViewModel.sessionFoldTimelineCollapsed) "1" else "0").append('\n')
                 appendSessionFoldExtras(extra)
                 append("---\n")
             }
@@ -497,6 +499,7 @@ class MainActivity : ComponentActivity() {
                     append("item_id=").append(refValue(itemId)).append('\n')
                     append("active_run=").append(refValue(terminalViewModel.activeSessionFoldRunId)).append('\n')
                     append("collapsed=").append(if (run?.collapsed == true) "1" else "0").append('\n')
+                    append("timeline_collapsed=").append(if (terminalViewModel.sessionFoldTimelineCollapsed) "1" else "0").append('\n')
                     if (error.isNotBlank()) append("error=").append(refValue(error)).append('\n')
                     appendSessionFoldExtras(extra)
                 }
@@ -509,7 +512,8 @@ class MainActivity : ComponentActivity() {
     private fun StringBuilder.appendSessionFoldExtras(extras: Map<String, String>) {
         val reserved = setOf(
             "event_id", "source", "type", "state", "reason", "request_id", "run_id",
-            "item_id", "active_run", "collapsed", "runs", "items", "stamp", "ok", "action"
+            "item_id", "active_run", "collapsed", "timeline_collapsed", "runs", "items",
+            "stamp", "ok", "action"
         )
         extras.toSortedMap().forEach { (key, value) ->
             if (key.isNotBlank() && key !in reserved) {
@@ -976,6 +980,37 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    fun toggleSessionFoldTimeline() {
+        setSessionFoldTimelineCollapsed(
+            collapsed = !terminalViewModel.sessionFoldTimelineCollapsed,
+            reason = "timeline_toggle"
+        )
+    }
+
+    private fun setSessionFoldTimelineCollapsed(
+        collapsed: Boolean,
+        reason: String,
+        requestId: String = "",
+        action: String = "timeline",
+        actor: String = "user"
+    ) {
+        terminalViewModel.setSessionFoldTimelineCollapsed(collapsed)
+        val state = if (collapsed) "collapsed" else "expanded"
+        writeSessionFoldEvent(
+            type = "${actor}_timeline_$state",
+            state = state,
+            reason = reason,
+            requestId = requestId,
+            extra = mapOf("timeline_action" to action)
+        )
+        writeSessionFoldStatus(
+            state = state,
+            reason = reason,
+            requestId = requestId,
+            extra = mapOf("timeline_action" to action)
+        )
+    }
+
     fun removeSessionFoldRun(runId: String) {
         terminalViewModel.removeSessionFoldRun(runId)
         writeSessionFoldEvent(
@@ -1226,6 +1261,36 @@ class MainActivity : ComponentActivity() {
                     writeSessionFoldEvent("agent_$state", state, reason, requestId, runId)
                     writeSessionFoldResult(requestId, action, true, state, reason, runId)
                     writeSessionFoldStatus(state, reason, requestId, runId)
+                }
+                "timeline_collapse", "timeline_expand", "timeline_toggle" -> {
+                    val collapsed = when (action) {
+                        "timeline_collapse" -> true
+                        "timeline_expand" -> false
+                        else -> !terminalViewModel.sessionFoldTimelineCollapsed
+                    }
+                    terminalViewModel.setSessionFoldTimelineCollapsed(collapsed)
+                    val state = if (collapsed) "collapsed" else "expanded"
+                    writeSessionFoldEvent(
+                        type = "agent_timeline_$state",
+                        state = state,
+                        reason = reason,
+                        requestId = requestId,
+                        extra = mapOf("timeline_action" to action)
+                    )
+                    writeSessionFoldResult(
+                        requestId = requestId,
+                        action = action,
+                        ok = true,
+                        state = state,
+                        reason = reason,
+                        extra = mapOf("timeline_action" to action)
+                    )
+                    writeSessionFoldStatus(
+                        state = state,
+                        reason = reason,
+                        requestId = requestId,
+                        extra = mapOf("timeline_action" to action)
+                    )
                 }
                 "remove" -> {
                     terminalViewModel.removeSessionFoldRun(runId)

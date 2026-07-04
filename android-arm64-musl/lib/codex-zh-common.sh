@@ -57,7 +57,7 @@ codex_app_bridge_bin_dir() {
 codex_install_app_bridge_wrappers() {
   install_dir="$(codex_install_dir)"
   mkdir -p "$install_dir"
-  for tool in codex-preview codex-push-image codex-push-media codex-browser codex-panel codex-session; do
+  for tool in codex-preview codex-push-image codex-push-media codex-browser codex-panel codex-session codex-rtk; do
     wrapper="$install_dir/$tool"
     cat > "$wrapper" <<'EOF'
 #!/usr/bin/env sh

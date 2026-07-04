@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.0.6-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.0.6)
+[![Release](https://img.shields.io/badge/release-v2.0.7-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.0.7)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.142.4-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,9 +9,11 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.0.6 更新
+## 重要：2.0.7 更新
 
-2.0.6 新增会话折叠 v1：Agent 可以通过 `codex-session` 把思考、工具、长文本、文件和浏览器协作状态放进 App 原生时间线，完成后默认折叠为“已处理 <耗时>”。已经安装 2.0.x 的用户需要从 Releases 下载并覆盖安装 2.0.6 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser` 和 `codex-session` 桥接命令。
+2.0.7 新增 RTK 内置和会话托盘总折叠：APK 通过 GitHub Actions 内置 Android/Alpine 可运行的 RTK `v0.43.0` ARM64 musl 二进制；`codex-session timeline collapse|expand|toggle` 可以整体折叠/展开会话时间线，折叠不会清空记录；`status/events/result` 会写入 `timeline_collapsed`，Agent 不需要猜托盘状态。
+
+已经安装 2.0.x 的用户需要从 Releases 下载并覆盖安装 2.0.7 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session` 和 `codex-rtk` 桥接命令。
 
 如果你在旧 resume 会话里遇到裸命令不可见，再手动执行一次：
 
@@ -28,10 +30,12 @@ codex 配置模式
 
 如果菜单里能看到 `6. 修复全权限授权`，说明脚本已经更新到包含配置菜单和授权持久化修复的版本。需要修复授权时选择该项；它会把全权限模式持久写入为 `approval_policy = "never"` + `sandbox_mode = "danger-full-access"`。
 
-新安装、尚未完成首次安装的 2.0.6 用户，首次安装时会拉取当前分支的最新脚本；普通启动仍然不会隐藏联网更新、不会刷新模型、不会覆盖用户配置。
+新安装、尚未完成首次安装的 2.0.7 用户，首次安装时会拉取当前分支的最新脚本；普通启动仍然不会隐藏联网更新、不会刷新模型、不会覆盖用户配置。
 
 ## 2.0 新功能
 
+- 2.0.7 新增：内置 RTK `v0.43.0`，提供 `codex-rtk status|enable|disable|verify|hook`；RTK 用来压缩未来 shell 命令输出，不会删除已经进入 Codex 的历史上下文。
+- 2.0.7 新增：会话时间线支持整体折叠，`codex-session timeline collapse|expand|toggle` 只改变托盘显示，不清空 run/item 记录。
 - 2.0.6 新增：会话折叠 v1，`codex-session` 支持 `start/add/done/fail/expand/collapse/remove/clear/status/events/wait/result`，长文本和工具输出进入结构化折叠时间线，不直接刷满终端。
 - 2.0.5 补丁：修复运行时调试发现的协议字段一致性问题，后台加入文件时 `status files` 会带上 `item_id/name/stamp`，删除文件后的 `active_item` 会反映真实当前项，浏览器 `status/result` 会带上 `active_item/tab_id/tabs_count`。
 - 2.0.4 补丁：新增统一 `codex-panel` Agent 面板入口，文件托盘和协作浏览器的展示、折叠、切换、完成、取消、清空、关闭、选择、删除都能通过同一套命令和结构化事件读写。
@@ -60,7 +64,7 @@ codex 配置模式
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.0.6` |
+| Android App | `2.0.7` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug 包名 | `com.gzy3894.codexfortui.debug` |
 | Codex CLI | `0.142.4` 中文版 |
@@ -204,6 +208,33 @@ codex-browser events
 
 Agent 可以打开网页、读 DOM、点击、输入、执行 JS、截图；遇到登录、授权、验证码或风控时，可以切到 Custom Tabs/系统浏览器让用户处理，再回到当前会话继续。
 
+会话时间线用于承载 Agent 的思考、工具、长文本、文件和浏览器协作摘要。整体折叠只隐藏托盘列表，不会清空记录；清空才会删除时间线记录：
+
+```sh
+codex-session start --run run-1 处理任务
+codex-session add tool --run run-1 --title 命令 --summary 成功
+codex-session timeline collapse 已收起
+codex-session timeline expand 继续查看
+codex-session status
+codex-session events
+```
+
+RTK 用来减少之后的 shell 输出噪音。它不会删除已经出现在终端或 Codex 上下文里的历史内容。首次启用 hook 后，需要在 Codex TUI 里运行 `/hooks` 并信任 `codex-rtk hook`：
+
+```sh
+codex-rtk status
+codex-rtk verify
+codex-rtk enable
+# 回到 Codex 后运行 /hooks 信任
+codex-rtk disable
+```
+
+临时跳过 RTK hook：
+
+```sh
+RTK_DISABLED=1 git status
+```
+
 安装器还会创建多种大小写入口，例如：
 
 ```sh
@@ -315,7 +346,7 @@ curl -v --http1.1 https://api.example.com/v1/models
 hooks = false
 ```
 
-如果你迁移过旧配置，可以检查 `~/.codex/config.toml` 里是否仍有旧 hook 配置。
+如果你迁移过旧配置，可以检查 `~/.codex/config.toml` 里是否仍有旧 hook 配置。需要使用 RTK 时运行 `codex-rtk enable`，它会把 hooks 开启并追加 Codex for TUI 管理的 RTK hook；不用时运行 `codex-rtk disable`，只移除这段托管 hook。
 
 **能不能直接用原生 Termux？**
 

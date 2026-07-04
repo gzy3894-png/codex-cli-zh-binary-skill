@@ -146,7 +146,9 @@ fun TerminalScreen(
                 if (sessionBinder != null) {
                     SessionFoldTimeline(
                         runs = terminalViewModel.sessionFoldRuns,
+                        collapsed = terminalViewModel.sessionFoldTimelineCollapsed,
                         onToggle = mainActivity::toggleSessionFoldRun,
+                        onTimelineToggle = mainActivity::toggleSessionFoldTimeline,
                         onRemove = mainActivity::removeSessionFoldRun,
                         onClear = mainActivity::clearSessionFoldTimeline
                     )

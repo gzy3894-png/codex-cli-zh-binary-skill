@@ -20,7 +20,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,7 +32,9 @@ import java.io.File
 @Composable
 fun SessionFoldTimeline(
     runs: List<TerminalSessionFoldRun>,
+    collapsed: Boolean,
     onToggle: (String) -> Unit,
+    onTimelineToggle: () -> Unit,
     onRemove: (String) -> Unit,
     onClear: () -> Unit,
     modifier: Modifier = Modifier
@@ -42,6 +43,7 @@ fun SessionFoldTimeline(
 
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val maxHeight = (screenHeight * 0.34f).coerceIn(104.dp, 280.dp)
+    val totalItems = runs.sumOf { it.items.size }
 
     Surface(
         modifier = modifier
@@ -60,32 +62,49 @@ fun SessionFoldTimeline(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "会话",
-                    modifier = Modifier.weight(1f),
+                    text = if (collapsed) "> 会话" else "v 会话",
+                    modifier = Modifier
+                        .clickable(onClick = onTimelineToggle)
+                        .padding(end = 8.dp),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "${runs.size}",
+                    text = sessionFoldTimelineSummary(runs),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${runs.size}/$totalItems",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                TextButton(onClick = onClear) {
-                    Text("清空")
-                }
+                Text(
+                    text = "清空",
+                    modifier = Modifier
+                        .clickable(onClick = onClear)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.16f))
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                items(runs.asReversed(), key = { it.id }) { run ->
-                    SessionFoldRunRow(
-                        run = run,
-                        onToggle = { onToggle(run.id) },
-                        onRemove = { onRemove(run.id) }
-                    )
+            if (!collapsed) {
+                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.16f))
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(runs.asReversed(), key = { it.id }) { run ->
+                        SessionFoldRunRow(
+                            run = run,
+                            onToggle = { onToggle(run.id) },
+                            onRemove = { onRemove(run.id) }
+                        )
+                    }
                 }
             }
         }
@@ -213,6 +232,20 @@ private fun sessionFoldHeader(run: TerminalSessionFoldRun): String {
     val label = if (run.status == "running") "处理中" else "已处理"
     val elapsed = sessionFoldElapsed(run)
     return if (elapsed.isBlank()) label else "$label  $elapsed"
+}
+
+private fun sessionFoldTimelineSummary(runs: List<TerminalSessionFoldRun>): String {
+    val latest = runs.lastOrNull() ?: return ""
+    val title = latest.summary.ifBlank { latest.title }
+    val status = when (latest.status) {
+        "running" -> "处理中"
+        "failed" -> "失败"
+        "cancelled" -> "已取消"
+        else -> "已处理"
+    }
+    return listOf(status, title)
+        .filter { it.isNotBlank() }
+        .joinToString("  ")
 }
 
 private fun sessionFoldElapsed(run: TerminalSessionFoldRun): String {

@@ -42,6 +42,7 @@ class TerminalViewModel : ViewModel() {
     var browserPanelExpanded by mutableStateOf(false)
     val sessionFoldRuns = mutableStateListOf<TerminalSessionFoldRun>()
     var activeSessionFoldRunId by mutableStateOf("")
+    var sessionFoldTimelineCollapsed by mutableStateOf(false)
 
     fun addMediaPreview(preview: TerminalMediaPreview) {
         mediaPreviews.removeAll { it.stamp == preview.stamp || it.path == preview.path }
@@ -145,6 +146,10 @@ class TerminalViewModel : ViewModel() {
         }
     }
 
+    fun setSessionFoldTimelineCollapsed(collapsed: Boolean) {
+        sessionFoldTimelineCollapsed = collapsed
+    }
+
     fun removeSessionFoldRun(runId: String) {
         sessionFoldRuns.removeAll { it.id == runId }
         if (activeSessionFoldRunId == runId) {
@@ -155,6 +160,7 @@ class TerminalViewModel : ViewModel() {
     fun clearSessionFoldRuns() {
         sessionFoldRuns.clear()
         activeSessionFoldRunId = ""
+        sessionFoldTimelineCollapsed = false
     }
 
     fun setFont(typeface: Typeface) {

@@ -307,7 +307,19 @@ curl -v --http1.1 https://api.example.com/v1/models
 hooks = false
 ```
 
-如果你迁移了旧配置，请手动检查 `~/.codex/config.toml`。
+如果你迁移了旧配置，请手动检查 `~/.codex/config.toml`。需要使用 RTK 压缩之后的 shell 输出时，先运行：
+
+```sh
+codex-rtk status
+codex-rtk verify
+codex-rtk enable
+```
+
+然后在 Codex TUI 里运行 `/hooks` 信任 `codex-rtk hook`。关闭 RTK hook 用：
+
+```sh
+codex-rtk disable
+```
 
 ## 文件校验
 

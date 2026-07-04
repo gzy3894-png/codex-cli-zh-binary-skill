@@ -1,0 +1,259 @@
+#!/usr/bin/env sh
+set -eu
+
+MARK_BEGIN="# codex-for-tui-rtk-hook begin"
+MARK_END="# codex-for-tui-rtk-hook end"
+
+usage() {
+  printf '%s\n' "用法: codex-rtk status|enable|disable|verify|hook"
+}
+
+codex_home() {
+  printf '%s\n' "${CODEX_HOME:-$HOME/.codex}"
+}
+
+rtk_path() {
+  if command -v rtk >/dev/null 2>&1; then
+    command -v rtk
+    return 0
+  fi
+  for path in \
+    "${PREFIX:-}/local/bin/rtk" \
+    "/usr/local/bin/rtk" \
+    "$HOME/.local/bin/rtk"
+  do
+    [ -x "$path" ] && { printf '%s\n' "$path"; return 0; }
+  done
+  return 1
+}
+
+config_file() {
+  printf '%s/config.toml\n' "$(codex_home)"
+}
+
+backup_file() {
+  file="$1"
+  [ -e "$file" ] || return 0
+  stamp="$(date +%Y%m%d%H%M%S 2>/dev/null || printf 0)"
+  cp -p "$file" "$file.codex-rtk.bak.$stamp"
+}
+
+strip_managed_block() {
+  input="$1"
+  output="$2"
+  awk -v begin="$MARK_BEGIN" -v end="$MARK_END" '
+    $0 == begin { skip = 1; next }
+    $0 == end { skip = 0; next }
+    !skip { print }
+  ' "$input" > "$output"
+}
+
+set_hooks_feature() {
+  value="$1"
+  cfg="$(config_file)"
+  home_dir="$(codex_home)"
+  mkdir -p "$home_dir"
+  [ -f "$cfg" ] || : > "$cfg"
+  backup_file "$cfg"
+  tmp="$cfg.tmp.$$"
+  awk -v desired="$value" '
+    function is_section(line) { return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*$/ }
+    function section_name(line, value) {
+      value = line
+      sub(/^[[:space:]]*\[/, "", value)
+      sub(/\][[:space:]]*$/, "", value)
+      return value
+    }
+    function flush_features() {
+      if (section == "features" && hooks_seen == 0) {
+        print "hooks = " desired
+        hooks_seen = 1
+      }
+    }
+    BEGIN {
+      section = ""
+      features_seen = 0
+      hooks_seen = 0
+    }
+    {
+      if (is_section($0)) {
+        flush_features()
+        section = section_name($0)
+        if (section == "features") {
+          features_seen = 1
+          hooks_seen = 0
+        }
+        print
+        next
+      }
+      if (section == "features" && $0 ~ /^[[:space:]]*hooks[[:space:]]*=/) {
+        print "hooks = " desired
+        hooks_seen = 1
+        next
+      }
+      print
+    }
+    END {
+      flush_features()
+      if (features_seen == 0) {
+        print ""
+        print "[features]"
+        print "hooks = " desired
+      }
+    }
+  ' "$cfg" > "$tmp"
+  mv "$tmp" "$cfg"
+}
+
+hook_configured() {
+  cfg="$(config_file)"
+  [ -f "$cfg" ] && grep -F "$MARK_BEGIN" "$cfg" >/dev/null 2>&1
+}
+
+install_hook_block() {
+  cfg="$(config_file)"
+  home_dir="$(codex_home)"
+  mkdir -p "$home_dir"
+  [ -f "$cfg" ] || : > "$cfg"
+  backup_file "$cfg"
+  tmp="$cfg.tmp.$$"
+  strip_managed_block "$cfg" "$tmp"
+  {
+    cat "$tmp"
+    printf '\n%s\n' "$MARK_BEGIN"
+    printf '[[hooks.PreToolUse]]\n'
+    printf 'matcher = "^Bash$"\n\n'
+    printf '[[hooks.PreToolUse.hooks]]\n'
+    printf 'type = "command"\n'
+    printf 'command = "codex-rtk hook"\n'
+    printf 'timeout = 5\n'
+    printf 'statusMessage = "RTK compacting shell command"\n'
+    printf '%s\n' "$MARK_END"
+  } > "$cfg"
+  rm -f "$tmp"
+}
+
+remove_hook_block() {
+  cfg="$(config_file)"
+  [ -f "$cfg" ] || return 0
+  backup_file "$cfg"
+  tmp="$cfg.tmp.$$"
+  strip_managed_block "$cfg" "$tmp"
+  mv "$tmp" "$cfg"
+}
+
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g'
+}
+
+extract_command_with_jq() {
+  jq -r '.tool_input.command // empty' 2>/dev/null || true
+}
+
+extract_command_without_jq() {
+  sed -n 's/.*"tool_input"[^{]*{[^}]*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
+    sed 's/\\"/"/g; s/\\\\/\\/g'
+}
+
+run_hook() {
+  [ "${RTK_DISABLED:-0}" = "1" ] && exit 0
+  input="$(cat)"
+  [ -n "$input" ] || exit 0
+  if command -v jq >/dev/null 2>&1; then
+    cmd="$(printf '%s' "$input" | extract_command_with_jq)"
+  else
+    cmd="$(printf '%s' "$input" | extract_command_without_jq)"
+  fi
+  [ -n "$cmd" ] || exit 0
+  case "$cmd" in
+    rtk|rtk\ *) exit 0 ;;
+  esac
+  rtk_bin="$(rtk_path 2>/dev/null || true)"
+  [ -n "$rtk_bin" ] || exit 0
+  code=0
+  rewritten="$("$rtk_bin" rewrite "$cmd" 2>/dev/null)" || code="$?"
+  code="${code:-0}"
+  case "$code" in
+    0|3) ;;
+    *) exit 0 ;;
+  esac
+  [ -n "$rewritten" ] || exit 0
+  [ "$rewritten" = "$cmd" ] && exit 0
+  case "$rewritten" in
+    *'
+'*) exit 0 ;;
+  esac
+  escaped="$(json_escape "$rewritten")"
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"RTK rewrite","updatedInput":{"command":"%s"}}}\n' "$escaped"
+}
+
+status() {
+  cfg="$(config_file)"
+  printf 'codex_home=%s\n' "$(codex_home)"
+  printf 'config=%s\n' "$cfg"
+  if rtk_bin="$(rtk_path 2>/dev/null)"; then
+    printf 'rtk_path=%s\n' "$rtk_bin"
+    printf 'rtk_version=%s\n' "$("$rtk_bin" --version 2>/dev/null || true)"
+  else
+    printf 'rtk_path=\n'
+    printf 'rtk_version=\n'
+  fi
+  if [ -f "$cfg" ] && grep -Eq '^[[:space:]]*hooks[[:space:]]*=[[:space:]]*true' "$cfg"; then
+    printf 'hooks_feature=true\n'
+  elif [ -f "$cfg" ] && grep -Eq '^[[:space:]]*hooks[[:space:]]*=[[:space:]]*false' "$cfg"; then
+    printf 'hooks_feature=false\n'
+  else
+    printf 'hooks_feature=default\n'
+  fi
+  if hook_configured; then
+    printf 'rtk_hook=enabled\n'
+  else
+    printf 'rtk_hook=disabled\n'
+  fi
+}
+
+verify() {
+  rtk_bin="$(rtk_path 2>/dev/null || true)"
+  [ -n "$rtk_bin" ] || { printf '%s\n' "rtk 不可用" >&2; exit 1; }
+  "$rtk_bin" --version >/dev/null 2>&1 || { printf '%s\n' "rtk 无法运行" >&2; exit 1; }
+  sample='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status"}}'
+  out="$(printf '%s' "$sample" | "$0" hook 2>/dev/null || true)"
+  if [ -n "$out" ]; then
+    printf '%s\n' "$out" | grep -F '"updatedInput"' >/dev/null 2>&1 || {
+      printf '%s\n' "hook 输出缺少 updatedInput" >&2
+      exit 1
+    }
+  fi
+  printf '%s\n' "RTK 可用。若 hook 已启用，请在 Codex 内用 /hooks 信任该 hook。"
+}
+
+[ "$#" -ge 1 ] || { usage >&2; exit 2; }
+
+cmd="$1"
+shift
+
+case "$cmd" in
+  status)
+    status
+    ;;
+  enable)
+    rtk_path >/dev/null 2>&1 || { printf '%s\n' "rtk 不可用，无法启用 hook" >&2; exit 1; }
+    set_hooks_feature true
+    install_hook_block
+    printf '%s\n' "已启用 Codex for TUI RTK hook。请在 Codex 内运行 /hooks 信任该 hook。"
+    ;;
+  disable)
+    remove_hook_block
+    printf '%s\n' "已移除 Codex for TUI RTK hook。未修改用户其他 hooks。"
+    ;;
+  verify)
+    verify
+    ;;
+  hook)
+    run_hook
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

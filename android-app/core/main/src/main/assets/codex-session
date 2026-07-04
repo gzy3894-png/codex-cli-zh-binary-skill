@@ -7,6 +7,7 @@ usage() {
   printf '%s\n' "      codex-session add text --run RUN_ID --stdin [--title TITLE]"
   printf '%s\n' "      codex-session done|fail RUN_ID [SUMMARY]"
   printf '%s\n' "      codex-session expand|collapse|remove RUN_ID"
+  printf '%s\n' "      codex-session timeline collapse|expand|toggle [REASON]"
   printf '%s\n' "      codex-session clear [REASON]"
   printf '%s\n' "      codex-session status|events|wait|result"
 }
@@ -187,6 +188,17 @@ case "$cmd" in
     [ "$#" -eq 1 ] || { usage >&2; exit 2; }
     run_id="$1"
     request_id="$(write_request "$prefix" action "$cmd" run_id "$run_id")"
+    ;;
+  timeline)
+    [ "$#" -ge 1 ] || { usage >&2; exit 2; }
+    timeline_action="$1"
+    shift
+    case "$timeline_action" in
+      collapse|expand|toggle) ;;
+      *) usage >&2; exit 2 ;;
+    esac
+    reason="${*:-timeline_$timeline_action}"
+    request_id="$(write_request "$prefix" action "timeline_$timeline_action" reason "$reason")"
     ;;
   clear)
     reason="${*:-agent_clear}"

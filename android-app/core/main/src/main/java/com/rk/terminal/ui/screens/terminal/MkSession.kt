@@ -26,6 +26,8 @@ object MkSession {
         "codex-browser" to "codex-browser",
         "codex-panel" to "codex-panel",
         "codex-session" to "codex-session",
+        "codex-rtk" to "codex-rtk",
+        "rtk" to "rtk",
     )
     private val obsoleteScripts = listOf(
         "install-reterminal-alpine.sh",
@@ -39,8 +41,10 @@ object MkSession {
         managedScripts.forEach { (assetName, outputName) ->
             localBinDir().child(outputName).apply {
                 createFileIfNot()
-                assets.open(assetName).bufferedReader().use { it.readText() }.let {
-                    writeText(it)
+                assets.open(assetName).use { input ->
+                    outputStream().use { output ->
+                        input.copyTo(output)
+                    }
                 }
                 setExecutable(true, false)
             }
