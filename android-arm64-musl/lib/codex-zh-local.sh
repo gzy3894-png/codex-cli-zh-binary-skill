@@ -184,10 +184,92 @@ codex_for_tui_update() {
   exit 1
 }
 
+codex_for_tui_tty_read() {
+  prompt="$1"
+  default="${2:-}"
+  if [ "${CODEX_ZH_FORCE_STDIN:-0}" != "1" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    [ -n "$default" ] && printf '%s [%s]: ' "$prompt" "$default" > /dev/tty || printf '%s: ' "$prompt" > /dev/tty
+    IFS= read -r ans < /dev/tty || ans=""
+  else
+    [ -n "$default" ] && printf '%s [%s]: ' "$prompt" "$default" >&2 || printf '%s: ' "$prompt" >&2
+    IFS= read -r ans || ans=""
+  fi
+  [ -n "$ans" ] || ans="$default"
+  printf '%s' "$ans"
+}
+
+codex_for_tui_is_interactive_start() {
+  case "${1:-}" in
+    ""|resume|fork)
+      return 0
+      ;;
+    --help|-h|--version|-V|help|exec|e|review|doctor|mcp|plugin|app-server|remote-control|completion|update|sandbox|debug|apply|archive|delete|unarchive|cloud|exec-server)
+      return 1
+      ;;
+    -*)
+      return 0
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+codex_for_tui_offer_hook_auth() {
+  [ "${CODEX_FOR_TUI_HOOK_AUTH_PROMPT:-1}" = "1" ] || return 0
+  codex_for_tui_is_interactive_start "$@" || return 0
+  if [ "${CODEX_ZH_FORCE_STDIN:-0}" != "1" ] && { [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; }; then
+    return 0
+  fi
+
+  codex_for_tui_load_config_libs
+  codex_init_env
+  codex_config_ensure_default_hooks
+  codex_config_managed_hooks_enabled && return 0
+  codex_config_managed_hooks_available || return 0
+
+  cat >&2 <<'EOM'
+检测到 Codex for TUI 增强功能尚未快捷授权。
+
+快捷授权会写入系统级 Codex requirements.toml，把 RTK/context 注册为托管 hooks。
+这样启动后不需要再进入 /hooks 手动信任；用户自己的 hooks 不会被授权。
+
+请选择：
+1. 快捷授权并启动 Codex
+2. 本次跳过，直接启动
+3. 退出到 shell
+EOM
+  while :; do
+    choice="$(codex_for_tui_tty_read "请输入选项编号" "1")"
+    case "$choice" in
+      1|"")
+        if codex_config_ensure_managed_hooks; then
+          printf '%s\n' "已完成 Codex for TUI 快捷授权。以后普通启动不会再询问。" >&2
+          return 0
+        fi
+        printf '%s\n' "警告: 快捷授权失败：无法写入 $(codex_config_requirements_file)。本次继续普通启动。" >&2
+        return 0
+        ;;
+      2)
+        printf '%s\n' "本次跳过快捷授权。" >&2
+        return 0
+        ;;
+      3)
+        printf '%s\n' "已退出。以后运行 codex 可重新选择快捷授权。" >&2
+        exit 0
+        ;;
+      *)
+        printf '%s\n' "请输入 1、2 或 3。" >&2
+        ;;
+    esac
+  done
+}
+
 case "${1:-}" in
   配置模式|configure|config)
     shift
     codex_for_tui_force_configure
+    codex_for_tui_offer_hook_auth "$@"
     exec "$real_bin" "$@"
     ;;
   更新|update)
@@ -197,6 +279,7 @@ case "${1:-}" in
 esac
 
 codex_for_tui_configure_if_missing
+codex_for_tui_offer_hook_auth "$@"
 exec "$real_bin" "$@"
 EOF
   } > "$launcher"

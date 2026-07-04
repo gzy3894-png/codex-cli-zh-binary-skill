@@ -6,6 +6,10 @@ codex_config_file() {
   printf '%s/config.toml\n' "$(codex_home)"
 }
 
+codex_config_requirements_file() {
+  printf '%s\n' "${CODEX_FOR_TUI_REQUIREMENTS_FILE:-/etc/codex/requirements.toml}"
+}
+
 codex_config_official_marker_file() {
   printf '%s/official-login-mode\n' "$(codex_state_root)"
 }
@@ -417,13 +421,103 @@ codex_config_append_default_hook_blocks() {
   chmod 600 "$codex_hooks_cfg" 2>/dev/null || true
 }
 
+codex_config_strip_default_hook_blocks() {
+  codex_hooks_cfg="$1"
+  [ -f "$codex_hooks_cfg" ] || return 0
+  codex_hooks_strip_rtk="$codex_hooks_cfg.strip-rtk.$$"
+  codex_hooks_strip_context="$codex_hooks_cfg.strip-context.$$"
+  codex_config_strip_managed_block \
+    "# codex-for-tui-rtk-hook begin" \
+    "# codex-for-tui-rtk-hook end" \
+    "$codex_hooks_cfg" "$codex_hooks_strip_rtk"
+  codex_config_strip_managed_block \
+    "# codex-for-tui-context-hook begin" \
+    "# codex-for-tui-context-hook end" \
+    "$codex_hooks_strip_rtk" "$codex_hooks_strip_context"
+  mv "$codex_hooks_strip_context" "$codex_hooks_cfg"
+  rm -f "$codex_hooks_strip_rtk"
+  chmod 600 "$codex_hooks_cfg" 2>/dev/null || true
+}
+
+codex_config_append_managed_hook_blocks() {
+  codex_hooks_req="$1"
+  codex_hooks_strip="$codex_hooks_req.strip-managed.$$"
+  codex_config_strip_managed_block \
+    "# codex-for-tui-managed-hooks begin" \
+    "# codex-for-tui-managed-hooks end" \
+    "$codex_hooks_req" "$codex_hooks_strip"
+  {
+    cat "$codex_hooks_strip"
+    printf '\n# codex-for-tui-managed-hooks begin\n'
+    if command -v codex-rtk >/dev/null 2>&1 && codex-rtk status >/dev/null 2>&1; then
+      printf '[[hooks.PreToolUse]]\n'
+      printf 'matcher = "^Bash$"\n\n'
+      printf '[[hooks.PreToolUse.hooks]]\n'
+      printf 'type = "command"\n'
+      printf 'command = "codex-rtk hook"\n'
+      printf 'timeout = 5\n'
+      printf 'statusMessage = "RTK compacting shell command"\n\n'
+    fi
+    if command -v codex-context >/dev/null 2>&1 && codex-context status >/dev/null 2>&1; then
+      printf '[[hooks.PreCompact]]\n'
+      printf 'matcher = "manual|auto"\n\n'
+      printf '[[hooks.PreCompact.hooks]]\n'
+      printf 'type = "command"\n'
+      printf 'command = "codex-context hook"\n'
+      printf 'timeout = 5\n'
+      printf 'statusMessage = "Recording context compact start"\n\n'
+      printf '[[hooks.PostCompact]]\n'
+      printf 'matcher = "manual|auto"\n\n'
+      printf '[[hooks.PostCompact.hooks]]\n'
+      printf 'type = "command"\n'
+      printf 'command = "codex-context hook"\n'
+      printf 'timeout = 5\n'
+      printf 'statusMessage = "Recording context compact finish"\n\n'
+      printf '[[hooks.SessionStart]]\n'
+      printf 'matcher = "startup|resume|compact"\n\n'
+      printf '[[hooks.SessionStart.hooks]]\n'
+      printf 'type = "command"\n'
+      printf 'command = "codex-context hook"\n'
+      printf 'timeout = 5\n'
+      printf 'statusMessage = "Recording Codex session start"\n'
+    fi
+    printf '# codex-for-tui-managed-hooks end\n'
+  } > "$codex_hooks_req"
+  rm -f "$codex_hooks_strip"
+  chmod 644 "$codex_hooks_req" 2>/dev/null || true
+}
+
+codex_config_managed_hooks_available() {
+  command -v codex-rtk >/dev/null 2>&1 && codex-rtk status >/dev/null 2>&1 && return 0
+  command -v codex-context >/dev/null 2>&1 && codex-context status >/dev/null 2>&1 && return 0
+  return 1
+}
+
+codex_config_managed_hooks_enabled() {
+  codex_hooks_req="$(codex_config_requirements_file)"
+  [ -s "$codex_hooks_req" ] || return 1
+  grep -F '# codex-for-tui-managed-hooks begin' "$codex_hooks_req" >/dev/null 2>&1
+}
+
+codex_config_ensure_managed_hooks() {
+  codex_hooks_req="$(codex_config_requirements_file)"
+  codex_hooks_dir="$(dirname "$codex_hooks_req")"
+  mkdir -p "$codex_hooks_dir" || return 1
+  [ -f "$codex_hooks_req" ] || : > "$codex_hooks_req" || return 1
+  codex_config_set_hooks_feature "$codex_hooks_req" true
+  codex_config_append_managed_hook_blocks "$codex_hooks_req"
+  codex_config_strip_default_hook_blocks "$(codex_config_file)"
+}
+
 codex_config_ensure_default_hooks() {
   codex_hooks_cfg="$(codex_config_file)"
   codex_hooks_home="$(codex_home)"
   mkdir -p "$codex_hooks_home"
   [ -f "$codex_hooks_cfg" ] || : > "$codex_hooks_cfg"
   codex_config_set_hooks_feature "$codex_hooks_cfg" true
-  codex_config_append_default_hook_blocks "$codex_hooks_cfg"
+  if codex_config_managed_hooks_enabled; then
+    codex_config_strip_default_hook_blocks "$codex_hooks_cfg"
+  fi
 }
 
 codex_config_backup_current() {

@@ -11,7 +11,7 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 ## 重要：2.0.8 更新
 
-2.0.8 让 RTK 默认进入 `~/.codex/config.toml`，新建、编辑或切换第三方配置后不会丢失 Codex for TUI 托管 hook；会话托盘运行中耗时会自动刷新；新增 `codex-context`，记录 `PreCompact` / `PostCompact` / `SessionStart` 事件，方便自动压缩后继续交接。
+2.0.8 让 RTK/context 进入启动前快捷授权流程：普通启动 `codex` 时，终端会在启动 Codex 前询问是否授权 Codex for TUI 增强功能。选择 `1` 后脚本会写入系统级 `requirements.toml`，把 RTK/context 注册为 Codex 托管 hooks，不需要再进入 `/hooks` 手动信任；会话托盘运行中耗时会自动刷新；新增 `codex-context`，记录 `PreCompact` / `PostCompact` / `SessionStart` 事件，方便自动压缩后继续交接。
 
 已经安装 2.0.x 的用户需要从 Releases 下载并覆盖安装 2.0.8 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk` 和 `codex-context` 桥接命令。
 
@@ -30,11 +30,11 @@ codex 配置模式
 
 如果菜单里能看到 `6. 修复全权限授权`，说明脚本已经更新到包含配置菜单和授权持久化修复的版本。需要修复授权时选择该项；它会把全权限模式持久写入为 `approval_policy = "never"` + `sandbox_mode = "danger-full-access"`。
 
-新安装、尚未完成首次安装的 2.0.8 用户，首次安装时会拉取当前分支的最新脚本；普通启动仍然不会隐藏联网更新、不会刷新模型、不会覆盖用户配置。
+新安装、尚未完成首次安装的 2.0.8 用户，首次安装时会拉取当前分支的最新脚本；普通启动仍然不会隐藏联网更新、不会刷新模型、不会覆盖用户配置。已安装 2.0.8 的用户运行 `codex 更新` 再运行 `codex-local repair-launcher` 后，新启动器会带上快捷授权菜单。
 
 ## 2.0 新功能
 
-- 2.0.8 修复：RTK hook 默认写入 `config.toml`，切换已保存配置后会保持 Codex for TUI 托管 hook；首次仍需在 Codex TUI 里运行 `/hooks` 信任。
+- 2.0.8 修复：RTK/context 改为启动前终端快捷授权，授权后写入系统级 `requirements.toml` 托管 hooks，不再要求普通用户进入 `/hooks` 手动信任。
 - 2.0.8 新增：`codex-context status|events|hook|enable|disable|verify`，记录自动/手动 compact 和 session start 事件，便于后续 Agent 接续。
 - 2.0.8 修复：会话托盘运行中耗时自动刷新，不再只在 Agent 主动传参时变化。
 - 2.0.7 新增：内置 RTK `v0.43.0`，提供 `codex-rtk status|enable|disable|verify|hook`；RTK 用来压缩未来 shell 命令输出，不会删除已经进入 Codex 的历史上下文。
@@ -222,13 +222,11 @@ codex-session status
 codex-session events
 ```
 
-RTK 用来减少之后的 shell 输出噪音。它不会删除已经出现在终端或 Codex 上下文里的历史内容。2.0.8 起配置模式会默认写入 RTK hook；首次启用 hook 后，需要在 Codex TUI 里运行 `/hooks` 并信任 `codex-rtk hook`：
+RTK 用来减少之后的 shell 输出噪音。它不会删除已经出现在终端或 Codex 上下文里的历史内容。2.0.8 起普通启动 `codex` 会在启动前询问快捷授权；选择 `1` 后会写入系统级托管 hooks，不需要再进入 `/hooks`。手动检查命令：
 
 ```sh
 codex-rtk status
 codex-rtk verify
-codex-rtk enable
-# 回到 Codex 后运行 /hooks 信任
 codex-rtk disable
 ```
 
@@ -360,7 +358,7 @@ curl -v --http1.1 https://api.example.com/v1/models
 hooks = true
 ```
 
-如果你迁移过旧配置，可以检查 `~/.codex/config.toml` 里是否仍有旧 hook 配置。RTK 和 context hook 都是 Codex for TUI 托管块；不用时分别运行 `codex-rtk disable` 或 `codex-context disable`，只移除对应托管块，不删除用户自己的 hooks。
+如果你迁移过旧配置，运行 `codex` 并在启动前选择 `1. 快捷授权并启动 Codex`。脚本会把 RTK/context 写入系统级 `requirements.toml`，并清理 `~/.codex/config.toml` 里的旧 Codex for TUI 用户级 hook 块；用户自己的 hooks 不会被授权或删除。`codex-rtk disable` 或 `codex-context disable` 只用于移除用户级手动 hook 配置。
 
 **能不能直接用原生 Termux？**
 

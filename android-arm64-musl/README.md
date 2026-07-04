@@ -33,6 +33,8 @@ codex 更新
 codex-local repair-launcher
 ```
 
+更新后普通启动 `codex` 会在启动 Codex 前询问是否快捷授权 Codex for TUI 增强功能。选择 `1` 后脚本会写入系统级 `/etc/codex/requirements.toml`，把 RTK/context 注册为 Codex 托管 hooks，不需要再进入 `/hooks` 手动信任。
+
 验证方式：
 
 ```sh
@@ -316,10 +318,12 @@ codex-context status
 codex-context verify
 ```
 
-然后在 Codex TUI 里运行 `/hooks` 信任 `codex-rtk hook` 和 `codex-context hook`。关闭托管 hook 用：
+普通用户不需要再进入 Codex TUI 运行 `/hooks`。快捷授权会清理 `~/.codex/config.toml` 里的旧 Codex for TUI 用户级 hook 块；用户自己的 hooks 不会被授权或删除。检查 RTK/context 命令：
 
 ```sh
+codex-rtk status
 codex-rtk disable
+codex-context status
 codex-context disable
 ```
 

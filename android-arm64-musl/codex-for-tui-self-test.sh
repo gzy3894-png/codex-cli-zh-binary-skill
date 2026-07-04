@@ -97,6 +97,16 @@ if [ -n "$codex_cmd" ] && [ -r "$codex_cmd" ]; then
   else
     fail "codex 启动器缺少更新入口"
   fi
+  if grep -F 'codex_for_tui_offer_hook_auth' "$codex_cmd" >/dev/null 2>&1; then
+    pass "codex 启动器包含启动前快捷授权入口"
+  else
+    fail "codex 启动器缺少启动前快捷授权入口"
+  fi
+  if grep -F -- '--dangerously-bypass-hook-trust' "$codex_cmd" >/dev/null 2>&1; then
+    fail "codex 启动器不应使用危险 hook trust bypass 参数"
+  else
+    pass "codex 启动器未使用 hook trust bypass 参数"
+  fi
   if grep -F -- '--preflight' "$codex_cmd" >/dev/null 2>&1; then
     fail "codex 启动器仍包含旧 preflight 自动流程"
   else
