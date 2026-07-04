@@ -1,5 +1,35 @@
 # Changelog
 
+## Codex for TUI 2.0.7
+
+Codex for TUI 2.0.7 内置 RTK，并补齐会话托盘总折叠能力，重点减少之后 shell 输出刷屏，同时让 Agent 能明确感知会话时间线是否折叠。
+
+### 新功能
+
+- 内置 RTK `v0.43.0`，由 GitHub Actions 构建 `aarch64-unknown-linux-musl` 二进制并随 APK 同步到终端环境。
+- 新增 `codex-rtk status|enable|disable|verify|hook`，可显式检查 RTK、启用/关闭 Codex PreToolUse hook，并保留 `RTK_DISABLED=1` 临时跳过。
+- `codex-rtk enable` 只追加 Codex for TUI 管理的 hook 块，并会备份 `~/.codex/config.toml`；`disable` 只移除托管块，不删除用户自己的 hooks 或配置。
+- 会话时间线新增总折叠：`codex-session timeline collapse|expand|toggle [REASON]`。
+- `codex-session status/events/result` 新增 `timeline_collapsed=0|1`，用户点击折叠/展开会写入 `user_timeline_collapsed` / `user_timeline_expanded`，Agent 命令会写入 `agent_timeline_collapsed` / `agent_timeline_expanded`。
+
+### 体验优化
+
+- 会话时间线 header 更紧凑，显示会话摘要和 `runs/items` 数量。
+- 总折叠只隐藏列表，不清空 run/item 记录；清空仍是独立操作。
+- RTK 只压缩之后进入 Codex 的 shell 输出，不会删除已经存在的终端文本或历史上下文。
+
+### 验证
+
+- 本地非 APK 门禁通过：`sh -n`、`sh tests/codex-for-tui-static-guards.sh`、`sh tests/codex-for-tui-installer-smoke.sh`、`git diff --check`、RTK hook 样例输入和配置保留测试。
+- GitHub Actions 分支构建通过：脚本静态检查、RTK ARM64 musl 构建、qemu 验证和 test APK。
+- 正式 APK、签名校验和 release 资产仍只通过 GitHub Actions tag/release 构建。
+
+### 回滚
+
+- 完整源码由 tag `codex-for-tui-v2.0.7` 固定保存，GitHub Release 会自动保留 source zip/tar。
+- 回滚到 2.0.6 可安装 release `codex-for-tui-v2.0.6` 的 APK，源码 tag 为 `codex-for-tui-v2.0.6`。
+- 本轮功能基线保留在分支 `rollback/rtk-session-fold-base-65f7c28`。
+
 ## Codex for TUI 2.0.6
 
 Codex for TUI 2.0.6 新增会话折叠 v1，让 Agent 过程信息进入 App 原生结构化时间线，而不是完整刷进终端文本。
