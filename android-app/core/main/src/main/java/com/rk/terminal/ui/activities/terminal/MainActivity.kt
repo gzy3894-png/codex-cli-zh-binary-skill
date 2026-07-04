@@ -313,6 +313,7 @@ class MainActivity : ComponentActivity() {
             runCatching { File(preview.path).delete() }
             runCatching { removePreviewReference(preview) }
         }
+        syncMediaPreviewStatus(reason = "delete_item", state = "ready")
         writeAgentPanelEvent(
             source = "files",
             type = "user_deleted",
@@ -438,6 +439,7 @@ class MainActivity : ComponentActivity() {
             reason = "composer",
             itemId = refId
         )
+        syncMediaPreviewStatus(reason = "composer_sent", state = "done")
         writeAgentPanelStatus(
             source = "text",
             state = "done",
@@ -517,6 +519,7 @@ class MainActivity : ComponentActivity() {
         } else {
             terminalViewModel.browserPanelExpanded = false
             terminalViewModel.mediaPreviewExpanded = true
+            syncMediaPreviewStatus(reason = "top_bar", state = "ready")
             writeAgentPanelEvent(source = "files", type = "user_presented", state = "ready", reason = "top_bar")
             writeAgentPanelStatus(source = "files", state = "ready", reason = "top_bar")
         }
@@ -524,6 +527,7 @@ class MainActivity : ComponentActivity() {
 
     fun collapseMediaPreviewPanel() {
         terminalViewModel.mediaPreviewExpanded = false
+        syncMediaPreviewStatus(reason = "collapse", state = "done")
         writeAgentPanelEvent(source = "files", type = "user_collapsed", state = "done", reason = "collapse")
         writeAgentPanelStatus(source = "files", state = "done", reason = "collapse")
     }
@@ -989,6 +993,26 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) {
             // Best-effort debug marker for terminal-side troubleshooting.
         }
+    }
+
+    private fun syncMediaPreviewStatus(reason: String, state: String) {
+        val latest = terminalViewModel.mediaPreviews.lastOrNull()
+        val status = buildString {
+            append("state=").append(refValue(state)).append('\n')
+            append("reason=").append(refValue(reason)).append('\n')
+            if (latest == null) {
+                append("empty=1\n")
+            } else {
+                val refId = previewReferenceId(latest)
+                append("shown=1\n")
+                append("kind=").append(latest.kind.name.lowercase(Locale.ROOT)).append('\n')
+                append("path=").append(refValue(latest.path)).append('\n')
+                append("name=").append(refValue(latest.name)).append('\n')
+                append("stamp=").append(refValue(latest.stamp)).append('\n')
+                append("item_id=").append(refId).append('\n')
+            }
+        }
+        writeMediaPreviewStatus(localDir().child("media-preview"), status)
     }
 
     private fun writeBrowserResult(browserDir: File, result: JSONObject) {

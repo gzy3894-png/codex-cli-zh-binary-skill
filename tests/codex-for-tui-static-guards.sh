@@ -61,8 +61,8 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 22'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.2"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 23'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.3"'
 }
 
 test_release_workflow_signature_gate() {
@@ -102,6 +102,11 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$MAIN_ACTIVITY" 'writePreviewReference'
   assert_file_contains "$MAIN_ACTIVITY" 'sendComposerTextToAi'
   assert_file_contains "$MAIN_ACTIVITY" 'writeAgentPanelEvent'
+  assert_file_contains "$MAIN_ACTIVITY" 'private fun syncMediaPreviewStatus'
+  assert_file_contains "$MAIN_ACTIVITY" 'syncMediaPreviewStatus(reason = "top_bar", state = "ready")'
+  assert_file_contains "$MAIN_ACTIVITY" 'syncMediaPreviewStatus(reason = "collapse", state = "done")'
+  assert_file_contains "$MAIN_ACTIVITY" 'syncMediaPreviewStatus(reason = "delete_item", state = "ready")'
+  assert_file_contains "$MAIN_ACTIVITY" 'syncMediaPreviewStatus(reason = "composer_sent", state = "done")'
   assert_file_contains "$MAIN_ACTIVITY" 'user_sent_text'
   assert_file_contains "$MAIN_ACTIVITY" 'visible='
   assert_file_contains "$MAIN_ACTIVITY" 'collapsed='

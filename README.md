@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.0.2-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.0.2)
+[![Release](https://img.shields.io/badge/release-v2.0.3-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.0.3)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.142.4-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -30,6 +30,7 @@ codex 配置模式
 
 ## 2.0 新功能
 
+- 2.0.3 补丁：修复文件托盘由用户展开、折叠、删除文件或发送长文本后，终端侧 `codex-preview status` 可能读到旧可见状态的问题。
 - 文件托盘：终端可以推送图片、视频和文本到顶部托盘，用户也可以从系统文件管理器添加文件，第一格常驻文本框可发送长文本。
 - 隐私友好的文件引用：发送到终端时只展示短编号和 `codex-preview path <编号>`，不再把应用私有目录完整刷到屏幕里。
 - 协作浏览器：内置 WebView 默认后台运行，只有 `present` / `user-wait`（兼容 `wait-user`）或用户点顶栏时才展示；支持 Agent 读取页面、点击、输入、执行 JS、截图、文件上传、用户接管和多标签切换。
@@ -54,7 +55,7 @@ codex 配置模式
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.0.2` |
+| Android App | `2.0.3` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug 包名 | `com.gzy3894.codexfortui.debug` |
 | Codex CLI | `0.142.4` 中文版 |
