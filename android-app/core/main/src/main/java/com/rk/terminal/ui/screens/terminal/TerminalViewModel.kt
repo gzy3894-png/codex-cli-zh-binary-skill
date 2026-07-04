@@ -146,7 +146,7 @@ class TerminalViewModel : ViewModel() {
         }
     }
 
-    fun setSessionFoldTimelineCollapsed(collapsed: Boolean) {
+    fun updateSessionFoldTimelineCollapsed(collapsed: Boolean) {
         sessionFoldTimelineCollapsed = collapsed
     }
 

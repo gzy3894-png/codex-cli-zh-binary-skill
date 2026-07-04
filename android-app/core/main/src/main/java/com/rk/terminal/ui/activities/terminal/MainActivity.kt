@@ -994,7 +994,7 @@ class MainActivity : ComponentActivity() {
         action: String = "timeline",
         actor: String = "user"
     ) {
-        terminalViewModel.setSessionFoldTimelineCollapsed(collapsed)
+        terminalViewModel.updateSessionFoldTimelineCollapsed(collapsed)
         val state = if (collapsed) "collapsed" else "expanded"
         writeSessionFoldEvent(
             type = "${actor}_timeline_$state",
@@ -1268,7 +1268,7 @@ class MainActivity : ComponentActivity() {
                         "timeline_expand" -> false
                         else -> !terminalViewModel.sessionFoldTimelineCollapsed
                     }
-                    terminalViewModel.setSessionFoldTimelineCollapsed(collapsed)
+                    terminalViewModel.updateSessionFoldTimelineCollapsed(collapsed)
                     val state = if (collapsed) "collapsed" else "expanded"
                     writeSessionFoldEvent(
                         type = "agent_timeline_$state",
