@@ -55,6 +55,26 @@ wait_browser_result_contains() {
   fail "browser result $request_id did not contain: $needle"
 }
 
+browser_event_count() {
+  codex-browser events 2>/dev/null | wc -l | tr -d ' '
+}
+
+wait_browser_event_after() {
+  start_line="$1"
+  needle="$2"
+  elapsed=0
+  while [ "$elapsed" -lt 30 ]; do
+    events="$(codex-browser events 2>/dev/null || true)"
+    if printf '%s\n' "$events" | awk -v start="$start_line" 'NR > start { print }' | grep -F "$needle" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  printf '%s\n' "$events" >&2
+  fail "browser events after line $start_line did not contain: $needle"
+}
+
 need_cmd codex-browser
 need_cmd codex-preview
 
@@ -132,27 +152,35 @@ while [ "$elapsed" -lt 20 ]; do
 done
 http_get "$base/index.html" || fail "local smoke server did not become reachable"
 
-run_browser open "$base/index.html"
+codex-browser --no-wait close >/dev/null 2>&1 || true
+sleep 1
+
+open_output="$(run_browser open "$base/index.html")"
+printf '%s\n' "$open_output"
+first_tab_id="$(printf '%s\n' "$open_output" | sed -n 's/^tab_id=//p' | sed -n '1p')"
+[ -n "$first_tab_id" ] || fail "initial browser tab id missing"
 run_browser get-text '#ready' | grep -F 'state=done' >/dev/null || fail "get-text did not complete"
 run_browser cookies verify "$base/index.html" | grep -F 'verified=1' >/dev/null || fail "cookie verification failed"
 storage_request="$(send_browser_no_wait js "return localStorage.getItem('codex_smoke_storage');")"
 wait_browser_result_contains "$storage_request" '"value": "ok"'
 
+events_start="$(browser_event_count)"
 present_output="$(run_browser present smoke_present)"
 printf '%s\n' "$present_output" | grep -F 'state=ready' >/dev/null || fail "present did not report ready"
 printf '%s\n' "$present_output" | grep -F 'visible=1' >/dev/null || fail "present did not report visible=1"
 printf '%s\n' "$present_output" | grep -F 'collapsed=0' >/dev/null || fail "present did not report collapsed=0"
-codex-browser events | grep -F 'type=agent_presented' >/dev/null || fail "present event missing"
+wait_browser_event_after "$events_start" 'type=agent_presented'
 
+events_start="$(browser_event_count)"
 collapse_output="$(run_browser collapse smoke_collapse)"
 printf '%s\n' "$collapse_output" | grep -F 'state=done' >/dev/null || fail "collapse did not report done"
 printf '%s\n' "$collapse_output" | grep -F 'visible=0' >/dev/null || fail "collapse did not report visible=0"
 printf '%s\n' "$collapse_output" | grep -F 'collapsed=1' >/dev/null || fail "collapse did not report collapsed=1"
-codex-browser events | grep -F 'type=agent_collapsed' >/dev/null || fail "collapse event missing"
+wait_browser_event_after "$events_start" 'type=agent_collapsed'
 
 run_browser new-tab "$base/page2.html" | grep -F 'state=done' >/dev/null || fail "new-tab failed"
 run_browser list-tabs | grep -F 'tabs_count=' >/dev/null || fail "list-tabs did not return status"
-run_browser select-tab 1 | grep -F 'state=done' >/dev/null || fail "select-tab failed"
+run_browser select-tab "$first_tab_id" | grep -F 'state=done' >/dev/null || fail "select-tab failed"
 
 i=1
 queue_ids="$tmp/queue-ids"
@@ -185,11 +213,13 @@ run_browser get-text '#userscript-ok' | grep -F 'state=done' >/dev/null || fail 
 
 run_browser history | grep -F 'state=done' >/dev/null || fail "history failed"
 run_browser clear-history | grep -F 'state=done' >/dev/null || fail "clear-history failed"
+events_start="$(browser_event_count)"
 codex-browser --no-wait user-wait 'smoke user handoff' >/dev/null
 sleep 1
 codex-browser status | grep -F 'needs_user=1' >/dev/null || fail "user-wait did not set needs_user"
-codex-browser events | grep -F 'type=agent_user_wait' >/dev/null || fail "user-wait event missing"
+wait_browser_event_after "$events_start" 'type=agent_user_wait'
+events_start="$(browser_event_count)"
 run_browser user-done | grep -F 'needs_user=0' >/dev/null || fail "user-done did not clear needs_user"
-codex-browser events | grep -F 'type=agent_done' >/dev/null || fail "user-done event missing"
+wait_browser_event_after "$events_start" 'type=agent_done'
 
 printf 'OK: browser smoke passed\n'
