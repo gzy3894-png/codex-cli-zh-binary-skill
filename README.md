@@ -61,6 +61,7 @@ codex 配置模式
 | 二进制目标 | `aarch64-unknown-linux-musl` |
 | 推荐设备 | Android 8.0+、ARM64 |
 | 默认分支 | `android-arm64-musl-installer` |
+| 2.x 正式 APK 签名证书 SHA-256 | `a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc` |
 
 已知边界：
 
@@ -78,6 +79,14 @@ https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases
 ```
 
 下载时选择 APK 文件，不要下载 GitHub 自动生成的 `Source code` 压缩包。若你之前安装过 Debug 包，它和正式版包名不同，可以共存；正式版包名是 `com.gzy3894.codexfortui`。
+
+Codex for TUI 2.x 正式版沿用同一个 APK 签名证书，以保证用户可以正常覆盖升级。GitHub Actions 的 release 构建会校验签名证书 SHA-256，必须等于：
+
+```text
+a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc
+```
+
+如果未来需要切换签名，必须作为不兼容升级单独公告，旧版用户不能直接覆盖安装。
 
 ## 首次使用
 

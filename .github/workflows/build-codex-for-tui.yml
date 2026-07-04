@@ -99,6 +99,7 @@ jobs:
       ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
       ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
       ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+      CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc
 
     steps:
       - name: Checkout
@@ -142,17 +143,55 @@ jobs:
               printf 'keyPassword=%s\n' "$ANDROID_RELEASE_KEY_PASSWORD"
               printf 'storePassword=%s\n' "$ANDROID_RELEASE_STORE_PASSWORD"
             } > /tmp/signing.properties
-            echo "artifact_name=codex-for-tui-official-release-apk" >> "$GITHUB_OUTPUT"
+            echo "Using configured release signing key."
           else
-            echo "No release signing secrets found; Gradle will use the test key fallback."
-            echo "artifact_name=codex-for-tui-unsigned-or-test-signed-release-apk" >> "$GITHUB_OUTPUT"
+            echo "No alternate release signing secrets found; using the repository 2.x release signing key."
           fi
+          echo "artifact_name=codex-for-tui-release-apk" >> "$GITHUB_OUTPUT"
 
       - name: Grant Gradle wrapper permission
         run: chmod +x ./gradlew
 
       - name: Build release APK
         run: ./gradlew --no-daemon :app:assembleRelease
+
+      - name: Verify release APK signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find app/build/outputs/apk/release -type f -name '*.apk' | sort | head -n 1)"
+          if [ -z "$apk" ]; then
+            echo "No release APK found" >&2
+            exit 1
+          fi
+
+          apksigner="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/build-tools/36.0.0/apksigner"
+          if [ ! -x "$apksigner" ]; then
+            apksigner="$(command -v apksigner || true)"
+          fi
+          if [ -z "$apksigner" ] || [ ! -x "$apksigner" ]; then
+            echo "apksigner not found" >&2
+            exit 1
+          fi
+
+          "$apksigner" verify --print-certs "$apk" | tee /tmp/codex-for-tui-release-certs.txt
+          actual="$(
+            awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' /tmp/codex-for-tui-release-certs.txt \
+              | tr '[:upper:]' '[:lower:]' \
+              | tr -d ':[:space:]'
+          )"
+          expected="$(printf '%s' "$CODEX_TUI_RELEASE_CERT_SHA256" | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')"
+          if [ -z "$actual" ]; then
+            echo "Could not read release certificate SHA-256 digest" >&2
+            exit 1
+          fi
+          if [ "$actual" != "$expected" ]; then
+            echo "Release APK signing certificate mismatch" >&2
+            echo "expected=$expected" >&2
+            echo "actual=$actual" >&2
+            exit 1
+          fi
+          echo "Release APK signing certificate verified: $actual"
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4

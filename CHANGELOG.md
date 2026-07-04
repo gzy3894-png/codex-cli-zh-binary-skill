@@ -15,6 +15,7 @@ Codex for TUI 2.0.1 修复 2.0 正式版后续测试中发现的浏览器和文�
 
 - 本地非构建门禁：APK asset shell 语法、安装器 smoke test、静态 guards 和 `git diff --check`。
 - GitHub Actions：测试 APK 由仓库工作流构建通过；正式 APK 由 release/tag 工作流构建。
+- 2.x 正式 APK 签名证书 SHA-256 固定为 `a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc`；后续 release 构建会校验该指纹，避免误换签名导致用户无法覆盖升级。
 
 ## Codex for TUI 2.0.0
 

@@ -3,6 +3,7 @@ set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 SCRIPT_DIR="$ROOT_DIR/android-arm64-musl"
+BUILD_WORKFLOW="$ROOT_DIR/.github/workflows/build-codex-for-tui.yml"
 MKSESSION="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MkSession.kt"
 INIT_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/init.sh"
 APP_BUILD_GRADLE="$ROOT_DIR/android-app/app/build.gradle.kts"
@@ -62,6 +63,16 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 21'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.1"'
+}
+
+test_release_workflow_signature_gate() {
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
+  assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release APK signature'
+  assert_file_contains "$BUILD_WORKFLOW" 'apksigner" verify --print-certs "$apk"'
+  assert_file_contains "$BUILD_WORKFLOW" 'Signer #1 certificate SHA-256 digest:'
+  assert_file_contains "$BUILD_WORKFLOW" 'Release APK signing certificate mismatch'
+  assert_file_contains "$BUILD_WORKFLOW" 'artifact_name=codex-for-tui-release-apk'
+  assert_file_not_contains "$BUILD_WORKFLOW" 'codex-for-tui-unsigned-or-test-signed-release-apk'
 }
 
 test_image_preview_bridge_asset() {
@@ -510,6 +521,7 @@ test_installer_does_not_manage_agents_md() {
 run_step test_android_session_uses_root_codex_home
 run_step test_bootstrap_asset_is_synced
 run_step test_debug_build_uses_test_package_name
+run_step test_release_workflow_signature_gate
 run_step test_image_preview_bridge_asset
 run_step test_browser_bridge_asset
 run_step test_generated_launcher_entrypoints_and_normal_path

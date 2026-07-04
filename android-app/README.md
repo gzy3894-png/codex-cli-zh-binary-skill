@@ -80,7 +80,7 @@ codex-browser external https://example.com/login
 
 ## 构建
 
-推荐使用仓库的 GitHub Actions 构建 release APK。构建前会先运行安装器 smoke test。
+推荐使用仓库的 GitHub Actions 构建 release APK。构建前会先运行安装器 smoke test。2.x 正式 APK 签名证书 SHA-256 固定为 `a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc`，release 构建会校验该指纹，避免误换签名导致用户无法覆盖升级。
 
 本地只建议做脚本级验证：
 
