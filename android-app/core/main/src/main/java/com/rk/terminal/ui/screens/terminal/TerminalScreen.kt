@@ -7,6 +7,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -125,7 +126,7 @@ fun TerminalScreen(
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             BackgroundImage(terminalViewModel)
             
-            Column {
+            Column(modifier = Modifier.fillMaxSize()) {
                 if (terminalViewModel.showToolbar) {
                     TerminalTopBar(
                         sessionBinder = sessionBinder,
@@ -143,6 +144,12 @@ fun TerminalScreen(
                 }
 
                 if (sessionBinder != null) {
+                    SessionFoldTimeline(
+                        runs = terminalViewModel.sessionFoldRuns,
+                        onToggle = mainActivity::toggleSessionFoldRun,
+                        onRemove = mainActivity::removeSessionFoldRun,
+                        onClear = mainActivity::clearSessionFoldTimeline
+                    )
                     TerminalViewLayout(
                         viewModel = terminalViewModel,
                         mainActivity = mainActivity,
@@ -151,7 +158,8 @@ fun TerminalScreen(
                             .imePadding()
                             .navigationBarsPadding()
                             .padding(top = topPadding)
-                            .fillMaxSize()
+                            .fillMaxWidth()
+                            .weight(1f)
                     )
                 }
             }

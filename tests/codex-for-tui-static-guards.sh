@@ -14,6 +14,7 @@ PUSH_IMAGE_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-push-ima
 PUSH_MEDIA_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-push-media"
 BROWSER_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-browser"
 PANEL_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-panel"
+SESSION_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-session"
 TERMINAL_TOP_BAR="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalTopBar.kt"
 TERMINAL_SCREEN="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalScreen.kt"
 MEDIA_PREVIEW_PANE="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MediaPreviewPane.kt"
@@ -63,8 +64,8 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 25'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.5"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 26'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.0.6"'
 }
 
 test_release_workflow_signature_gate() {
@@ -83,6 +84,7 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$MKSESSION" '"codex-push-media" to "codex-push-media"'
   assert_file_contains "$MKSESSION" '"codex-browser" to "codex-browser"'
   assert_file_contains "$MKSESSION" '"codex-panel" to "codex-panel"'
+  assert_file_contains "$MKSESSION" '"codex-session" to "codex-session"'
   assert_file_contains "$INIT_ASSET" 'ensure_codex_preview'
   assert_file_contains "$INIT_ASSET" '[ ! -r /etc/profile ] || . /etc/profile'
   assert_file_contains "$INIT_ASSET" 'export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"'
@@ -148,6 +150,7 @@ test_image_preview_bridge_asset() {
   sh -n "$PUSH_MEDIA_ASSET" || fail "codex-push-media shell syntax failed"
   sh -n "$BROWSER_ASSET" || fail "codex-browser shell syntax failed"
   sh -n "$PANEL_ASSET" || fail "codex-panel shell syntax failed"
+  sh -n "$SESSION_ASSET" || fail "codex-session shell syntax failed"
   sh -n "$INIT_ASSET" || fail "init.sh shell syntax failed"
 
   tmp="${TMPDIR:-/tmp}/codex-tui-static-image-preview.$$"
@@ -406,6 +409,60 @@ test_agent_panel_bridge_asset() {
   rm -rf "$tmp"
 }
 
+test_session_fold_bridge_asset() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-static-session-fold.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/prefix/local/session-fold"
+
+  assert_file_contains "$SESSION_ASSET" 'codex-session start [--run RUN_ID] [TITLE]'
+  assert_file_contains "$SESSION_ASSET" 'codex-session add thinking|tool|text|file|browser|final --run RUN_ID'
+  assert_file_contains "$SESSION_ASSET" 'codex-session status|events|wait|result'
+  assert_file_contains "$TERMINAL_VIEW_MODEL" 'val sessionFoldRuns'
+  assert_file_contains "$TERMINAL_VIEW_MODEL" 'data class TerminalSessionFoldRun'
+  assert_file_contains "$TERMINAL_VIEW_MODEL" 'data class TerminalSessionFoldItem'
+  assert_file_contains "$TERMINAL_SCREEN" 'SessionFoldTimeline'
+  assert_file_contains "$MAIN_ACTIVITY" 'private suspend fun pollSessionFoldRequest'
+  assert_file_contains "$MAIN_ACTIVITY" 'writeSessionFoldEvent'
+  assert_file_contains "$MAIN_ACTIVITY" 'toggleSessionFoldRun'
+  assert_file_contains "$MAIN_ACTIVITY" 'clearSessionFoldTimeline'
+
+  if ! output="$(PREFIX="$tmp/prefix" sh "$SESSION_ASSET" start --run run-1 '测试会话')"; then
+    fail "codex-session start should write request"
+  fi
+  assert_file_contains "$tmp/prefix/local/session-fold/request" "action=start"
+  assert_file_contains "$tmp/prefix/local/session-fold/request" "run_id=run-1"
+  printf '%s\n' "$output" | grep -F 'run_id=run-1' >/dev/null 2>&1 || fail "codex-session start did not print run id"
+
+  if ! PREFIX="$tmp/prefix" sh "$SESSION_ASSET" add tool --run run-1 --title '命令' --summary '成功' --status done >/dev/null; then
+    fail "codex-session add tool should write request"
+  fi
+  assert_file_contains "$tmp/prefix/local/session-fold/request" "action=add"
+  assert_file_contains "$tmp/prefix/local/session-fold/request" "kind=tool"
+  assert_file_contains "$tmp/prefix/local/session-fold/request" "summary=成功"
+
+  if ! output="$(printf 'very long private text\nsecond line\n' | PREFIX="$tmp/prefix" sh "$SESSION_ASSET" add text --run run-1 --stdin --title note)"; then
+    fail "codex-session add text --stdin should write request"
+  fi
+  assert_file_contains "$tmp/prefix/local/session-fold/request" "kind=text"
+  text_path="$(sed -n 's/^path=//p' "$tmp/prefix/local/session-fold/request")"
+  [ -s "$text_path" ] || fail "codex-session stdin text file missing"
+  printf '%s\n' "$output" | grep -F 'very long private text' >/dev/null 2>&1 && fail "codex-session dumped stdin text"
+
+  PREFIX="$tmp/prefix" sh "$SESSION_ASSET" done run-1 '完成' >/dev/null || fail "codex-session done failed"
+  assert_file_contains "$tmp/prefix/local/session-fold/request" "action=done"
+  PREFIX="$tmp/prefix" sh "$SESSION_ASSET" collapse run-1 >/dev/null || fail "codex-session collapse failed"
+  assert_file_contains "$tmp/prefix/local/session-fold/request" "action=collapse"
+  PREFIX="$tmp/prefix" sh "$SESSION_ASSET" remove run-1 >/dev/null || fail "codex-session remove failed"
+  assert_file_contains "$tmp/prefix/local/session-fold/request" "action=remove"
+  PREFIX="$tmp/prefix" sh "$SESSION_ASSET" clear test_clear >/dev/null || fail "codex-session clear failed"
+  assert_file_contains "$tmp/prefix/local/session-fold/request" "action=clear"
+
+  PREFIX="$tmp/prefix" sh "$SESSION_ASSET" status >/dev/null || fail "codex-session status should be safe without status file"
+  PREFIX="$tmp/prefix" sh "$SESSION_ASSET" events >/dev/null || fail "codex-session events should be safe without events file"
+  PREFIX="$tmp/prefix" sh "$SESSION_ASSET" result >/dev/null || fail "codex-session result should be safe without result file"
+  rm -rf "$tmp"
+}
+
 test_generated_launcher_entrypoints_and_normal_path() {
   tmp="${TMPDIR:-/tmp}/codex-tui-static-launcher.$$"
   rm -rf "$tmp"
@@ -580,6 +637,7 @@ test_update_apply_installs_self_test_script_and_aliases() {
   [ -x "$tmp/bin/codex-preview" ] || fail "codex-preview bridge wrapper was not installed by update"
   [ -x "$tmp/bin/codex-browser" ] || fail "codex-browser bridge wrapper was not installed by update"
   [ -x "$tmp/bin/codex-panel" ] || fail "codex-panel bridge wrapper was not installed by update"
+  [ -x "$tmp/bin/codex-session" ] || fail "codex-session bridge wrapper was not installed by update"
   assert_file_contains "$tmp/stdout" "已更新：codex-for-tui-self-test.sh"
   rm -rf "$tmp"
 }
@@ -656,6 +714,7 @@ run_step test_release_workflow_signature_gate
 run_step test_image_preview_bridge_asset
 run_step test_browser_bridge_asset
 run_step test_agent_panel_bridge_asset
+run_step test_session_fold_bridge_asset
 run_step test_generated_launcher_entrypoints_and_normal_path
 run_step test_generated_launcher_first_run_configures_then_runs
 run_step test_update_apply_installs_self_test_script_and_aliases

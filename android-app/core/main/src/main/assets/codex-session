@@ -1,0 +1,204 @@
+#!/usr/bin/env sh
+set -eu
+
+usage() {
+  printf '%s\n' "用法: codex-session start [--run RUN_ID] [TITLE]"
+  printf '%s\n' "      codex-session add thinking|tool|text|file|browser|final --run RUN_ID [--title TITLE] [--summary TEXT] [--path PATH] [--status STATUS]"
+  printf '%s\n' "      codex-session add text --run RUN_ID --stdin [--title TITLE]"
+  printf '%s\n' "      codex-session done|fail RUN_ID [SUMMARY]"
+  printf '%s\n' "      codex-session expand|collapse|remove RUN_ID"
+  printf '%s\n' "      codex-session clear [REASON]"
+  printf '%s\n' "      codex-session status|events|wait|result"
+}
+
+find_prefix() {
+  if [ -n "${PREFIX:-}" ]; then
+    printf '%s\n' "$PREFIX"
+    return 0
+  fi
+  if [ -n "${PKG:-}" ]; then
+    [ -d "/data/user/0/$PKG" ] && { printf '%s\n' "/data/user/0/$PKG"; return 0; }
+    [ -d "/data/data/$PKG" ] && { printf '%s\n' "/data/data/$PKG"; return 0; }
+  fi
+  return 1
+}
+
+print_file_if_readable() {
+  file="$1"
+  if [ -r "$file" ]; then
+    cat "$file"
+    return 0
+  fi
+  return 1
+}
+
+write_request() {
+  bridge_dir="$1/local/session-fold"
+  shift
+  request_file="$bridge_dir/request"
+  mkdir -p "$bridge_dir"
+  request_id="$(date +%s 2>/dev/null || printf 0).$$"
+  tmp="$request_file.tmp.$$"
+  {
+    printf 'request_id=%s\n' "$request_id"
+    printf 'stamp=%s\n' "$request_id"
+    while [ "$#" -gt 0 ]; do
+      printf '%s=%s\n' "$1" "$2"
+      shift 2
+    done
+  } > "$tmp"
+  mv "$tmp" "$request_file"
+  printf '%s\n' "$request_id"
+}
+
+wait_events() {
+  bridge_dir="$1/local/session-fold"
+  events_file="$bridge_dir/events"
+  wait_seconds="${CODEX_SESSION_WAIT_SECONDS:-120}"
+  start_size=0
+  [ ! -f "$events_file" ] || start_size="$(wc -c < "$events_file" 2>/dev/null || printf 0)"
+  elapsed=0
+  while [ "$elapsed" -lt "$wait_seconds" ]; do
+    if [ -s "$events_file" ]; then
+      size="$(wc -c < "$events_file" 2>/dev/null || printf 0)"
+      if [ "$size" != "$start_size" ]; then
+        tail -n 60 "$events_file"
+        return 0
+      fi
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  printf '等待会话折叠事件超时\n' >&2
+  return 1
+}
+
+prefix="$(find_prefix)" || {
+  printf '%s\n' "找不到 App 数据目录: 请在 Codex for TUI 终端内运行。" >&2
+  exit 1
+}
+
+[ "$#" -ge 1 ] || { usage >&2; exit 2; }
+
+cmd="$1"
+shift
+
+case "$cmd" in
+  status)
+    print_file_if_readable "$prefix/local/session-fold/status" || true
+    exit 0
+    ;;
+  events)
+    print_file_if_readable "$prefix/local/session-fold/events" || true
+    exit 0
+    ;;
+  result)
+    print_file_if_readable "$prefix/local/session-fold/result" || true
+    exit 0
+    ;;
+  wait)
+    wait_events "$prefix"
+    exit $?
+    ;;
+esac
+
+case "$cmd" in
+  start)
+    run_id=""
+    if [ "${1:-}" = "--run" ]; then
+      [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+      run_id="$2"
+      shift 2
+    fi
+    title="${*:-会话处理}"
+    request_id="$(write_request "$prefix" action start run_id "$run_id" title "$title")"
+    [ -n "$run_id" ] || run_id="$request_id"
+    ;;
+  add)
+    [ "$#" -ge 1 ] || { usage >&2; exit 2; }
+    kind="$1"
+    shift
+    run_id=""
+    item_id=""
+    title=""
+    summary=""
+    path=""
+    status="done"
+    stdin_file=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --run)
+          [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+          run_id="$2"
+          shift 2
+          ;;
+        --id|--item)
+          [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+          item_id="$2"
+          shift 2
+          ;;
+        --title)
+          [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+          title="$2"
+          shift 2
+          ;;
+        --summary)
+          [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+          summary="$2"
+          shift 2
+          ;;
+        --path|--content-file)
+          [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+          path="$2"
+          shift 2
+          ;;
+        --status)
+          [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+          status="$2"
+          shift 2
+          ;;
+        --stdin)
+          bridge_dir="$prefix/local/session-fold"
+          mkdir -p "$bridge_dir/entries"
+          stamp="$(date +%s 2>/dev/null || printf 0).$$"
+          stdin_file="$bridge_dir/entries/$stamp.txt"
+          cat > "$stdin_file"
+          path="$stdin_file"
+          shift
+          ;;
+        *)
+          usage >&2
+          exit 2
+          ;;
+      esac
+    done
+    [ -n "$run_id" ] || { printf '%s\n' "--run RUN_ID 是必需的" >&2; exit 2; }
+    request_id="$(write_request "$prefix" action add run_id "$run_id" item_id "$item_id" kind "$kind" title "$title" summary "$summary" path "$path" status "$status")"
+    [ -n "$item_id" ] || item_id="$request_id"
+    ;;
+  done|fail)
+    [ "$#" -ge 1 ] || { usage >&2; exit 2; }
+    run_id="$1"
+    shift
+    summary="${*:-}"
+    request_id="$(write_request "$prefix" action "$cmd" run_id "$run_id" summary "$summary")"
+    ;;
+  expand|collapse|remove)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    run_id="$1"
+    request_id="$(write_request "$prefix" action "$cmd" run_id "$run_id")"
+    ;;
+  clear)
+    reason="${*:-agent_clear}"
+    request_id="$(write_request "$prefix" action clear reason "$reason")"
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
+
+printf '已发送到 Codex for TUI 会话折叠: %s\n' "$request_id"
+printf 'request_id=%s\n' "$request_id"
+[ "${run_id:-}" = "" ] || printf 'run_id=%s\n' "$run_id"
+[ "${item_id:-}" = "" ] || printf 'item_id=%s\n' "$item_id"

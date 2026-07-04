@@ -40,6 +40,8 @@ class TerminalViewModel : ViewModel() {
     var mediaPreviewExpanded by mutableStateOf(false)
     var browserSnapshot by mutableStateOf(TerminalBrowserSnapshot())
     var browserPanelExpanded by mutableStateOf(false)
+    val sessionFoldRuns = mutableStateListOf<TerminalSessionFoldRun>()
+    var activeSessionFoldRunId by mutableStateOf("")
 
     fun addMediaPreview(preview: TerminalMediaPreview) {
         mediaPreviews.removeAll { it.stamp == preview.stamp || it.path == preview.path }
@@ -66,6 +68,93 @@ class TerminalViewModel : ViewModel() {
         if (!snapshot.available) {
             browserPanelExpanded = false
         }
+    }
+
+    fun upsertSessionFoldRun(
+        runId: String,
+        title: String,
+        status: String,
+        collapsed: Boolean? = null,
+        summary: String = ""
+    ): TerminalSessionFoldRun {
+        val safeRunId = runId.trim().ifBlank { "run-${System.currentTimeMillis()}" }
+        val now = System.currentTimeMillis()
+        val index = sessionFoldRuns.indexOfFirst { it.id == safeRunId }
+        val existing = sessionFoldRuns.getOrNull(index)
+        val terminal = status == "done" || status == "failed" || status == "cancelled"
+        val resolved = existing?.copy(
+            title = title.ifBlank { existing.title },
+            status = status.ifBlank { existing.status },
+            collapsed = collapsed ?: if (terminal) true else existing.collapsed,
+            summary = summary.ifBlank { existing.summary },
+            endedAt = if (terminal) now else existing.endedAt
+        ) ?: TerminalSessionFoldRun(
+            id = safeRunId,
+            title = title.ifBlank { "会话处理" },
+            status = status.ifBlank { "running" },
+            collapsed = collapsed ?: terminal,
+            summary = summary,
+            startedAt = now,
+            endedAt = if (terminal) now else 0L
+        )
+        if (index == -1) {
+            sessionFoldRuns.add(resolved)
+        } else {
+            sessionFoldRuns[index] = resolved
+        }
+        if (!terminal) {
+            activeSessionFoldRunId = safeRunId
+        } else if (activeSessionFoldRunId == safeRunId) {
+            activeSessionFoldRunId = ""
+        }
+        while (sessionFoldRuns.size > MAX_SESSION_FOLD_RUNS) {
+            sessionFoldRuns.removeAt(0)
+        }
+        return resolved
+    }
+
+    fun addSessionFoldItem(item: TerminalSessionFoldItem) {
+        val runId = item.runId.trim().ifBlank { activeSessionFoldRunId }
+        if (runId.isBlank()) return
+        val index = sessionFoldRuns.indexOfFirst { it.id == runId }
+        val run = if (index == -1) {
+            upsertSessionFoldRun(
+                runId = runId,
+                title = "会话处理",
+                status = "running",
+                collapsed = false
+            )
+        } else {
+            sessionFoldRuns[index]
+        }
+        val items = (run.items.filterNot { it.id == item.id } + item.copy(runId = runId))
+            .takeLast(MAX_SESSION_FOLD_ITEMS)
+        val updated = run.copy(items = items)
+        val updatedIndex = sessionFoldRuns.indexOfFirst { it.id == runId }
+        if (updatedIndex == -1) {
+            sessionFoldRuns.add(updated)
+        } else {
+            sessionFoldRuns[updatedIndex] = updated
+        }
+    }
+
+    fun setSessionFoldCollapsed(runId: String, collapsed: Boolean) {
+        val index = sessionFoldRuns.indexOfFirst { it.id == runId }
+        if (index >= 0) {
+            sessionFoldRuns[index] = sessionFoldRuns[index].copy(collapsed = collapsed)
+        }
+    }
+
+    fun removeSessionFoldRun(runId: String) {
+        sessionFoldRuns.removeAll { it.id == runId }
+        if (activeSessionFoldRunId == runId) {
+            activeSessionFoldRunId = ""
+        }
+    }
+
+    fun clearSessionFoldRuns() {
+        sessionFoldRuns.clear()
+        activeSessionFoldRunId = ""
     }
 
     fun setFont(typeface: Typeface) {
@@ -112,6 +201,8 @@ class TerminalViewModel : ViewModel() {
 }
 
 private const val MAX_MEDIA_PREVIEWS = 60
+private const val MAX_SESSION_FOLD_RUNS = 40
+private const val MAX_SESSION_FOLD_ITEMS = 80
 
 enum class TerminalMediaPreviewKind {
     IMAGE,
@@ -135,4 +226,35 @@ data class TerminalMediaPreview(
     val mimeType: String = "",
     val textPreview: String? = null,
     val source: TerminalMediaPreviewSource = TerminalMediaPreviewSource.AGENT
+)
+
+data class TerminalSessionFoldRun(
+    val id: String,
+    val title: String,
+    val status: String,
+    val collapsed: Boolean,
+    val summary: String = "",
+    val startedAt: Long,
+    val endedAt: Long = 0L,
+    val items: List<TerminalSessionFoldItem> = emptyList()
+)
+
+enum class TerminalSessionFoldItemKind {
+    THINKING,
+    TOOL,
+    TEXT,
+    FILE,
+    BROWSER,
+    FINAL
+}
+
+data class TerminalSessionFoldItem(
+    val id: String,
+    val runId: String,
+    val kind: TerminalSessionFoldItemKind,
+    val title: String,
+    val summary: String = "",
+    val path: String = "",
+    val status: String = "done",
+    val stamp: Long = System.currentTimeMillis()
 )

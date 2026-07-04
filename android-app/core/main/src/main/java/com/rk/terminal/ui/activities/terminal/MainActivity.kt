@@ -36,6 +36,8 @@ import com.rk.terminal.ui.screens.terminal.TerminalBrowserSessionManager
 import com.rk.terminal.ui.screens.terminal.TerminalMediaPreview
 import com.rk.terminal.ui.screens.terminal.TerminalMediaPreviewKind
 import com.rk.terminal.ui.screens.terminal.TerminalMediaPreviewSource
+import com.rk.terminal.ui.screens.terminal.TerminalSessionFoldItem
+import com.rk.terminal.ui.screens.terminal.TerminalSessionFoldItemKind
 import com.rk.terminal.ui.screens.terminal.TerminalViewModel
 import com.rk.terminal.ui.theme.KarbonTheme
 import java.io.File
@@ -58,8 +60,10 @@ class MainActivity : ComponentActivity() {
     private var wasKeyboardOpen = false
     private var mediaPreviewJob: Job? = null
     private var browserBridgeJob: Job? = null
+    private var sessionFoldJob: Job? = null
     private var lastMediaPreviewRequest = ""
     private var lastBrowserRequest = ""
+    private var lastSessionFoldRequest = ""
     private var lastBrowserNeedsUserEventKey = ""
     private var browserFileChooserCallback: ((Array<Uri>?) -> Unit)? = null
 
@@ -181,6 +185,7 @@ class MainActivity : ComponentActivity() {
         
         primeMediaPreviewRequestCache()
         primeBrowserRequestCache()
+        primeSessionFoldRequestCache()
         setupKeyboardListener()
     }
 
@@ -189,6 +194,7 @@ class MainActivity : ComponentActivity() {
         viewModel.startAndBindService(this)
         startMediaPreviewBridge()
         startBrowserBridge()
+        startSessionFoldBridge()
     }
 
     override fun onStop() {
@@ -197,6 +203,8 @@ class MainActivity : ComponentActivity() {
         mediaPreviewJob = null
         browserBridgeJob?.cancel()
         browserBridgeJob = null
+        sessionFoldJob?.cancel()
+        sessionFoldJob = null
         viewModel.unbindService(this)
     }
 
@@ -216,6 +224,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             pollMediaPreviewRequest()
             pollBrowserRequest()
+            pollSessionFoldRequest()
         }
     }
 
@@ -399,6 +408,116 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private fun writeSessionFoldStatus(
+        state: String,
+        reason: String = "",
+        requestId: String = "",
+        runId: String = "",
+        itemId: String = "",
+        extra: Map<String, String> = emptyMap()
+    ) {
+        try {
+            val activeRun = runId.ifBlank { terminalViewModel.activeSessionFoldRunId }
+            val run = terminalViewModel.sessionFoldRuns.firstOrNull { it.id == activeRun }
+                ?: terminalViewModel.sessionFoldRuns.lastOrNull()
+            val totalItems = terminalViewModel.sessionFoldRuns.sumOf { it.items.size }
+            localDir().child("session-fold").apply { mkdirs() }.child("status").writeText(
+                buildString {
+                    append("source=session\n")
+                    append("state=").append(refValue(state)).append('\n')
+                    append("reason=").append(refValue(reason)).append('\n')
+                    append("request_id=").append(refValue(requestId)).append('\n')
+                    append("run_id=").append(refValue(run?.id ?: activeRun)).append('\n')
+                    append("item_id=").append(refValue(itemId)).append('\n')
+                    append("active_run=").append(refValue(terminalViewModel.activeSessionFoldRunId)).append('\n')
+                    append("collapsed=").append(if (run?.collapsed == true) "1" else "0").append('\n')
+                    append("runs=").append(terminalViewModel.sessionFoldRuns.size).append('\n')
+                    append("items=").append(totalItems).append('\n')
+                    appendSessionFoldExtras(extra)
+                    append("stamp=").append(panelEventId()).append('\n')
+                }
+            )
+        } catch (_: Exception) {
+            // Best-effort session-fold bridge status.
+        }
+    }
+
+    private fun writeSessionFoldEvent(
+        type: String,
+        state: String = "done",
+        reason: String = "",
+        requestId: String = "",
+        runId: String = "",
+        itemId: String = "",
+        extra: Map<String, String> = emptyMap()
+    ) {
+        try {
+            val run = terminalViewModel.sessionFoldRuns.firstOrNull { it.id == runId }
+            val event = buildString {
+                append("event_id=").append(panelEventId()).append('\n')
+                append("source=session\n")
+                append("type=").append(type).append('\n')
+                append("state=").append(state).append('\n')
+                append("reason=").append(refValue(reason)).append('\n')
+                append("request_id=").append(refValue(requestId)).append('\n')
+                append("run_id=").append(refValue(runId)).append('\n')
+                append("item_id=").append(refValue(itemId)).append('\n')
+                append("active_run=").append(refValue(terminalViewModel.activeSessionFoldRunId)).append('\n')
+                append("collapsed=").append(if (run?.collapsed == true) "1" else "0").append('\n')
+                appendSessionFoldExtras(extra)
+                append("---\n")
+            }
+            localDir().child("session-fold").apply { mkdirs() }.child("events").appendText(event)
+        } catch (_: Exception) {
+            // Best-effort session-fold event bridge.
+        }
+    }
+
+    private fun writeSessionFoldResult(
+        requestId: String,
+        action: String,
+        ok: Boolean,
+        state: String,
+        reason: String,
+        runId: String = "",
+        itemId: String = "",
+        error: String = "",
+        extra: Map<String, String> = emptyMap()
+    ) {
+        try {
+            val run = terminalViewModel.sessionFoldRuns.firstOrNull { it.id == runId }
+            localDir().child("session-fold").apply { mkdirs() }.child("result").writeText(
+                buildString {
+                    append("request_id=").append(refValue(requestId)).append('\n')
+                    append("action=").append(refValue(action)).append('\n')
+                    append("ok=").append(if (ok) "1" else "0").append('\n')
+                    append("state=").append(refValue(state)).append('\n')
+                    append("reason=").append(refValue(reason)).append('\n')
+                    append("run_id=").append(refValue(runId)).append('\n')
+                    append("item_id=").append(refValue(itemId)).append('\n')
+                    append("active_run=").append(refValue(terminalViewModel.activeSessionFoldRunId)).append('\n')
+                    append("collapsed=").append(if (run?.collapsed == true) "1" else "0").append('\n')
+                    if (error.isNotBlank()) append("error=").append(refValue(error)).append('\n')
+                    appendSessionFoldExtras(extra)
+                }
+            )
+        } catch (_: Exception) {
+            // Best-effort session-fold result bridge.
+        }
+    }
+
+    private fun StringBuilder.appendSessionFoldExtras(extras: Map<String, String>) {
+        val reserved = setOf(
+            "event_id", "source", "type", "state", "reason", "request_id", "run_id",
+            "item_id", "active_run", "collapsed", "runs", "items", "stamp", "ok", "action"
+        )
+        extras.toSortedMap().forEach { (key, value) ->
+            if (key.isNotBlank() && key !in reserved) {
+                append(key).append('=').append(refValue(value)).append('\n')
+            }
+        }
+    }
+
     private fun setupKeyboardListener() {
         val rootView = findViewById<View>(android.R.id.content)
         rootView.viewTreeObserver.addOnGlobalLayoutListener {
@@ -501,6 +620,14 @@ class MainActivity : ComponentActivity() {
             source = "files",
             state = "done",
             reason = "sent_to_terminal",
+            itemId = refId
+        )
+        appendActiveSessionFoldItem(
+            kind = TerminalSessionFoldItemKind.FILE,
+            title = preview.name,
+            summary = cleanMessage,
+            path = preview.path,
+            status = "done",
             itemId = refId
         )
         toast("已发送：${shortenForTerminal(preview.name, 24)}")
@@ -610,6 +737,14 @@ class MainActivity : ComponentActivity() {
             reason = "composer_sent",
             itemId = refId,
             extra = mediaPreviewExtras(preview)
+        )
+        appendActiveSessionFoldItem(
+            kind = TerminalSessionFoldItemKind.TEXT,
+            title = preview.name,
+            summary = text.replace(Regex("\\s+"), " ").take(240),
+            path = preview.path,
+            status = "done",
+            itemId = refId
         )
         toast("文本已发送")
         return true
@@ -824,6 +959,81 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    fun toggleSessionFoldRun(runId: String) {
+        val run = terminalViewModel.sessionFoldRuns.firstOrNull { it.id == runId } ?: return
+        val collapsed = !run.collapsed
+        terminalViewModel.setSessionFoldCollapsed(runId, collapsed)
+        writeSessionFoldEvent(
+            type = if (collapsed) "user_collapsed" else "user_expanded",
+            state = "ready",
+            reason = "timeline_toggle",
+            runId = runId
+        )
+        writeSessionFoldStatus(
+            state = "ready",
+            reason = "timeline_toggle",
+            runId = runId
+        )
+    }
+
+    fun removeSessionFoldRun(runId: String) {
+        terminalViewModel.removeSessionFoldRun(runId)
+        writeSessionFoldEvent(
+            type = "user_removed",
+            state = "ready",
+            reason = "timeline_remove",
+            runId = runId
+        )
+        writeSessionFoldStatus(
+            state = "ready",
+            reason = "timeline_remove",
+            runId = runId
+        )
+    }
+
+    fun clearSessionFoldTimeline() {
+        terminalViewModel.clearSessionFoldRuns()
+        lifecycleScope.launch(Dispatchers.IO) {
+            runCatching { localDir().child("session-fold").child("entries").deleteRecursively() }
+        }
+        writeSessionFoldEvent(
+            type = "user_cleared",
+            state = "closed",
+            reason = "timeline_clear"
+        )
+        writeSessionFoldStatus(state = "closed", reason = "timeline_clear")
+    }
+
+    private fun appendActiveSessionFoldItem(
+        kind: TerminalSessionFoldItemKind,
+        title: String,
+        summary: String = "",
+        path: String = "",
+        status: String = "done",
+        itemId: String = ""
+    ) {
+        val runId = terminalViewModel.activeSessionFoldRunId
+        if (runId.isBlank()) return
+        val resolvedItemId = itemId.ifBlank { "${kind.name.lowercase(Locale.ROOT)}-${System.currentTimeMillis()}" }
+        terminalViewModel.addSessionFoldItem(
+            TerminalSessionFoldItem(
+                id = resolvedItemId,
+                runId = runId,
+                kind = kind,
+                title = title,
+                summary = summary,
+                path = path,
+                status = status
+            )
+        )
+        writeSessionFoldStatus(
+            state = status,
+            reason = "attached_${kind.name.lowercase(Locale.ROOT)}",
+            runId = runId,
+            itemId = resolvedItemId
+        )
+    }
+
     private fun writeBrowserNeedsUserTransition(
         previous: TerminalBrowserSnapshot,
         current: TerminalBrowserSnapshot
@@ -850,6 +1060,14 @@ class MainActivity : ComponentActivity() {
             requestId = current.requestId,
             extra = browserSnapshotExtras(current)
         )
+        appendActiveSessionFoldItem(
+            kind = TerminalSessionFoldItemKind.BROWSER,
+            title = "浏览器等待用户",
+            summary = current.message.ifBlank { current.title.ifBlank { current.currentUrl } },
+            path = current.currentUrl,
+            status = "waiting_for_user",
+            itemId = current.requestId.ifBlank { "browser-${System.currentTimeMillis()}" }
+        )
     }
 
     private fun primeMediaPreviewRequestCache() {
@@ -864,6 +1082,15 @@ class MainActivity : ComponentActivity() {
     private fun primeBrowserRequestCache() {
         lastBrowserRequest = try {
             val requestFile = localDir().child("browser").child("request")
+            if (requestFile.isFile) requestFile.readText().trim() else ""
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun primeSessionFoldRequestCache() {
+        lastSessionFoldRequest = try {
+            val requestFile = localDir().child("session-fold").child("request")
             if (requestFile.isFile) requestFile.readText().trim() else ""
         } catch (_: Exception) {
             ""
@@ -887,6 +1114,145 @@ class MainActivity : ComponentActivity() {
                 pollBrowserRequest()
                 delay(350)
             }
+        }
+    }
+
+    private fun startSessionFoldBridge() {
+        if (sessionFoldJob?.isActive == true) return
+        sessionFoldJob = lifecycleScope.launch {
+            while (isActive) {
+                pollSessionFoldRequest()
+                delay(450)
+            }
+        }
+    }
+
+    private suspend fun pollSessionFoldRequest() {
+        val foldDir = localDir().child("session-fold")
+        val requestFile = foldDir.child("request")
+        val content = withContext(Dispatchers.IO) {
+            foldDir.mkdirs()
+            if (requestFile.isFile) requestFile.readText() else ""
+        }.trim()
+
+        if (content.isBlank() || content == lastSessionFoldRequest) return
+        lastSessionFoldRequest = content
+
+        val request = parseMediaPreviewRequest(content)
+        val requestId = panelRequestId(request, content)
+        val action = request["action"].orEmpty()
+        val runId = request["run_id"].orEmpty().ifBlank { requestId }
+        val reason = request["reason"] ?: request["summary"] ?: action
+        try {
+            when (action) {
+                "start" -> {
+                    val resolvedRunId = request["run_id"].orEmpty().ifBlank { requestId }
+                    terminalViewModel.upsertSessionFoldRun(
+                        runId = resolvedRunId,
+                        title = request["title"].orEmpty().ifBlank { "会话处理" },
+                        status = "running",
+                        collapsed = false
+                    )
+                    writeSessionFoldEvent("agent_started", "running", reason, requestId, resolvedRunId)
+                    writeSessionFoldResult(requestId, action, true, "running", reason, resolvedRunId)
+                    writeSessionFoldStatus("running", reason, requestId, resolvedRunId)
+                }
+                "add" -> {
+                    val resolvedRunId = request["run_id"].orEmpty().ifBlank {
+                        terminalViewModel.activeSessionFoldRunId.ifBlank { runId }
+                    }
+                    val kind = sessionFoldItemKind(request["kind"].orEmpty())
+                    val itemId = request["item_id"].orEmpty().ifBlank { requestId }
+                    val path = request["path"].orEmpty()
+                    val summary = request["summary"].orEmpty().ifBlank {
+                        sessionFoldPathSummary(path)
+                    }
+                    val title = request["title"].orEmpty().ifBlank {
+                        sessionFoldDefaultTitle(kind, path)
+                    }
+                    terminalViewModel.addSessionFoldItem(
+                        TerminalSessionFoldItem(
+                            id = itemId,
+                            runId = resolvedRunId,
+                            kind = kind,
+                            title = title,
+                            summary = summary,
+                            path = path,
+                            status = request["status"].orEmpty().ifBlank { "done" }
+                        )
+                    )
+                    writeSessionFoldEvent(
+                        type = "agent_added",
+                        state = request["status"].orEmpty().ifBlank { "done" },
+                        reason = reason,
+                        requestId = requestId,
+                        runId = resolvedRunId,
+                        itemId = itemId,
+                        extra = mapOf("kind" to kind.name.lowercase(Locale.ROOT), "title" to title, "path" to path)
+                    )
+                    writeSessionFoldResult(requestId, action, true, "done", reason, resolvedRunId, itemId)
+                    writeSessionFoldStatus("done", reason, requestId, resolvedRunId, itemId)
+                }
+                "done", "fail" -> {
+                    val state = if (action == "fail") "failed" else "done"
+                    val summary = request["summary"].orEmpty()
+                    terminalViewModel.upsertSessionFoldRun(
+                        runId = runId,
+                        title = request["title"].orEmpty(),
+                        status = state,
+                        collapsed = true,
+                        summary = summary
+                    )
+                    if (summary.isNotBlank()) {
+                        terminalViewModel.addSessionFoldItem(
+                            TerminalSessionFoldItem(
+                                id = "$requestId-final",
+                                runId = runId,
+                                kind = TerminalSessionFoldItemKind.FINAL,
+                                title = if (state == "done") "最终结果" else "失败说明",
+                                summary = summary,
+                                status = state
+                            )
+                        )
+                    }
+                    writeSessionFoldEvent("agent_$state", state, reason, requestId, runId)
+                    writeSessionFoldResult(requestId, action, true, state, reason, runId)
+                    writeSessionFoldStatus(state, reason, requestId, runId)
+                }
+                "expand", "collapse" -> {
+                    val collapsed = action == "collapse"
+                    terminalViewModel.setSessionFoldCollapsed(runId, collapsed)
+                    val state = if (collapsed) "collapsed" else "expanded"
+                    writeSessionFoldEvent("agent_$state", state, reason, requestId, runId)
+                    writeSessionFoldResult(requestId, action, true, state, reason, runId)
+                    writeSessionFoldStatus(state, reason, requestId, runId)
+                }
+                "remove" -> {
+                    terminalViewModel.removeSessionFoldRun(runId)
+                    writeSessionFoldEvent("agent_removed", "ready", reason, requestId, runId)
+                    writeSessionFoldResult(requestId, action, true, "ready", reason, runId)
+                    writeSessionFoldStatus("ready", reason, requestId, runId)
+                }
+                "clear" -> {
+                    terminalViewModel.clearSessionFoldRuns()
+                    withContext(Dispatchers.IO) {
+                        runCatching { foldDir.child("entries").deleteRecursively() }
+                    }
+                    writeSessionFoldEvent("agent_cleared", "closed", reason, requestId)
+                    writeSessionFoldResult(requestId, action, true, "closed", reason)
+                    writeSessionFoldStatus("closed", reason, requestId)
+                }
+                else -> {
+                    writeSessionFoldEvent("agent_error", "error", "unsupported_action", requestId, runId)
+                    writeSessionFoldResult(requestId, action, false, "error", "unsupported_action", runId, error = "unsupported_action")
+                    writeSessionFoldStatus("error", "unsupported_action", requestId, runId)
+                }
+            }
+        } catch (error: Exception) {
+            val message = error.message ?: error::class.java.simpleName
+            writeSessionFoldEvent("agent_error", "error", message, requestId, runId)
+            writeSessionFoldResult(requestId, action, false, "error", message, runId, error = message)
+            writeSessionFoldStatus("error", message, requestId, runId)
         }
     }
 
@@ -959,6 +1325,14 @@ class MainActivity : ComponentActivity() {
             reason = request["reason"] ?: request["message"] ?: action,
             requestId = result.optString("requestId"),
             extra = browserJsonExtras(snapshot)
+        )
+        appendActiveSessionFoldItem(
+            kind = TerminalSessionFoldItemKind.BROWSER,
+            title = snapshot?.optString("title").orEmpty().ifBlank { "浏览器" },
+            summary = snapshot?.optString("currentUrl").orEmpty().ifBlank { request["message"].orEmpty() },
+            path = snapshot?.optString("currentUrl").orEmpty(),
+            status = state,
+            itemId = result.optString("requestId").ifBlank { "browser-${System.currentTimeMillis()}" }
         )
     }
 
@@ -1143,6 +1517,14 @@ class MainActivity : ComponentActivity() {
             state = "ready",
             reason = if (shouldPresent) "present" else "background",
             requestId = refId,
+            itemId = refId
+        )
+        appendActiveSessionFoldItem(
+            kind = if (kind == TerminalMediaPreviewKind.TEXT) TerminalSessionFoldItemKind.TEXT else TerminalSessionFoldItemKind.FILE,
+            title = preview.name,
+            summary = textPreview?.replace(Regex("\\s+"), " ")?.take(240).orEmpty(),
+            path = preview.path,
+            status = "ready",
             itemId = refId
         )
     }
@@ -1331,6 +1713,53 @@ class MainActivity : ComponentActivity() {
             }
         }
         return values
+    }
+
+    private fun sessionFoldItemKind(value: String): TerminalSessionFoldItemKind {
+        return when (value.lowercase(Locale.ROOT)) {
+            "thinking", "reasoning" -> TerminalSessionFoldItemKind.THINKING
+            "tool", "command", "terminal" -> TerminalSessionFoldItemKind.TOOL
+            "text", "long_text" -> TerminalSessionFoldItemKind.TEXT
+            "file", "preview" -> TerminalSessionFoldItemKind.FILE
+            "browser", "web" -> TerminalSessionFoldItemKind.BROWSER
+            "final", "answer" -> TerminalSessionFoldItemKind.FINAL
+            else -> TerminalSessionFoldItemKind.TOOL
+        }
+    }
+
+    private fun sessionFoldDefaultTitle(
+        kind: TerminalSessionFoldItemKind,
+        path: String
+    ): String {
+        val name = path.takeIf { it.isNotBlank() }?.let { File(it).name }.orEmpty()
+        return when (kind) {
+            TerminalSessionFoldItemKind.THINKING -> "思考过程"
+            TerminalSessionFoldItemKind.TOOL -> "工具调用"
+            TerminalSessionFoldItemKind.TEXT -> name.ifBlank { "长文本" }
+            TerminalSessionFoldItemKind.FILE -> name.ifBlank { "文件" }
+            TerminalSessionFoldItemKind.BROWSER -> "浏览器"
+            TerminalSessionFoldItemKind.FINAL -> "最终结果"
+        }
+    }
+
+    private suspend fun sessionFoldPathSummary(path: String): String = withContext(Dispatchers.IO) {
+        if (path.isBlank()) return@withContext ""
+        val file = File(path)
+        if (!file.isFile || !file.canRead()) return@withContext ""
+        val maxBytes = 4096
+        val buffer = ByteArray(maxBytes)
+        val read = runCatching {
+            file.inputStream().use { input -> input.read(buffer) }
+        }.getOrDefault(0)
+        if (read <= 0) {
+            ""
+        } else {
+            String(buffer, 0, read, Charsets.UTF_8)
+                .replace("\u0000", "")
+                .replace(Regex("\\s+"), " ")
+                .trim()
+                .take(240)
+        }
     }
 
     private fun writeMediaPreviewStatus(previewDir: File, text: String) {

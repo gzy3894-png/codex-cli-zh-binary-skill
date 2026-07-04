@@ -1,5 +1,21 @@
 # Changelog
 
+## Codex for TUI 2.0.6
+
+Codex for TUI 2.0.6 新增会话折叠 v1，让 Agent 过程信息进入 App 原生结构化时间线，而不是完整刷进终端文本。
+
+### 新功能
+
+- 新增 `codex-session` 桥接命令，支持 `start/add/done/fail/expand/collapse/remove/clear/status/events/wait/result`。
+- 新增会话折叠时间线：思考、工具、文本、文件、浏览器和最终结果可归入同一个 run，完成后默认折叠为“已处理 <耗时>”。
+- 用户展开、折叠、删除和清空会话折叠项会写入 `session-fold/events`，Agent 可以通过 `codex-session events/wait` 感知。
+- 文件托盘、长文本发送和浏览器协作会在存在 active session run 时附加到当前折叠记录；旧 `codex-preview`、`codex-browser`、`codex-panel` 用法保持兼容。
+
+### 验证
+
+- 本地非 APK 构建门禁：静态 guards、APK asset shell 语法和 `git diff --check`。
+- APK 构建、签名校验和 release 资产仍只通过 GitHub Actions 完成。
+
 ## Codex for TUI 2.0.5
 
 Codex for TUI 2.0.5 修复 2.0.4 安装后运行时调试发现的 Agent 面板协议字段一致性问题。
