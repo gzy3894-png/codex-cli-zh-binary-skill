@@ -8,6 +8,7 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.FileObserver
 import android.provider.OpenableColumns
 import android.view.View
 import android.view.inputmethod.InputMethodManager
@@ -36,6 +37,7 @@ import com.rk.terminal.ui.screens.terminal.TerminalBrowserSessionManager
 import com.rk.terminal.ui.screens.terminal.TerminalMediaPreview
 import com.rk.terminal.ui.screens.terminal.TerminalMediaPreviewKind
 import com.rk.terminal.ui.screens.terminal.TerminalMediaPreviewSource
+import com.rk.terminal.ui.screens.terminal.TerminalRenderPerformanceMetrics
 import com.rk.terminal.ui.screens.terminal.TerminalSessionFoldItem
 import com.rk.terminal.ui.screens.terminal.TerminalSessionFoldItemKind
 import com.rk.terminal.ui.screens.terminal.TerminalViewModel
@@ -43,14 +45,24 @@ import com.rk.terminal.ui.theme.KarbonTheme
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+
+private const val BRIDGE_FALLBACK_POLL_MS = 1500L
+private const val TERMINAL_PERF_STATUS_MIN_INTERVAL_MS = 5000L
+private val REQUEST_FILE_OBSERVER_EVENTS =
+    FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO
+private val QUEUE_FILE_OBSERVER_EVENTS =
+    FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO
 
 class MainActivity : ComponentActivity() {
     val viewModel: MainViewModel by viewModels()
@@ -62,10 +74,19 @@ class MainActivity : ComponentActivity() {
     private var mediaPreviewJob: Job? = null
     private var browserBridgeJob: Job? = null
     private var sessionFoldJob: Job? = null
+    private var mediaPreviewObserver: FileObserver? = null
+    private var browserRequestObserver: FileObserver? = null
+    private var browserQueueObserver: FileObserver? = null
+    private var sessionFoldObserver: FileObserver? = null
+    private val mediaPreviewPollMutex = Mutex()
+    private val browserPollMutex = Mutex()
+    private val sessionFoldPollMutex = Mutex()
+    private val terminalPerfStatusLock = Any()
     private var lastMediaPreviewRequest = ""
     private var lastBrowserRequest = ""
     private var lastSessionFoldRequest = ""
     private var lastBrowserNeedsUserEventKey = ""
+    private var lastTerminalPerfStatusWriteAt = 0L
     private val browserProcessedRequestIds = linkedSetOf<String>()
     private var browserFileChooserCallback: ((Array<Uri>?) -> Unit)? = null
 
@@ -207,6 +228,7 @@ class MainActivity : ComponentActivity() {
         browserBridgeJob = null
         sessionFoldJob?.cancel()
         sessionFoldJob = null
+        stopBridgeObservers()
         viewModel.unbindService(this)
     }
 
@@ -224,9 +246,9 @@ class MainActivity : ComponentActivity() {
             }
         }
         lifecycleScope.launch {
-            pollMediaPreviewRequest()
-            pollBrowserRequest()
-            pollSessionFoldRequest()
+            pollMediaPreviewRequestLocked()
+            pollBrowserRequestLocked()
+            pollSessionFoldRequestLocked()
         }
     }
 
@@ -1277,40 +1299,215 @@ class MainActivity : ComponentActivity() {
 
     private fun startMediaPreviewBridge() {
         if (mediaPreviewJob?.isActive == true) return
+        val previewDir = localDir().child("media-preview").apply { mkdirs() }
+        mediaPreviewObserver = startBridgeRequestObserver(
+            dir = previewDir,
+            requestFileName = "request"
+        ) {
+            scheduleMediaPreviewPoll()
+        }
+        writeTerminalPerformanceStatus()
         mediaPreviewJob = lifecycleScope.launch {
             while (isActive) {
-                pollMediaPreviewRequest()
-                delay(500)
+                pollMediaPreviewRequestLocked()
+                delay(BRIDGE_FALLBACK_POLL_MS)
             }
         }
     }
 
     private fun startBrowserBridge() {
         if (browserBridgeJob?.isActive == true) return
+        val browserDir = localDir().child("browser").apply { mkdirs() }
+        val queueDir = browserDir.child("queue").apply { mkdirs() }
+        browserRequestObserver = startBridgeRequestObserver(
+            dir = browserDir,
+            requestFileName = "request"
+        ) {
+            scheduleBrowserPoll()
+        }
+        browserQueueObserver = startBridgeQueueObserver(queueDir) {
+            scheduleBrowserPoll()
+        }
+        writeTerminalPerformanceStatus()
         browserBridgeJob = lifecycleScope.launch {
             while (isActive) {
-                runCatching {
-                    pollBrowserRequest()
-                }.onFailure { error ->
-                    writeBrowserBridgeError(
-                        browserDir = localDir().child("browser"),
-                        requestId = "poll-${System.currentTimeMillis()}",
-                        action = "poll",
-                        error = error
-                    )
-                }
-                delay(350)
+                pollBrowserRequestLocked()
+                delay(BRIDGE_FALLBACK_POLL_MS)
             }
         }
     }
 
     private fun startSessionFoldBridge() {
         if (sessionFoldJob?.isActive == true) return
+        val foldDir = localDir().child("session-fold").apply { mkdirs() }
+        sessionFoldObserver = startBridgeRequestObserver(
+            dir = foldDir,
+            requestFileName = "request"
+        ) {
+            scheduleSessionFoldPoll()
+        }
+        writeTerminalPerformanceStatus()
         sessionFoldJob = lifecycleScope.launch {
             while (isActive) {
-                pollSessionFoldRequest()
-                delay(450)
+                pollSessionFoldRequestLocked()
+                delay(BRIDGE_FALLBACK_POLL_MS)
             }
+        }
+    }
+
+    private fun scheduleMediaPreviewPoll() {
+        writeTerminalPerformanceStatus()
+        lifecycleScope.launch {
+            pollMediaPreviewRequestLocked()
+        }
+    }
+
+    private fun scheduleBrowserPoll() {
+        writeTerminalPerformanceStatus()
+        lifecycleScope.launch {
+            pollBrowserRequestLocked()
+        }
+    }
+
+    private fun scheduleSessionFoldPoll() {
+        writeTerminalPerformanceStatus()
+        lifecycleScope.launch {
+            pollSessionFoldRequestLocked()
+        }
+    }
+
+    private suspend fun pollMediaPreviewRequestLocked() {
+        mediaPreviewPollMutex.withLock {
+            runCatching {
+                pollMediaPreviewRequest()
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+            }
+        }
+        writeTerminalPerformanceStatus()
+    }
+
+    private suspend fun pollBrowserRequestLocked() {
+        browserPollMutex.withLock {
+            runCatching {
+                pollBrowserRequest()
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                writeBrowserBridgeError(
+                    browserDir = localDir().child("browser"),
+                    requestId = "poll-${System.currentTimeMillis()}",
+                    action = "poll",
+                    error = error
+                )
+            }
+        }
+        writeTerminalPerformanceStatus()
+    }
+
+    private suspend fun pollSessionFoldRequestLocked() {
+        sessionFoldPollMutex.withLock {
+            runCatching {
+                pollSessionFoldRequest()
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+            }
+        }
+        writeTerminalPerformanceStatus()
+    }
+
+    private fun startBridgeRequestObserver(
+        dir: File,
+        requestFileName: String,
+        onChanged: () -> Unit
+    ): FileObserver? {
+        return startBridgeObserver(dir, REQUEST_FILE_OBSERVER_EVENTS) { event, path ->
+            if ((event and REQUEST_FILE_OBSERVER_EVENTS) != 0 && (path.isNullOrBlank() || path == requestFileName)) {
+                onChanged()
+            }
+        }
+    }
+
+    private fun startBridgeQueueObserver(
+        dir: File,
+        onChanged: () -> Unit
+    ): FileObserver? {
+        return startBridgeObserver(dir, QUEUE_FILE_OBSERVER_EVENTS) { event, path ->
+            if ((event and QUEUE_FILE_OBSERVER_EVENTS) != 0 && path?.endsWith(".req") == true) {
+                onChanged()
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun startBridgeObserver(
+        dir: File,
+        events: Int,
+        onEvent: (event: Int, path: String?) -> Unit
+    ): FileObserver? {
+        return runCatching {
+            dir.mkdirs()
+            object : FileObserver(dir.absolutePath, events) {
+                override fun onEvent(event: Int, path: String?) {
+                    onEvent(event, path)
+                }
+            }.also { it.startWatching() }
+        }.getOrNull()
+    }
+
+    private fun stopBridgeObservers() {
+        mediaPreviewObserver?.stopWatching()
+        mediaPreviewObserver = null
+        browserRequestObserver?.stopWatching()
+        browserRequestObserver = null
+        browserQueueObserver?.stopWatching()
+        browserQueueObserver = null
+        sessionFoldObserver?.stopWatching()
+        sessionFoldObserver = null
+        writeTerminalPerformanceStatus()
+    }
+
+    private fun bridgeMode(): String {
+        return if (
+            mediaPreviewObserver != null ||
+            browserRequestObserver != null ||
+            browserQueueObserver != null ||
+            sessionFoldObserver != null
+        ) {
+            "file_observer"
+        } else {
+            "fallback_poll"
+        }
+    }
+
+    private fun writeTerminalPerformanceStatus() {
+        val now = System.currentTimeMillis()
+        val shouldWrite = synchronized(terminalPerfStatusLock) {
+            if (now - lastTerminalPerfStatusWriteAt < TERMINAL_PERF_STATUS_MIN_INTERVAL_MS) {
+                false
+            } else {
+                lastTerminalPerfStatusWriteAt = now
+                true
+            }
+        }
+        if (!shouldWrite) return
+        val render = TerminalRenderPerformanceMetrics.snapshot()
+        runCatching {
+            localDir().child("perf").apply { mkdirs() }.child("terminal.status").writeText(
+                buildString {
+                    append("render_requests=").append(render.renderRequests).append('\n')
+                    append("render_frames=").append(render.renderFrames).append('\n')
+                    append("coalesced_requests=").append(render.coalescedRequests).append('\n')
+                    append("burst_mode=").append(if (render.burstMode) "1" else "0").append('\n')
+                    append("last_frame_ms=").append(render.lastFrameMs).append('\n')
+                    append("bridge_mode=").append(bridgeMode()).append('\n')
+                    append("fallback_interval_ms=").append(BRIDGE_FALLBACK_POLL_MS).append('\n')
+                    append("media_preview_observer=").append(if (mediaPreviewObserver != null) "1" else "0").append('\n')
+                    append("browser_request_observer=").append(if (browserRequestObserver != null) "1" else "0").append('\n')
+                    append("browser_queue_observer=").append(if (browserQueueObserver != null) "1" else "0").append('\n')
+                    append("session_fold_observer=").append(if (sessionFoldObserver != null) "1" else "0").append('\n')
+                    append("stamp=").append(now).append('\n')
+                }
+            )
         }
     }
 
@@ -1828,8 +2025,10 @@ class MainActivity : ComponentActivity() {
                         writeAgentPanelStatus(source = "files", state = "error", reason = "item_not_found", requestId = requestId, itemId = request["item_id"].orEmpty())
                         return
                     }
-                    terminalViewModel.mediaPreviews.removeAll { it.stamp == selected.stamp }
-                    terminalViewModel.mediaPreviews.add(selected)
+                    if (terminalViewModel.mediaPreviews.lastOrNull() != selected) {
+                        terminalViewModel.mediaPreviews.removeAll { it.stamp == selected.stamp }
+                        terminalViewModel.mediaPreviews.add(selected)
+                    }
                 }
                 "remove" -> {
                     if (selected == null) {

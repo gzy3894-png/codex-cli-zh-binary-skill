@@ -1269,7 +1269,7 @@ class TerminalBrowserSessionManager(
             needsUser -> userMessage
             else -> message
         }
-        latestSnapshot = TerminalBrowserSnapshot(
+        val snapshot = TerminalBrowserSnapshot(
             available = tabs.isNotEmpty() || auth != null || external != null,
             requestId = auth?.requestId ?: activeUserRequestId.ifBlank { currentRequestId },
             activeTabId = active?.id,
@@ -1311,7 +1311,9 @@ class TerminalBrowserSessionManager(
             riskChallengeKind = active?.riskChallengeKind.orEmpty(),
             recommendedNextAction = active?.recommendedNextAction.orEmpty()
         )
-        onSnapshot(latestSnapshot)
+        if (snapshot == latestSnapshot) return
+        latestSnapshot = snapshot
+        onSnapshot(snapshot)
     }
 
     private fun appendHistory(tab: BrowserTab) {

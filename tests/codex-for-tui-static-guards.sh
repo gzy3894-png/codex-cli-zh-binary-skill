@@ -25,6 +25,8 @@ MAIN_ACTIVITY="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/
 BROWSER_PANEL_PANE="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/BrowserPanelPane.kt"
 TERMINAL_BROWSER_SESSION="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalBrowserSession.kt"
 TERMINAL_VIEW_MODEL="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt"
+TERMINAL_BACK_END="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalBackEnd.kt"
+TERMINAL_VIEW_LAYOUT="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewLayout.kt"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -67,8 +69,8 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 34'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.2.1"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 35'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.2.2"'
 }
 
 test_release_workflow_signature_gate() {
@@ -85,6 +87,30 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'qemu-aarch64 /tmp/rtk --version'
   assert_file_contains "$BUILD_WORKFLOW" 'cp /tmp/codex-for-tui-rtk/rtk core/main/src/main/assets/rtk'
   assert_file_not_contains "$BUILD_WORKFLOW" 'codex-for-tui-unsigned-or-test-signed-release-apk'
+}
+
+test_terminal_performance_guards() {
+  assert_file_contains "$TERMINAL_BACK_END" 'object TerminalRenderPerformanceMetrics'
+  assert_file_contains "$TERMINAL_BACK_END" 'private val screenUpdateRunnable'
+  assert_file_contains "$TERMINAL_BACK_END" 'postOnAnimationDelayed'
+  assert_file_contains "$TERMINAL_BACK_END" 'changedSession != terminal.currentSession'
+  assert_file_contains "$TERMINAL_BACK_END" 'TerminalRenderPerformanceMetrics.recordRequest'
+  assert_file_contains "$TERMINAL_BACK_END" 'TerminalRenderPerformanceMetrics.recordFrame'
+  assert_file_not_contains "$TERMINAL_BACK_END" 'override fun onTextChanged(changedSession: TerminalSession) { terminal.onScreenUpdated() }'
+  assert_file_not_contains "$TERMINAL_VIEW_LAYOUT" 'view.onScreenUpdated()'
+  assert_file_contains "$TERMINAL_VIEW_LAYOUT" 'postInvalidateOnAnimation'
+  assert_file_contains "$MAIN_ACTIVITY" 'FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO'
+  assert_file_contains "$MAIN_ACTIVITY" 'private const val BRIDGE_FALLBACK_POLL_MS = 1500L'
+  assert_file_contains "$MAIN_ACTIVITY" 'pollBrowserRequestLocked'
+  assert_file_contains "$MAIN_ACTIVITY" 'localDir().child("perf").apply { mkdirs() }.child("terminal.status")'
+  assert_file_contains "$MAIN_ACTIVITY" 'render_requests='
+  assert_file_contains "$MAIN_ACTIVITY" 'render_frames='
+  assert_file_contains "$MAIN_ACTIVITY" 'coalesced_requests='
+  assert_file_contains "$MAIN_ACTIVITY" 'burst_mode='
+  assert_file_contains "$MAIN_ACTIVITY" 'last_frame_ms='
+  assert_file_contains "$MAIN_ACTIVITY" 'bridge_mode='
+  assert_file_contains "$TERMINAL_VIEW_MODEL" 'if (browserSnapshotState.value != value)'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'if (snapshot == latestSnapshot) return'
 }
 
 test_image_preview_bridge_asset() {
@@ -998,6 +1024,7 @@ run_step test_android_session_uses_root_codex_home
 run_step test_bootstrap_asset_is_synced
 run_step test_debug_build_uses_test_package_name
 run_step test_release_workflow_signature_gate
+run_step test_terminal_performance_guards
 run_step test_image_preview_bridge_asset
 run_step test_browser_bridge_asset
 run_step test_browser_background_asset

@@ -1,5 +1,23 @@
 # Changelog
 
+## Codex for TUI 2.2.2
+
+Codex for TUI 2.2.2 是终端流畅度优化版，重点减少长输出、托盘状态刷新和 bridge 轮询叠加造成的卡顿。
+
+### 优化
+
+- 终端输出刷新按屏幕帧合并，避免每次文本变化都立即触发 `TerminalView` 重绘。
+- Compose 层不再因普通重组无条件刷新终端；托盘、浏览器和会话折叠状态尽量结构相等去重。
+- 文件托盘、浏览器和 session fold bridge 优先由文件事件触发，保留低频 fallback poll，减少空轮询。
+- 新增 `$PREFIX/local/perf/terminal.status` 轻量排障状态，便于确认合帧和 bridge 工作模式。
+- 持久化 `/root/AGENTS.md` 子代理路由约定：复杂跨模块任务用主代理总控、`explorer` 只读探索、`worker` 分片实现。
+
+### 验证
+
+- 本地仍只运行非 APK 门禁：`sh -n`、`sh tests/codex-for-tui-static-guards.sh`、`sh tests/codex-for-tui-installer-smoke.sh`、`git diff --check`。
+- APK、正式签名和 release 资产仍只通过 GitHub Actions 构建。
+- 真机验证重点：`seq 1 5000`、`yes | head -n 5000` 高频输出，输入/复制粘贴/软键盘/虚拟键/切 session，文件/浏览器/会话托盘，bridge 事件，以及 2.2.1 Auth Browser 回归。
+
 ## Codex for TUI 2.2.1
 
 Codex for TUI 2.2.1 是 2.2 浏览器协作体验热修版，重点减少 Auth Browser 对用户前台页面的打断。

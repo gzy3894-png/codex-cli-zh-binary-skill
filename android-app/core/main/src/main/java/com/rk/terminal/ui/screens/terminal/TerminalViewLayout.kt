@@ -63,11 +63,7 @@ fun TerminalViewLayout(
                         requestFocus()
                         isFocusableInTouchMode = true
 
-                        mEmulator?.mColors?.mCurrentColors?.apply {
-                            set(256, color)
-                            set(257, bgColor)
-                            set(258, color)
-                        }
+                        applyTerminalDynamicColors(color, bgColor)
 
                         val colorsFile = ctx.localDir().child("colors.properties")
                         if (colorsFile.exists() && colorsFile.isFile) {
@@ -80,13 +76,10 @@ fun TerminalViewLayout(
             },
             modifier = Modifier.fillMaxWidth().weight(1f),
             update = { view ->
-                view.onScreenUpdated()
                 val color = TerminalUtils.getViewColor()
                 val bgColor = TerminalUtils.getBackgroundColor()
-                view.mEmulator?.mColors?.mCurrentColors?.apply {
-                    set(256, color)
-                    set(257, bgColor)
-                    set(258, color)
+                if (view.applyTerminalDynamicColors(color, bgColor)) {
+                    view.postInvalidateOnAnimation()
                 }
             }
         )
@@ -95,6 +88,22 @@ fun TerminalViewLayout(
             VirtualKeysPager(viewModel)
         }
     }
+}
+
+private fun TerminalView.applyTerminalDynamicColors(
+    color: Int = TerminalUtils.getViewColor(),
+    bgColor: Int = TerminalUtils.getBackgroundColor()
+): Boolean {
+    var changed = false
+    mEmulator?.mColors?.mCurrentColors?.apply {
+        changed = get(256) != color || get(257) != bgColor || get(258) != color
+        if (changed) {
+            set(256, color)
+            set(257, bgColor)
+            set(258, color)
+        }
+    }
+    return changed
 }
 
 @Composable

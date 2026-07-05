@@ -37,14 +37,43 @@ class TerminalViewModel : ViewModel() {
     var showVirtualKeys by mutableStateOf(Settings.virtualKeys)
     var showHorizontalToolbar by mutableStateOf(Settings.toolbar)
     val mediaPreviews = mutableStateListOf<TerminalMediaPreview>()
-    var mediaPreviewExpanded by mutableStateOf(false)
-    var browserSnapshot by mutableStateOf(TerminalBrowserSnapshot())
-    var browserPanelExpanded by mutableStateOf(false)
+    private val mediaPreviewExpandedState = mutableStateOf(false)
+    var mediaPreviewExpanded: Boolean
+        get() = mediaPreviewExpandedState.value
+        set(value) {
+            if (mediaPreviewExpandedState.value != value) {
+                mediaPreviewExpandedState.value = value
+            }
+        }
+    private val browserSnapshotState = mutableStateOf(TerminalBrowserSnapshot())
+    var browserSnapshot: TerminalBrowserSnapshot
+        get() = browserSnapshotState.value
+        private set(value) {
+            if (browserSnapshotState.value != value) {
+                browserSnapshotState.value = value
+            }
+        }
+    private val browserPanelExpandedState = mutableStateOf(false)
+    var browserPanelExpanded: Boolean
+        get() = browserPanelExpandedState.value
+        set(value) {
+            if (browserPanelExpandedState.value != value) {
+                browserPanelExpandedState.value = value
+            }
+        }
     val sessionFoldRuns = mutableStateListOf<TerminalSessionFoldRun>()
     var activeSessionFoldRunId by mutableStateOf("")
-    var sessionFoldTimelineCollapsed by mutableStateOf(false)
+    private val sessionFoldTimelineCollapsedState = mutableStateOf(false)
+    var sessionFoldTimelineCollapsed: Boolean
+        get() = sessionFoldTimelineCollapsedState.value
+        private set(value) {
+            if (sessionFoldTimelineCollapsedState.value != value) {
+                sessionFoldTimelineCollapsedState.value = value
+            }
+        }
 
     fun addMediaPreview(preview: TerminalMediaPreview) {
+        if (mediaPreviews.lastOrNull() == preview) return
         mediaPreviews.removeAll { it.stamp == preview.stamp || it.path == preview.path }
         mediaPreviews.add(preview)
         while (mediaPreviews.size > MAX_MEDIA_PREVIEWS) {
@@ -53,20 +82,24 @@ class TerminalViewModel : ViewModel() {
     }
 
     fun clearMediaPreviews() {
-        mediaPreviews.clear()
-        mediaPreviewExpanded = false
+        if (mediaPreviews.isNotEmpty()) {
+            mediaPreviews.clear()
+        }
+        if (mediaPreviewExpanded) {
+            mediaPreviewExpanded = false
+        }
     }
 
     fun removeMediaPreview(stamp: String) {
         mediaPreviews.removeAll { it.stamp == stamp }
-        if (mediaPreviews.isEmpty()) {
+        if (mediaPreviews.isEmpty() && mediaPreviewExpanded) {
             mediaPreviewExpanded = false
         }
     }
 
     fun updateBrowserSnapshot(snapshot: TerminalBrowserSnapshot) {
         browserSnapshot = snapshot
-        if (!snapshot.available) {
+        if (!snapshot.available && browserPanelExpanded) {
             browserPanelExpanded = false
         }
     }
@@ -88,7 +121,7 @@ class TerminalViewModel : ViewModel() {
             status = status.ifBlank { existing.status },
             collapsed = collapsed ?: if (terminal) true else existing.collapsed,
             summary = summary.ifBlank { existing.summary },
-            endedAt = if (terminal) now else existing.endedAt
+            endedAt = if (terminal) existing.endedAt.takeIf { it > 0L } ?: now else existing.endedAt
         ) ?: TerminalSessionFoldRun(
             id = safeRunId,
             title = title.ifBlank { "会话处理" },
@@ -100,11 +133,13 @@ class TerminalViewModel : ViewModel() {
         )
         if (index == -1) {
             sessionFoldRuns.add(resolved)
-        } else {
+        } else if (existing != resolved) {
             sessionFoldRuns[index] = resolved
         }
         if (!terminal) {
-            activeSessionFoldRunId = safeRunId
+            if (activeSessionFoldRunId != safeRunId) {
+                activeSessionFoldRunId = safeRunId
+            }
         } else if (activeSessionFoldRunId == safeRunId) {
             activeSessionFoldRunId = ""
         }
@@ -128,20 +163,28 @@ class TerminalViewModel : ViewModel() {
         } else {
             sessionFoldRuns[index]
         }
-        val items = (run.items.filterNot { it.id == item.id } + item.copy(runId = runId))
+        val resolvedItem = item.copy(runId = runId)
+        val existingItem = run.items.firstOrNull { it.id == resolvedItem.id }
+        val itemForUpdate = if (existingItem != null && existingItem.sameContentAs(resolvedItem)) {
+            existingItem
+        } else {
+            resolvedItem
+        }
+        val items = (run.items.filterNot { it.id == itemForUpdate.id } + itemForUpdate)
             .takeLast(MAX_SESSION_FOLD_ITEMS)
+        if (items == run.items) return
         val updated = run.copy(items = items)
         val updatedIndex = sessionFoldRuns.indexOfFirst { it.id == runId }
         if (updatedIndex == -1) {
             sessionFoldRuns.add(updated)
-        } else {
+        } else if (sessionFoldRuns[updatedIndex] != updated) {
             sessionFoldRuns[updatedIndex] = updated
         }
     }
 
     fun setSessionFoldCollapsed(runId: String, collapsed: Boolean) {
         val index = sessionFoldRuns.indexOfFirst { it.id == runId }
-        if (index >= 0) {
+        if (index >= 0 && sessionFoldRuns[index].collapsed != collapsed) {
             sessionFoldRuns[index] = sessionFoldRuns[index].copy(collapsed = collapsed)
         }
     }
@@ -158,9 +201,15 @@ class TerminalViewModel : ViewModel() {
     }
 
     fun clearSessionFoldRuns() {
-        sessionFoldRuns.clear()
-        activeSessionFoldRunId = ""
-        sessionFoldTimelineCollapsed = false
+        if (sessionFoldRuns.isNotEmpty()) {
+            sessionFoldRuns.clear()
+        }
+        if (activeSessionFoldRunId.isNotBlank()) {
+            activeSessionFoldRunId = ""
+        }
+        if (sessionFoldTimelineCollapsed) {
+            sessionFoldTimelineCollapsed = false
+        }
     }
 
     fun setFont(typeface: Typeface) {
@@ -209,6 +258,16 @@ class TerminalViewModel : ViewModel() {
 private const val MAX_MEDIA_PREVIEWS = 60
 private const val MAX_SESSION_FOLD_RUNS = 40
 private const val MAX_SESSION_FOLD_ITEMS = 80
+
+private fun TerminalSessionFoldItem.sameContentAs(other: TerminalSessionFoldItem): Boolean {
+    return id == other.id &&
+        runId == other.runId &&
+        kind == other.kind &&
+        title == other.title &&
+        summary == other.summary &&
+        path == other.path &&
+        status == other.status
+}
 
 enum class TerminalMediaPreviewKind {
     IMAGE,
