@@ -67,8 +67,8 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 33'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.2.0"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 34'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.2.1"'
 }
 
 test_release_workflow_signature_gate() {
@@ -322,9 +322,16 @@ test_browser_bridge_asset() {
   fi
   assert_file_contains "$tmp/prefix/local/browser/request" "action=auth_open"
   assert_file_contains "$tmp/prefix/local/browser/request" "present=1"
+  assert_file_contains "$tmp/prefix/local/browser/request" "open_now=0"
   assert_file_contains "$tmp/prefix/local/browser/request" "reason=Codex 官方登录"
   assert_file_contains "$tmp/prefix/local/browser/request" "code=ABCD-EFGH"
   assert_file_contains "$tmp/prefix/local/browser/request" "url=https://device.example.test"
+
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait auth-open --open-now --reason "Codex 官方登录" --code "ABCD-EFGH" https://device.example.test >/dev/null; then
+    fail "codex-browser should write an auth-open --open-now request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=auth_open"
+  assert_file_contains "$tmp/prefix/local/browser/request" "open_now=1"
 
   if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait auth-done test-auth-request >/dev/null; then
     fail "codex-browser should write an auth-done request"
@@ -419,6 +426,8 @@ test_browser_bridge_asset() {
   PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" result >/dev/null || fail "codex-browser result should be safe without result file"
   PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" result missing-id >/dev/null || fail "codex-browser result REQUEST_ID should be safe without result file"
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'CustomTabsIntent.Builder'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'request["open_now"] == "1"'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" '.put("openNow", openNow)'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'shouldHandleOutsideWebView'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'onShowFileChooser'
   assert_file_contains "$BROWSER_SMOKE" 'persist.html'

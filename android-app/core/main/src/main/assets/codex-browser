@@ -13,7 +13,7 @@ usage() {
   printf '%s\n' "      codex-browser userscript add NAME MATCH FILE"
   printf '%s\n' "      codex-browser userscript list|enable|disable|remove ID"
   printf '%s\n' "      codex-browser user-wait|wait-user [MESSAGE]"
-  printf '%s\n' "      codex-browser auth-open [--reason TEXT] [--code CODE] URL"
+  printf '%s\n' "      codex-browser auth-open [--open-now] [--reason TEXT] [--code CODE] URL"
   printf '%s\n' "      codex-browser auth-wait|auth-status|auth-done|auth-cancel|auth-reopen REQUEST_ID"
   printf '%s\n' "      codex-browser external-confirm|external-cancel REQUEST_ID"
   printf '%s\n' "      codex-browser auth|external URL"
@@ -244,9 +244,13 @@ case "$cmd" in
   auth-open|auth_open)
     reason="安全登录/验证"
     code=""
+    open_now=0
     url=""
     while [ "$#" -gt 0 ]; do
       case "$1" in
+        --open-now|--auto-open)
+          open_now=1
+          ;;
         --reason)
           shift
           [ "$#" -gt 0 ] || { usage >&2; exit 2; }
@@ -273,7 +277,7 @@ case "$cmd" in
       shift
     done
     [ -n "$url" ] || { usage >&2; exit 2; }
-    request_id="$(write_request "$prefix" action auth_open present 1 reason "$reason" code "$code" url "$url")"
+    request_id="$(write_request "$prefix" action auth_open present 1 open_now "$open_now" reason "$reason" code "$code" url "$url")"
     ;;
   auth-wait|auth_wait)
     [ "$#" -eq 1 ] || { usage >&2; exit 2; }

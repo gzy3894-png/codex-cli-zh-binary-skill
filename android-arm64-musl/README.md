@@ -41,7 +41,7 @@ codex-local repair-launcher
 codex 官方登录
 ```
 
-该入口会调用 `codex login --device-auth`，解析登录链接和一次性验证码，并通过 Codex for TUI 的 Custom Tabs 安全登录任务卡打开；用户完成后再用 `codex login status` 验证。脚本不会打印 token、Cookie 或 `~/.codex/auth.json` 内容。
+该入口会调用 `codex login --device-auth`，解析登录链接和一次性验证码，并创建 Codex for TUI 安全登录任务卡；用户点击“打开/重开”后再进入 Custom Tabs；用户完成后再用 `codex login status` 验证。脚本不会打印 token、Cookie 或 `~/.codex/auth.json` 内容。
 
 验证方式：
 

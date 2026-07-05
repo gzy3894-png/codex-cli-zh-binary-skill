@@ -229,7 +229,7 @@ class TerminalBrowserSessionManager(
                 "get_readable" -> getReadable()
                 "execute_js", "js" -> executeJs(request.requireValue("script"))
                 "screenshot" -> screenshot(browserDir, requestId, request)
-                "external", "auth", "custom_tab", "auth_open" -> openAuthBrowser(request, requestId)
+                "external", "auth", "custom_tab", "auth_open" -> openAuthBrowser(request, requestId, action)
                 "auth_reopen" -> reopenAuthBrowser(request, requestId)
                 "auth_done" -> authDone(request["auth_request_id"] ?: requestId)
                 "auth_cancel", "auth_cancelled" -> authCancelled(request["auth_request_id"] ?: requestId)
@@ -663,24 +663,31 @@ class TerminalBrowserSessionManager(
             .put("name", "browser-$requestId.png")
     }
 
-    private fun openAuthBrowser(request: Map<String, String>, requestId: String): JSONObject {
+    private fun openAuthBrowser(request: Map<String, String>, requestId: String, action: String): JSONObject {
         val url = normalizeUrl(request.requireValue("url"))
         val reason = request["reason"].orEmpty().ifBlank { "安全登录/验证" }
         val code = request["code"].orEmpty()
+        val openNow = request["open_now"] == "1" ||
+            request["auto_open"] == "1" ||
+            action in setOf("external", "auth", "custom_tab")
         authTask = BrowserAuthTask(
             requestId = requestId,
             url = url,
             reason = reason,
-            code = code
+            code = code,
+            userAction = if (openNow) "opened" else "created"
         )
         needsUser = true
         userMessage = reason
         activeUserRequestId = requestId
         publish("waiting_for_user", reason)
-        launchCustomTab(url)
+        if (openNow) {
+            launchCustomTab(url)
+        }
         return authTaskJson()
             .put("url", url)
-            .put("external", true)
+            .put("external", openNow)
+            .put("openNow", openNow)
     }
 
     private fun reopenAuthBrowser(request: Map<String, String>, requestId: String): JSONObject {

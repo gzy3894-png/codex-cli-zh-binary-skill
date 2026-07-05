@@ -320,7 +320,7 @@ codex_for_tui_offer_official_login() {
   cat >&2 <<'EOM'
 检测到当前使用官方 Codex 登录模式，但 CLI 尚未登录。
 
-推荐使用设备码登录：系统浏览器/Custom Tabs 完成授权，Codex CLI 负责写入本机登录状态。
+推荐使用设备码登录：先创建安全登录任务卡，用户从卡片打开系统浏览器/Custom Tabs 完成授权，Codex CLI 负责写入本机登录状态。
 
 请选择：
 1. 设备码登录并启动 Codex

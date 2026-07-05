@@ -78,6 +78,7 @@ codex-browser screenshot --push
 codex-browser auth https://chatgpt.com
 codex-browser external https://example.com/login
 codex-browser auth-open --reason "Codex 官方登录" --code "ABCD-EFGH" https://chatgpt.com/activate
+# 如确实需要立即跳系统浏览器：codex-browser auth-open --open-now --reason "登录" https://example.com/login
 codex-browser auth-wait '<request_id>'
 ```
 
@@ -85,11 +86,11 @@ codex-browser auth-wait '<request_id>'
 
 内嵌 WebView 支持多标签、历史记录、Cookie 状态/验证、WebStorage 持久化、WebView 自绘截图和本地 userscript 注入。`screenshot --push` 会把当前网页截图加入可清理文件托盘，可用 `codex-preview path <编号>` 解析真实图片路径。`cookies status|verify` 不输出 Cookie value，只输出 Cookie 名称和数量。
 
-`auth-open` / `auth` / `external` 使用 Chrome Custom Tabs 或系统浏览器，适合登录、授权、验证码和风控场景；该模式不向 App 暴露用户浏览器 Cookie。Auth 任务卡会把用户点击“我已完成 / 取消 / 折叠 / 重开”的动作写回 `results/<request_id>.status/json` 和统一事件流，字段包括 `auth_state`、`user_action`、`needs_user`、`visible`、`collapsed`。需要定时签到或自动化复用登录态的站点，应在内嵌 WebView 中完成一次登录；Android WebView 的 Cookie 不与 Chrome、Edge 或 Custom Tabs 共享。
+`auth-open` 默认只创建 App 内安全登录任务卡，用户点“打开/重开”或使用 `--open-now` 才会打开 Chrome Custom Tabs 或系统浏览器；旧 `auth` / `external` 仍保持立即打开兼容，适合登录、授权、验证码和风控场景；该模式不向 App 暴露用户浏览器 Cookie。Auth 任务卡会把用户点击“我已完成 / 取消 / 折叠 / 重开”的动作写回 `results/<request_id>.status/json` 和统一事件流，字段包括 `auth_state`、`user_action`、`needs_user`、`visible`、`collapsed`。需要定时签到或自动化复用登录态的站点，应在内嵌 WebView 中完成一次登录；Android WebView 的 Cookie 不与 Chrome、Edge 或 Custom Tabs 共享。
 
-官方 Codex 登录建议运行 `codex 官方登录`。启动器会调用 `codex login --device-auth`，解析登录链接和一次性验证码并通过 Custom Tabs 打开；用户完成后再用 `codex login status` 验证，不打印 token、Cookie 或 `auth.json` 内容。
+官方 Codex 登录建议运行 `codex 官方登录`。启动器会调用 `codex login --device-auth`，解析登录链接和一次性验证码并创建安全登录任务卡；用户可在卡片中点击“打开/重开”进入 Custom Tabs；用户完成后再用 `codex login status` 验证，不打印 token、Cookie 或 `auth.json` 内容。
 
-2.2.0 起浏览器桥支持 Auth Browser 任务、外部 scheme 打开确认、验证码/风控状态字段和更明确的折叠/完成/取消事件。2.1.3 起浏览器桥对单个坏请求做异常隔离，队列请求先完成 legacy request 再暴露给 App 消费；页面加载会等待 userscript 注入回调后再向终端返回 `open` 完成。userscript 注入使用延迟重试、回调解析和本地 `userscripts.log`，注入失败会反馈给 `codex-browser`，避免 `open -> get-text` 抢跑或静默失败。
+2.2.1 起 `auth-open` 默认不再自动跳出，2.2.0 起浏览器桥支持 Auth Browser 任务、外部 scheme 打开确认、验证码/风控状态字段和更明确的折叠/完成/取消事件。2.1.3 起浏览器桥对单个坏请求做异常隔离，队列请求先完成 legacy request 再暴露给 App 消费；页面加载会等待 userscript 注入回调后再向终端返回 `open` 完成。userscript 注入使用延迟重试、回调解析和本地 `userscripts.log`，注入失败会反馈给 `codex-browser`，避免 `open -> get-text` 抢跑或静默失败。
 
 ## 构建
 

@@ -277,7 +277,7 @@ private fun BrowserAuthTaskCard(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(
-            text = "安全登录 / 授权中",
+            text = if (authTask.userAction == "created") "安全登录 / 等待打开" else "安全登录 / 授权中",
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold
         )
@@ -339,7 +339,7 @@ private fun BrowserAuthTaskCard(
             }
         }
         Text(
-            text = "提示：此页面由系统浏览器/Custom Tabs 打开，Agent 不读取密码、Cookie 或页面内容，只接收你的完成/取消/折叠信号。",
+            text = "提示：点击“打开/重开”后会交给系统浏览器/Custom Tabs。Agent 不读取密码、Cookie 或页面内容，只接收你的完成/取消/折叠信号。",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

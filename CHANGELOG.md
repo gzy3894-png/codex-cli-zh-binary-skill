@@ -1,5 +1,22 @@
 # Changelog
 
+## Codex for TUI 2.2.1
+
+Codex for TUI 2.2.1 是 2.2 浏览器协作体验热修版，重点减少 Auth Browser 对用户前台页面的打断。
+
+### 修复
+
+- `codex-browser auth-open` 默认只创建 App 内安全登录任务卡，不再自动跳出到 Custom Tabs/系统浏览器，避免 Agent 测试或重试时反复弹外部页面。
+- 需要立刻打开系统浏览器时可显式使用 `codex-browser auth-open --open-now ...`；用户也可以在任务卡里点“打开/重开”，Agent 侧仍可用 `auth-reopen <request_id>`。
+- 旧 `codex-browser auth URL`、`external URL`、`custom-tab URL` 保持立即打开兼容，避免破坏已有脚本。
+- 官方登录向导继续创建 Auth 任务卡并展示一次性 code；用户确认后再从卡片进入 Custom Tabs，脚本仍用 `codex login status` 验证，不打印 token/Cookie/auth.json。
+
+### 验证
+
+- 本地仍只运行非 APK 门禁：`sh -n`、`sh tests/codex-for-tui-static-guards.sh`、`sh tests/codex-for-tui-installer-smoke.sh`、`git diff --check`。
+- APK、正式签名和 release 资产仍只通过 GitHub Actions 构建。
+- 真机验证重点：`auth-open` 不自动弹外部浏览器，`auth-reopen/打开按钮` 才打开；完成/取消/折叠/重开继续写回结构化字段。
+
 ## Codex for TUI 2.2.0
 
 Codex for TUI 2.2.0 聚焦浏览器协作：把登录/授权/验证码交给调用式 Custom Tabs Auth Browser，同时继续增强内置 WebView Agent Browser。
