@@ -222,6 +222,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        viewModel.unbindService(this)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
         mediaPreviewJob?.cancel()
         mediaPreviewJob = null
         browserBridgeJob?.cancel()
@@ -229,7 +234,6 @@ class MainActivity : ComponentActivity() {
         sessionFoldJob?.cancel()
         sessionFoldJob = null
         stopBridgeObservers()
-        viewModel.unbindService(this)
     }
 
     override fun onPause() {

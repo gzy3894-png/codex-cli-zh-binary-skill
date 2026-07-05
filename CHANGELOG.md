@@ -1,5 +1,21 @@
 # Changelog
 
+## Codex for TUI 2.2.3
+
+Codex for TUI 2.2.3 是 2.2.2 的真机门禁热修版，重点修复打开 Custom Tabs/外部浏览器后 bridge 停止消费的问题。
+
+### 修复
+
+- 文件托盘、协作浏览器和 session fold bridge 不再在 `MainActivity.onStop()` 时停止；Activity 被 Custom Tabs/系统浏览器盖到后台时仍可消费 Agent 写入的请求。
+- bridge 观察器和 fallback poll 改为 Activity 销毁时才停止，避免 Auth Browser 折叠/完成/取消、外部 scheme 协作、文件托盘和会话折叠状态卡在旧请求。
+- `onResume` 继续主动轮询文件托盘、浏览器和 session fold 请求，回到终端后能尽快补处理积压事件。
+
+### 验证
+
+- 本地仍只运行非 APK 门禁：`sh -n`、`sh tests/codex-for-tui-static-guards.sh`、`sh tests/codex-for-tui-installer-smoke.sh`、`git diff --check`。
+- APK、正式签名和 release 资产仍只通过 GitHub Actions 构建。
+- 真机验证重点：覆盖 2.2.2 高频输出门禁，并重跑 Custom Tabs/Auth Browser 返回后 bridge 继续消费、外部 scheme、文件托盘、session fold、Cookie/localStorage、截图推送和旧命令兼容。
+
 ## Codex for TUI 2.2.2
 
 Codex for TUI 2.2.2 是终端流畅度优化版，重点减少长输出、托盘状态刷新和 bridge 轮询叠加造成的卡顿。

@@ -69,8 +69,8 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 35'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.2.2"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 36'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.2.3"'
 }
 
 test_release_workflow_signature_gate() {
@@ -102,6 +102,17 @@ test_terminal_performance_guards() {
   assert_file_contains "$MAIN_ACTIVITY" 'FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO'
   assert_file_contains "$MAIN_ACTIVITY" 'private const val BRIDGE_FALLBACK_POLL_MS = 1500L'
   assert_file_contains "$MAIN_ACTIVITY" 'pollBrowserRequestLocked'
+  assert_file_contains "$MAIN_ACTIVITY" 'override fun onDestroy()'
+  assert_file_contains "$MAIN_ACTIVITY" 'pollSessionFoldRequestLocked'
+  if awk '
+    /override fun onStop\(\)/ { in_on_stop=1 }
+    in_on_stop && /override fun onDestroy\(\)/ { in_on_stop=0 }
+    in_on_stop && /override fun onPause\(\)/ { in_on_stop=0 }
+    in_on_stop && (/mediaPreviewJob\?\.cancel\(\)/ || /browserBridgeJob\?\.cancel\(\)/ || /sessionFoldJob\?\.cancel\(\)/ || /stopBridgeObservers\(\)/) { bad=1 }
+    END { exit bad ? 0 : 1 }
+  ' "$MAIN_ACTIVITY"; then
+    fail "MainActivity.onStop must not stop bridge jobs/observers; Custom Tabs background flows still need bridge consumption"
+  fi
   assert_file_contains "$MAIN_ACTIVITY" 'localDir().child("perf").apply { mkdirs() }.child("terminal.status")'
   assert_file_contains "$MAIN_ACTIVITY" 'render_requests='
   assert_file_contains "$MAIN_ACTIVITY" 'render_frames='
