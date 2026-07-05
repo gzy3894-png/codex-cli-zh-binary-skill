@@ -49,6 +49,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
@@ -1147,7 +1148,16 @@ class MainActivity : ComponentActivity() {
         if (browserBridgeJob?.isActive == true) return
         browserBridgeJob = lifecycleScope.launch {
             while (isActive) {
-                pollBrowserRequest()
+                runCatching {
+                    pollBrowserRequest()
+                }.onFailure { error ->
+                    writeBrowserBridgeError(
+                        browserDir = localDir().child("browser"),
+                        requestId = "poll-${System.currentTimeMillis()}",
+                        action = "poll",
+                        error = error
+                    )
+                }
                 delay(350)
             }
         }
@@ -1335,12 +1345,30 @@ class MainActivity : ComponentActivity() {
                 ?: emptyList()
         }
         for (file in queuedRequests) {
-            val content = withContext(Dispatchers.IO) { file.readText().trim() }
-            if (content.isNotBlank()) {
-                handleBrowserRequestContent(browserDir, content)
-            }
-            withContext(Dispatchers.IO) {
-                runCatching { file.delete() }
+            var content = ""
+            try {
+                content = withContext(Dispatchers.IO) {
+                    if (file.isFile) file.readText().trim() else ""
+                }
+                if (content.isNotBlank()) {
+                    handleBrowserRequestContent(browserDir, content)
+                }
+            } catch (error: Exception) {
+                val request = runCatching { parseMediaPreviewRequest(content) }.getOrDefault(emptyMap())
+                writeBrowserBridgeError(
+                    browserDir = browserDir,
+                    requestId = if (content.isNotBlank()) {
+                        panelRequestId(request, content)
+                    } else {
+                        file.name.removeSuffix(".req").ifBlank { "queue-${System.currentTimeMillis()}" }
+                    },
+                    action = request["action"].orEmpty().ifBlank { "queue" },
+                    error = error
+                )
+            } finally {
+                withContext(Dispatchers.IO) {
+                    runCatching { file.delete() }
+                }
             }
         }
 
@@ -1354,6 +1382,56 @@ class MainActivity : ComponentActivity() {
         if (isBrowserRequestProcessed(requestId)) return
         lastBrowserRequest = content
         handleBrowserRequestContent(browserDir, content)
+    }
+
+    private fun writeBrowserBridgeError(
+        browserDir: File,
+        requestId: String,
+        action: String,
+        error: Throwable
+    ) {
+        val message = error.message ?: error::class.java.simpleName
+        val result = JSONObject()
+            .put("ok", false)
+            .put("requestId", requestId)
+            .put("action", action)
+            .put("error", message)
+            .put("snapshot", browserSnapshotJson(terminalViewModel.browserSnapshot))
+        writeBrowserResult(browserDir, result)
+        rememberBrowserRequestId(requestId)
+        writeAgentPanelEvent(
+            source = "browser",
+            type = "agent_error",
+            state = "error",
+            reason = message,
+            requestId = requestId,
+            extra = browserSnapshotExtras(terminalViewModel.browserSnapshot)
+        )
+    }
+
+    private fun browserSnapshotJson(snapshot: TerminalBrowserSnapshot): JSONObject {
+        return JSONObject()
+            .put("available", snapshot.available)
+            .put("requestId", snapshot.requestId)
+            .put("activeTabId", snapshot.activeTabId)
+            .put("title", snapshot.title)
+            .put("currentUrl", snapshot.currentUrl)
+            .put("isLoading", snapshot.isLoading)
+            .put("status", snapshot.status)
+            .put("message", snapshot.message)
+            .put("needsUser", snapshot.needsUser)
+            .put("lastError", snapshot.lastError)
+            .put("tabs", JSONArray().apply {
+                snapshot.tabs.forEach { tab ->
+                    put(
+                        JSONObject()
+                            .put("id", tab.id)
+                            .put("title", tab.title)
+                            .put("url", tab.url)
+                            .put("isLoading", tab.isLoading)
+                    )
+                }
+            })
     }
 
     private suspend fun handleBrowserRequestContent(browserDir: File, content: String) {

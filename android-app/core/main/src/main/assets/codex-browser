@@ -52,12 +52,12 @@ write_request() {
       shift 2
     done
   } > "$req_tmp"
-  mv "$req_tmp" "$req_file"
 
   # Legacy fallback for older app builds. Newer builds de-duplicate by request_id.
   legacy_tmp="$request_file.tmp.$$"
-  cp "$req_file" "$legacy_tmp"
+  cp "$req_tmp" "$legacy_tmp"
   mv "$legacy_tmp" "$request_file"
+  mv "$req_tmp" "$req_file"
   printf '%s\n' "$request_id"
 }
 

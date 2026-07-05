@@ -1,5 +1,21 @@
 # Changelog
 
+## Codex for TUI 2.1.1
+
+Codex for TUI 2.1.1 是 2.1.0 协作浏览器硬化后的热修版，重点修复真机 smoke 中发现的队列竞态、桥接轮询退出和 userscript 注入抢跑问题。
+
+### 修复
+
+- `codex-browser` 写请求时先准备 legacy request，再暴露队列文件，避免 App 抢先消费队列后 shell 侧复制失败。
+- 浏览器桥轮询加入顶层异常保护和单队列文件异常隔离，单个坏请求不会让后台桥接协程停止消费后续请求。
+- 页面 `onPageFinished` 后等待 userscript 注入回调再完成 `open` 请求；`get-text #selector` 对短暂异步渲染/注入增加小轮询。
+
+### 验证
+
+- 本地仍只运行非 APK 门禁：`sh -n`、`sh tests/codex-for-tui-static-guards.sh`、`sh tests/codex-for-tui-installer-smoke.sh`、`git diff --check`。
+- APK、正式签名和 release 资产仍只通过 GitHub Actions 构建。
+- 覆盖安装后需再次运行 `tests/codex-for-tui-browser-smoke.sh` 真机验证多标签、队列、Cookie/WebStorage、截图推送、userscript 和接管状态。
+
 ## Codex for TUI 2.1.0
 
 Codex for TUI 2.1.0 硬化协作浏览器，并加入终端默认背景图，让 WebView 自动化更接近长期可用。

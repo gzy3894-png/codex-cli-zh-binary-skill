@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.1.0-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.1.0)
+[![Release](https://img.shields.io/badge/release-v2.1.1-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.1.1)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.142.4-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,11 +9,11 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.1.0 更新
+## 重要：2.1.1 更新
 
-2.1.0 把协作浏览器升级为长期可用的 Agent WebView 浏览器：`codex-browser` 使用请求队列避免并发覆盖，补齐多标签、历史记录、Cookie/WebStorage 持久化验证、WebView 自绘截图推送到文件托盘、userscript 本地注入和用户接管事件回传。终端还内置默认背景图，默认透明度为 1；用户自定义背景仍然优先。
+2.1.1 是 2.1.0 浏览器硬化后的热修版：保留协作浏览器、多标签、历史记录、Cookie/WebStorage 持久化验证、WebView 自绘截图推送文件托盘、userscript 本地注入、用户接管事件回传和默认背景图，同时修复请求队列竞态、浏览器桥异常退出后不再消费请求、userscript 注入完成前 `open` 抢先返回的问题。
 
-已经安装 2.0.x 的用户需要从 Releases 下载并覆盖安装 2.1.0 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk` 和 `codex-context` 桥接命令。
+已经安装 2.0.x/2.1.0 的用户需要从 Releases 下载并覆盖安装 2.1.1 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk` 和 `codex-context` 桥接命令。
 
 如果你在旧 resume 会话里遇到裸命令不可见，再手动执行一次：
 
@@ -34,6 +34,7 @@ codex 配置模式
 
 ## 2.0 新功能
 
+- 2.1.1 修复：`codex-browser` 请求队列发布竞态、桥接轮询异常退出、userscript 注入回调抢跑。
 - 2.1.0 新增：`codex-browser` 请求队列、多标签列表、历史、Cookie 状态/验证、截图推送文件托盘、userscript 本地注入。
 - 2.1.0 新增：内置终端预设背景图，默认透明度为 1；用户自定义背景优先。
 - 2.0.8 修复：RTK/context 改为启动前终端快捷授权，授权后写入系统级 `requirements.toml` 托管 hooks，不再要求普通用户进入 `/hooks` 手动信任。
@@ -69,7 +70,7 @@ codex 配置模式
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.1.0` |
+| Android App | `2.1.1` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug 包名 | `com.gzy3894.codexfortui.debug` |
 | Codex CLI | `0.142.4` 中文版 |

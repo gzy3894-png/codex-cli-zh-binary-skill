@@ -85,6 +85,8 @@ codex-browser external https://example.com/login
 
 `auth` / `external` 使用 Chrome Custom Tabs 或系统浏览器，适合登录、授权、验证码和风控场景；该模式不向 App 暴露用户浏览器 Cookie。需要定时签到或自动化复用登录态的站点，应在内嵌 WebView 中完成一次登录；Android WebView 的 Cookie 不与 Chrome、Edge 或 Custom Tabs 共享。
 
+2.1.1 起浏览器桥对单个坏请求做异常隔离，队列请求先完成 legacy request 再暴露给 App 消费，页面加载会等待 userscript 注入回调后再向终端返回 `open` 完成，避免 `open -> get-text` 抢跑。
+
 ## 构建
 
 推荐使用仓库的 GitHub Actions 构建 release APK。构建前会先运行安装器 smoke test。2.x 正式 APK 签名证书 SHA-256 固定为 `a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc`，release 构建会校验该指纹，避免误换签名导致用户无法覆盖升级。

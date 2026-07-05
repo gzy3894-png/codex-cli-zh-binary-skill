@@ -500,15 +500,27 @@ class TerminalBrowserSessionManager(
 
     private suspend fun getText(selector: String?): JSONObject {
         val selectorLiteral = selector?.let { JSONObject.quote(it) } ?: "null"
-        return evalObject(
-            """
+        val script = """
             const selector = $selectorLiteral;
             const target = selector ? document.querySelector(selector) : document.body;
             if (!target) throw new Error('Element not found: ' + selector);
             const text = (target.innerText || target.textContent || '').replace(/\s+/g, ' ').trim();
             return {selector:selector, text:text, textLength:text.length};
             """.trimIndent()
-        )
+        if (selector.isNullOrBlank()) return evalObject(script)
+
+        var lastError: Throwable? = null
+        val deadline = System.currentTimeMillis() + 2500
+        while (System.currentTimeMillis() <= deadline) {
+            try {
+                return evalObject(script)
+            } catch (error: Throwable) {
+                lastError = error
+                if (!error.message.orEmpty().contains("Element not found")) throw error
+                delay(150)
+            }
+        }
+        throw lastError ?: IllegalStateException("Element not found: $selector")
     }
 
     private suspend fun getReadable(): JSONObject = getText("main, article, [role='main'], body")
@@ -753,10 +765,11 @@ class TerminalBrowserSessionManager(
                 tab.isLoading = false
                 cookieFlush()
                 appendHistory(tab)
-                applyUserScripts(tab)
-                tab.loadWaiter?.complete(Unit)
-                tab.loadWaiter = null
-                publish("done", "网页已加载")
+                applyUserScripts(tab) {
+                    tab.loadWaiter?.complete(Unit)
+                    tab.loadWaiter = null
+                    publish("done", "网页已加载")
+                }
             }
 
             override fun onReceivedError(
@@ -962,29 +975,58 @@ class TerminalBrowserSessionManager(
         }
     }
 
-    private fun applyUserScripts(tab: BrowserTab) {
-        val browserDir = currentBrowserDir ?: return
+    private fun applyUserScripts(tab: BrowserTab, onComplete: (() -> Unit)? = null) {
+        val browserDir = currentBrowserDir
+        if (browserDir == null) {
+            onComplete?.invoke()
+            return
+        }
         val scripts = loadUserScripts(browserDir)
             .filter { it.enabled && userScriptMatches(it.match, tab.currentUrl) }
-        if (scripts.isEmpty()) return
+        if (scripts.isEmpty()) {
+            onComplete?.invoke()
+            return
+        }
+        var pending = scripts.size
+        fun finishOne() {
+            pending -= 1
+            if (pending <= 0) {
+                onComplete?.invoke()
+            }
+        }
         scripts.forEach { script ->
-            val source = runCatching { File(script.path).readText() }.getOrNull() ?: return@forEach
+            val source = runCatching { File(script.path).readText() }.getOrNull()
+            if (source == null) {
+                finishOne()
+                return@forEach
+            }
             tab.webView.post {
                 runCatching {
                     tab.webView.evaluateJavascript(
                         """
                         (function(){
+                          function codexRunUserScript(){
+                            try {
+                              $source
+                              return {ok:true,id:${JSONObject.quote(script.id)}};
+                            } catch (error) {
+                              return {ok:false,id:${JSONObject.quote(script.id)},error:String(error && error.message ? error.message : error)};
+                            }
+                          }
                           try {
-                            $source
-                            return {ok:true,id:${JSONObject.quote(script.id)}};
+                            if (!document.body) {
+                              document.addEventListener('DOMContentLoaded', function(){ codexRunUserScript(); }, {once:true});
+                              return JSON.stringify({ok:true,id:${JSONObject.quote(script.id)},deferred:true});
+                            }
+                            return JSON.stringify(codexRunUserScript());
                           } catch (error) {
-                            return {ok:false,id:${JSONObject.quote(script.id)},error:String(error && error.message ? error.message : error)};
+                            return JSON.stringify({ok:false,id:${JSONObject.quote(script.id)},error:String(error && error.message ? error.message : error)});
                           }
                         })();
                         """.trimIndent(),
-                        null
+                        { finishOne() }
                     )
-                }
+                }.onFailure { finishOne() }
             }
         }
     }
