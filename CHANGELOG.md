@@ -1,6 +1,8 @@
 # Changelog
 
-## Script update after Codex for TUI 2.1.1
+## Codex for TUI 2.1.2
+
+Codex for TUI 2.1.2 把配置管理器修复内置到 APK，用户覆盖安装后即可获得新版 `codex 配置模式`，不需要先安装 2.1.1 再手动补脚本更新。
 
 ### 修复
 
@@ -14,6 +16,7 @@
 
 - 新增配置菜单 smoke：自动保存新配置、切换前保存未保存修改、空列表/错误输入不退出、删除可取消。
 - 本地门禁仍只运行 shell/static 测试，不运行本地 Gradle/APK 构建。
+- APK、正式签名和 release 资产仍只通过 GitHub Actions 构建。
 
 ## Codex for TUI 2.1.1
 
