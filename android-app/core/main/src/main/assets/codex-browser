@@ -13,6 +13,9 @@ usage() {
   printf '%s\n' "      codex-browser userscript add NAME MATCH FILE"
   printf '%s\n' "      codex-browser userscript list|enable|disable|remove ID"
   printf '%s\n' "      codex-browser user-wait|wait-user [MESSAGE]"
+  printf '%s\n' "      codex-browser auth-open [--reason TEXT] [--code CODE] URL"
+  printf '%s\n' "      codex-browser auth-wait|auth-status|auth-done|auth-cancel|auth-reopen REQUEST_ID"
+  printf '%s\n' "      codex-browser external-confirm|external-cancel REQUEST_ID"
   printf '%s\n' "      codex-browser auth|external URL"
   printf '%s\n' "      codex-browser status|events|wait|result [REQUEST_ID]|close"
 }
@@ -82,7 +85,7 @@ wait_status() {
     if [ -s "$request_status_file" ]; then
       state="$(sed -n 's/^state=//p' "$request_status_file" | sed -n '1p')"
       case "$state" in
-        done|closed|ready|cancelled|waiting_for_user)
+        done|closed|ready|cancelled|waiting_for_user|collapsed|reopened|user_done)
           cat "$request_status_file"
           return 0
           ;;
@@ -94,7 +97,7 @@ wait_status() {
     elif [ -s "$status_file" ] && grep -F "request_id=$request_id" "$status_file" >/dev/null 2>&1; then
       state="$(sed -n 's/^state=//p' "$status_file" | sed -n '1p')"
       case "$state" in
-        done|closed|ready|cancelled)
+          done|closed|ready|cancelled|collapsed|reopened|user_done)
           cat "$status_file"
           return 0
           ;;
@@ -138,6 +141,31 @@ wait_events() {
     elapsed=$((elapsed + 1))
   done
   printf '等待浏览器事件超时\n' >&2
+  return 1
+}
+
+wait_auth_status() {
+  bridge_dir="$1/local/browser"
+  request_id="$2"
+  safe_request_id="$(safe_id "$request_id")"
+  request_status_file="$bridge_dir/results/$safe_request_id.status"
+  wait_seconds="${CODEX_BROWSER_AUTH_WAIT_SECONDS:-${CODEX_BROWSER_WAIT_SECONDS:-300}}"
+  elapsed=0
+  while [ "$elapsed" -lt "$wait_seconds" ]; do
+    if [ -s "$request_status_file" ]; then
+      state="$(sed -n 's/^state=//p' "$request_status_file" | sed -n '1p')"
+      case "$state" in
+        user_done|cancelled|collapsed|reopened|error)
+          cat "$request_status_file"
+          [ "$state" != "error" ]
+          return $?
+          ;;
+      esac
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  printf '等待 Auth 用户动作超时: request_id=%s\n' "$request_id" >&2
   return 1
 }
 
@@ -212,6 +240,81 @@ case "$cmd" in
     action="$cmd"
     [ "$cmd" = "custom-tab" ] && action="custom_tab"
     request_id="$(write_request "$prefix" action "$action" url "$1")"
+    ;;
+  auth-open|auth_open)
+    reason="安全登录/验证"
+    code=""
+    url=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --reason)
+          shift
+          [ "$#" -gt 0 ] || { usage >&2; exit 2; }
+          reason="$1"
+          ;;
+        --code)
+          shift
+          [ "$#" -gt 0 ] || { usage >&2; exit 2; }
+          code="$1"
+          ;;
+        --)
+          shift
+          [ "$#" -gt 0 ] || { usage >&2; exit 2; }
+          url="$1"
+          ;;
+        --*)
+          usage >&2
+          exit 2
+          ;;
+        *)
+          url="$1"
+          ;;
+      esac
+      shift
+    done
+    [ -n "$url" ] || { usage >&2; exit 2; }
+    request_id="$(write_request "$prefix" action auth_open present 1 reason "$reason" code "$code" url "$url")"
+    ;;
+  auth-wait|auth_wait)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    wait_auth_status "$prefix" "$1"
+    exit $?
+    ;;
+  auth-status|auth_status)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    safe_request_id="$(safe_id "$1")"
+    print_file_if_readable "$prefix/local/browser/results/$safe_request_id.status" || true
+    exit 0
+    ;;
+  auth-done|auth_done)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    target_request_id="$1"
+    write_request "$prefix" action auth_done auth_request_id "$target_request_id" >/dev/null
+    request_id="$target_request_id"
+    ;;
+  auth-cancel|auth_cancel)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    target_request_id="$1"
+    write_request "$prefix" action auth_cancel auth_request_id "$target_request_id" >/dev/null
+    request_id="$target_request_id"
+    ;;
+  auth-reopen|auth_reopen)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    target_request_id="$1"
+    write_request "$prefix" action auth_reopen auth_request_id "$target_request_id" >/dev/null
+    request_id="$target_request_id"
+    ;;
+  external-confirm|external_confirm)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    target_request_id="$1"
+    write_request "$prefix" action external_confirm external_request_id "$target_request_id" >/dev/null
+    request_id="$target_request_id"
+    ;;
+  external-cancel|external_cancel)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    target_request_id="$1"
+    write_request "$prefix" action external_cancel external_request_id "$target_request_id" >/dev/null
+    request_id="$target_request_id"
     ;;
   reload|snapshot|user-done|done|cancel|close)
     action="$cmd"

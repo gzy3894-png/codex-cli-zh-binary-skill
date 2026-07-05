@@ -35,6 +35,14 @@ codex-local repair-launcher
 
 更新后普通启动 `codex` 会在启动 Codex 前询问是否快捷授权 Codex for TUI 增强功能。选择 `1` 后脚本会写入系统级 `/etc/codex/requirements.toml`，把 RTK/context 注册为 Codex 托管 hooks，不需要再进入 `/hooks` 手动信任。
 
+如果当前处于官方 Codex 登录模式且 `codex login status` 未通过，普通交互启动会提示设备码登录。也可以手动运行：
+
+```sh
+codex 官方登录
+```
+
+该入口会调用 `codex login --device-auth`，解析登录链接和一次性验证码，并通过 Codex for TUI 的 Custom Tabs 安全登录任务卡打开；用户完成后再用 `codex login status` 验证。脚本不会打印 token、Cookie 或 `~/.codex/auth.json` 内容。
+
 验证方式：
 
 ```sh

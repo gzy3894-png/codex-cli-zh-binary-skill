@@ -31,6 +31,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -97,6 +99,9 @@ fun TerminalBrowserTray(
     onCollapse: () -> Unit,
     onClose: () -> Unit,
     onUserDone: () -> Unit,
+    onUserCancel: () -> Unit,
+    onAuthReopen: () -> Unit,
+    onExternalConfirm: () -> Unit,
     onSelectTab: (Int) -> Unit,
     onCloseTab: (Int) -> Unit,
     modifier: Modifier = Modifier
@@ -105,6 +110,8 @@ fun TerminalBrowserTray(
 
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val trayHeight = (screenHeight * 0.58f).coerceIn(280.dp, 560.dp)
+    val authTask = snapshot.authTask
+    val externalPrompt = snapshot.externalPrompt
 
     Surface(
         modifier = modifier
@@ -122,17 +129,39 @@ fun TerminalBrowserTray(
                 onCollapse = onCollapse,
                 onClose = onClose,
                 onUserDone = onUserDone,
+                onUserCancel = onUserCancel,
+                onAuthReopen = onAuthReopen,
+                onExternalConfirm = onExternalConfirm,
                 onSelectTab = onSelectTab,
                 onCloseTab = onCloseTab
             )
             HorizontalDivider(thickness = 0.5.dp)
-            BrowserWebViewHost(
-                activeTabId = snapshot.activeTabId,
-                browserSessionManager = browserSessionManager,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-            )
+            when {
+                authTask?.active == true -> BrowserAuthTaskCard(
+                    authTask = authTask,
+                    onReopen = onAuthReopen,
+                    onDone = onUserDone,
+                    onCancel = onUserCancel,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                )
+                externalPrompt != null -> BrowserExternalPromptCard(
+                    prompt = externalPrompt,
+                    onConfirm = onExternalConfirm,
+                    onCancel = onUserCancel,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                )
+                else -> BrowserWebViewHost(
+                    activeTabId = snapshot.activeTabId,
+                    browserSessionManager = browserSessionManager,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                )
+            }
         }
     }
 }
@@ -143,6 +172,9 @@ private fun BrowserTrayHeader(
     onCollapse: () -> Unit,
     onClose: () -> Unit,
     onUserDone: () -> Unit,
+    onUserCancel: () -> Unit,
+    onAuthReopen: () -> Unit,
+    onExternalConfirm: () -> Unit,
     onSelectTab: (Int) -> Unit,
     onCloseTab: (Int) -> Unit
 ) {
@@ -185,10 +217,25 @@ private fun BrowserTrayHeader(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-                if (snapshot.needsUser) {
+            if (snapshot.needsUser) {
                     Spacer(modifier = Modifier.size(8.dp))
-                    TextButton(onClick = onUserDone) {
-                        Text("继续")
+                    if (snapshot.authTask?.active == true) {
+                        TextButton(onClick = onAuthReopen) {
+                            Text("重开")
+                        }
+                    }
+                    if (snapshot.externalPrompt != null) {
+                        TextButton(onClick = onExternalConfirm) {
+                            Text("打开")
+                        }
+                    }
+                    if (snapshot.externalPrompt == null) {
+                        TextButton(onClick = onUserDone) {
+                            Text("完成")
+                        }
+                    }
+                    TextButton(onClick = onUserCancel) {
+                        Text("取消")
                     }
                 }
             }
@@ -209,6 +256,132 @@ private fun BrowserTrayHeader(
                         modifier = Modifier.weight(1f)
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BrowserAuthTaskCard(
+    authTask: TerminalBrowserAuthSnapshot,
+    onReopen: () -> Unit,
+    onDone: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val clipboard = LocalClipboardManager.current
+    Column(
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.94f))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = "安全登录 / 授权中",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = authTask.reason.ifBlank { "请在系统浏览器中完成登录或验证" },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = authTask.url,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis
+        )
+        if (authTask.code.isNotBlank()) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.20f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "一次性验证码",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = authTask.code,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    TextButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(authTask.code))
+                        }
+                    ) {
+                        Text("复制")
+                    }
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onReopen) {
+                Text("打开/重开")
+            }
+            TextButton(onClick = onDone) {
+                Text("我已完成")
+            }
+            TextButton(onClick = onCancel) {
+                Text("取消")
+            }
+        }
+        Text(
+            text = "提示：此页面由系统浏览器/Custom Tabs 打开，Agent 不读取密码、Cookie 或页面内容，只接收你的完成/取消/折叠信号。",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun BrowserExternalPromptCard(
+    prompt: TerminalBrowserExternalPromptSnapshot,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.94f))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = "是否打开外部链接？",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = "协议：${prompt.scheme}",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color(0xFFE09A21)
+        )
+        Text(
+            text = prompt.target,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 5,
+            overflow = TextOverflow.Ellipsis
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onConfirm) {
+                Text("打开")
+            }
+            TextButton(onClick = onCancel) {
+                Text("取消")
             }
         }
     }

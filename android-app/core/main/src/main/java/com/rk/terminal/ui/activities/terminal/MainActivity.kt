@@ -396,17 +396,33 @@ class MainActivity : ComponentActivity() {
             "url" to snapshot.currentUrl,
             "title" to snapshot.title,
             "needs_user" to if (snapshot.needsUser) "1" else "0",
-            "tabs_count" to snapshot.tabs.size.toString()
+            "tabs_count" to snapshot.tabs.size.toString(),
+            "auth_request_id" to snapshot.authTask?.requestId.orEmpty(),
+            "auth_state" to snapshot.authTask?.state.orEmpty(),
+            "user_action" to snapshot.authTask?.userAction.orEmpty(),
+            "external_request_id" to snapshot.externalPrompt?.requestId.orEmpty(),
+            "risk_challenge_detected" to if (snapshot.riskChallengeDetected) "1" else "0",
+            "risk_challenge_kind" to snapshot.riskChallengeKind,
+            "recommended_next_action" to snapshot.recommendedNextAction
         )
     }
 
     private fun browserJsonExtras(snapshot: JSONObject?): Map<String, String> {
+        val authTask = snapshot?.optJSONObject("authTask")
+        val externalPrompt = snapshot?.optJSONObject("externalPrompt")
         return mapOf(
             "tab_id" to snapshot?.opt("activeTabId")?.toString().orEmpty(),
             "url" to snapshot?.optString("currentUrl").orEmpty(),
             "title" to snapshot?.optString("title").orEmpty(),
             "needs_user" to if (snapshot?.optBoolean("needsUser") == true) "1" else "0",
-            "tabs_count" to (snapshot?.optJSONArray("tabs")?.length() ?: 0).toString()
+            "tabs_count" to (snapshot?.optJSONArray("tabs")?.length() ?: 0).toString(),
+            "auth_request_id" to authTask?.optString("requestId").orEmpty(),
+            "auth_state" to authTask?.optString("state").orEmpty(),
+            "user_action" to authTask?.optString("userAction").orEmpty(),
+            "external_request_id" to externalPrompt?.optString("requestId").orEmpty(),
+            "risk_challenge_detected" to if (snapshot?.optBoolean("riskChallengeDetected") == true) "1" else "0",
+            "risk_challenge_kind" to snapshot?.optString("riskChallengeKind").orEmpty(),
+            "recommended_next_action" to snapshot?.optString("recommendedNextAction").orEmpty()
         )
     }
 
@@ -865,34 +881,52 @@ class MainActivity : ComponentActivity() {
     }
 
     fun collapseBrowserPanel() {
-        if (terminalViewModel.browserSnapshot.needsUser) {
-            markBrowserUserDone(reason = "user_collapsed")
+        terminalViewModel.browserPanelExpanded = false
+        if (terminalViewModel.browserSnapshot.authTask?.active == true) {
+            markBrowserAuthCollapsed()
             return
         }
-        terminalViewModel.browserPanelExpanded = false
+        val collapseState = if (terminalViewModel.browserSnapshot.needsUser) "collapsed" else "done"
+        if (terminalViewModel.browserSnapshot.needsUser) {
+            lifecycleScope.launch {
+                val browserDir = localDir().child("browser")
+                val requestId = terminalViewModel.browserSnapshot.requestId
+                    .ifBlank { "manual-user-collapse-${System.currentTimeMillis()}" }
+                val result = browserSessionManager.handleRequest(
+                    mapOf("action" to "user_collapse", "request_id" to requestId),
+                    browserDir
+                )
+                writeBrowserResult(browserDir, result)
+            }
+        }
         writeAgentPanelEvent(
             source = "browser",
             type = "user_collapsed",
-            state = "done",
+            state = collapseState,
             reason = "collapse",
             requestId = terminalViewModel.browserSnapshot.requestId
         )
         writeAgentPanelStatus(
             source = "browser",
-            state = "done",
+            state = collapseState,
             reason = "collapse",
             requestId = terminalViewModel.browserSnapshot.requestId
         )
     }
 
     fun closeBrowserSession() {
+        val snapshot = terminalViewModel.browserSnapshot
+        if (snapshot.authTask?.active == true || snapshot.externalPrompt != null) {
+            cancelBrowserUserAction()
+            return
+        }
         terminalViewModel.browserPanelExpanded = false
         writeAgentPanelEvent(
             source = "browser",
             type = "user_cancelled",
             state = "cancelled",
             reason = "close",
-            requestId = terminalViewModel.browserSnapshot.requestId
+            requestId = snapshot.requestId
         )
         lifecycleScope.launch {
             val browserDir = localDir().child("browser")
@@ -908,17 +942,124 @@ class MainActivity : ComponentActivity() {
         terminalViewModel.browserPanelExpanded = false
         val requestId = terminalViewModel.browserSnapshot.requestId
             .ifBlank { "manual-user-done-${System.currentTimeMillis()}" }
+        val isAuth = terminalViewModel.browserSnapshot.authTask?.active == true
         writeAgentPanelEvent(
             source = "browser",
-            type = reason,
+            type = if (isAuth) "auth_done" else reason,
             state = "done",
-            reason = reason,
+            reason = if (isAuth) "auth_done" else reason,
             requestId = requestId
         )
         lifecycleScope.launch {
             val browserDir = localDir().child("browser")
             val result = browserSessionManager.handleRequest(
-                mapOf("action" to "user_done", "request_id" to requestId),
+                mapOf("action" to if (isAuth) "auth_done" else "user_done", "request_id" to requestId),
+                browserDir
+            )
+            writeBrowserResult(browserDir, result)
+        }
+    }
+
+    fun markBrowserAuthCollapsed() {
+        val requestId = terminalViewModel.browserSnapshot.authTask?.requestId
+            ?: terminalViewModel.browserSnapshot.requestId.ifBlank { "manual-auth-collapse-${System.currentTimeMillis()}" }
+        writeAgentPanelEvent(
+            source = "browser",
+            type = "auth_collapsed",
+            state = "collapsed",
+            reason = "auth_collapse",
+            requestId = requestId,
+            extra = browserSnapshotExtras(terminalViewModel.browserSnapshot) + ("user_action" to "collapse")
+        )
+        lifecycleScope.launch {
+            val browserDir = localDir().child("browser")
+            val result = browserSessionManager.handleRequest(
+                mapOf("action" to "auth_collapse", "request_id" to requestId, "auth_request_id" to requestId),
+                browserDir
+            )
+            writeBrowserResult(browserDir, result)
+        }
+    }
+
+    fun reopenBrowserAuth() {
+        val requestId = terminalViewModel.browserSnapshot.authTask?.requestId
+            ?: terminalViewModel.browserSnapshot.requestId.ifBlank { "manual-auth-reopen-${System.currentTimeMillis()}" }
+        terminalViewModel.mediaPreviewExpanded = false
+        terminalViewModel.browserPanelExpanded = true
+        writeAgentPanelEvent(
+            source = "browser",
+            type = "auth_reopened",
+            state = "reopened",
+            reason = "auth_reopen",
+            requestId = requestId,
+            extra = browserSnapshotExtras(terminalViewModel.browserSnapshot) + ("user_action" to "reopen")
+        )
+        lifecycleScope.launch {
+            val browserDir = localDir().child("browser")
+            val result = browserSessionManager.handleRequest(
+                mapOf("action" to "auth_reopen", "request_id" to requestId, "auth_request_id" to requestId),
+                browserDir
+            )
+            writeBrowserResult(browserDir, result)
+        }
+    }
+
+    fun cancelBrowserUserAction() {
+        terminalViewModel.browserPanelExpanded = false
+        val snapshot = terminalViewModel.browserSnapshot
+        val authRequestId = snapshot.authTask?.requestId
+        val externalRequestId = snapshot.externalPrompt?.requestId
+        val requestId = authRequestId ?: externalRequestId ?: snapshot.requestId.ifBlank {
+            "manual-user-cancel-${System.currentTimeMillis()}"
+        }
+        val action = when {
+            authRequestId != null -> "auth_cancel"
+            externalRequestId != null -> "external_cancel"
+            else -> "user_cancelled"
+        }
+        writeAgentPanelEvent(
+            source = "browser",
+            type = when (action) {
+                "auth_cancel" -> "auth_cancelled"
+                "external_cancel" -> "external_open_cancelled"
+                else -> "user_cancelled"
+            },
+            state = "cancelled",
+            reason = action,
+            requestId = requestId,
+            extra = browserSnapshotExtras(snapshot) + ("user_action" to "cancel")
+        )
+        lifecycleScope.launch {
+            val browserDir = localDir().child("browser")
+            val result = browserSessionManager.handleRequest(
+                mapOf(
+                    "action" to action,
+                    "request_id" to requestId,
+                    "auth_request_id" to authRequestId.orEmpty(),
+                    "external_request_id" to externalRequestId.orEmpty()
+                ),
+                browserDir
+            )
+            writeBrowserResult(browserDir, result)
+        }
+    }
+
+    fun confirmBrowserExternalOpen() {
+        val snapshot = terminalViewModel.browserSnapshot
+        val requestId = snapshot.externalPrompt?.requestId
+            ?: snapshot.requestId.ifBlank { "manual-external-confirm-${System.currentTimeMillis()}" }
+        writeAgentPanelEvent(
+            source = "browser",
+            type = "external_open_confirmed",
+            state = "done",
+            reason = "external_confirm",
+            requestId = requestId,
+            extra = browserSnapshotExtras(snapshot) + ("user_action" to "confirm")
+        )
+        lifecycleScope.launch {
+            val browserDir = localDir().child("browser")
+            val result = browserSessionManager.handleRequest(
+                mapOf("action" to "external_confirm", "request_id" to requestId, "external_request_id" to requestId),
                 browserDir
             )
             writeBrowserResult(browserDir, result)
@@ -1421,6 +1562,26 @@ class MainActivity : ComponentActivity() {
             .put("message", snapshot.message)
             .put("needsUser", snapshot.needsUser)
             .put("lastError", snapshot.lastError)
+            .put("riskChallengeDetected", snapshot.riskChallengeDetected)
+            .put("riskChallengeKind", snapshot.riskChallengeKind)
+            .put("recommendedNextAction", snapshot.recommendedNextAction)
+            .put("authTask", snapshot.authTask?.let {
+                JSONObject()
+                    .put("requestId", it.requestId)
+                    .put("url", it.url)
+                    .put("reason", it.reason)
+                    .put("code", it.code)
+                    .put("state", it.state)
+                    .put("userAction", it.userAction)
+                    .put("active", it.active)
+            })
+            .put("externalPrompt", snapshot.externalPrompt?.let {
+                JSONObject()
+                    .put("requestId", it.requestId)
+                    .put("target", it.target)
+                    .put("scheme", it.scheme)
+                    .put("fallbackUrl", it.fallbackUrl)
+            })
             .put("tabs", JSONArray().apply {
                 snapshot.tabs.forEach { tab ->
                     put(
@@ -1447,11 +1608,11 @@ class MainActivity : ComponentActivity() {
         } else {
             request
         }
-        if (effectiveAction in setOf("present", "user_wait") || request["present"] == "1") {
+        if (effectiveAction in setOf("present", "user_wait", "auth_open", "auth_reopen") || request["present"] == "1") {
             terminalViewModel.mediaPreviewExpanded = false
             terminalViewModel.browserPanelExpanded = true
         }
-        if (effectiveAction in setOf("collapse", "user_done", "user_cancelled", "close")) {
+        if (effectiveAction in setOf("collapse", "user_done", "user_cancelled", "auth_collapse", "auth_done", "auth_cancel", "auth_cancelled", "external_cancel", "close")) {
             terminalViewModel.browserPanelExpanded = false
         }
         val result = runCatching {
@@ -1466,14 +1627,16 @@ class MainActivity : ComponentActivity() {
         }
         val action = effectiveAction
         val snapshot = result.optJSONObject("snapshot")
-        val suppressPresent = action in setOf("collapse", "user_done", "user_cancelled", "close")
+        val suppressPresent = action in setOf("collapse", "user_done", "user_cancelled", "auth_collapse", "auth_done", "auth_cancel", "auth_cancelled", "external_cancel", "close")
         val shouldPresent = !suppressPresent && (
             request["present"] == "1" ||
                 action == "present" ||
                 action == "user_wait" ||
+                action == "auth_open" ||
+                action == "auth_reopen" ||
                 snapshot?.optBoolean("needsUser") == true
             )
-        val shouldCollapse = action == "collapse" || action == "user_done" || action == "user_cancelled"
+        val shouldCollapse = action in setOf("collapse", "user_done", "user_cancelled", "auth_collapse", "auth_done", "auth_cancel", "auth_cancelled", "external_cancel")
         if (result.optBoolean("ok") && shouldCollapse) {
             terminalViewModel.browserPanelExpanded = false
         }
@@ -2100,6 +2263,13 @@ class MainActivity : ComponentActivity() {
             "user_wait" -> "agent_user_wait"
             "user_done" -> "agent_done"
             "user_cancelled" -> "agent_cancelled"
+            "auth_open" -> "auth_opened"
+            "auth_reopen" -> "auth_reopened"
+            "auth_done" -> "auth_done"
+            "auth_collapse" -> "auth_collapsed"
+            "auth_cancel", "auth_cancelled" -> "auth_cancelled"
+            "external_confirm" -> "external_open_confirmed"
+            "external_cancel" -> "external_open_cancelled"
             "close" -> "agent_closed"
             else -> "agent_${action.ifBlank { "request" }}"
         }
@@ -2154,6 +2324,11 @@ class MainActivity : ComponentActivity() {
             val activeItem = snapshot?.opt("activeTabId")?.toString().orEmpty()
             val tabsCount = (snapshot?.optJSONArray("tabs")?.length() ?: 0).toString()
             val requestId = result.optString("requestId")
+            val authTask = snapshot?.optJSONObject("authTask")
+            val externalPrompt = snapshot?.optJSONObject("externalPrompt")
+            val userAction = result.optJSONObject("data")?.optString("userAction")
+                ?.takeIf { it.isNotBlank() }
+                ?: authTask?.optString("userAction").orEmpty()
             result
                 .put("visible", visible)
                 .put("collapsed", !visible)
@@ -2162,6 +2337,7 @@ class MainActivity : ComponentActivity() {
                 .put("reason", result.optString("action"))
                 .put("needsUser", snapshot?.optBoolean("needsUser") == true)
                 .put("tabsCount", tabsCount)
+                .put("userAction", userAction)
             browserDir.child("result.json").writeText(result.toString(2))
             val requestResultsDir = browserDir.child("results").apply { mkdirs() }
             val text = buildString {
@@ -2178,10 +2354,20 @@ class MainActivity : ComponentActivity() {
                 append("tabs_count=").append(tabsCount).append('\n')
                 append("url=").append(snapshot?.optString("currentUrl").orEmpty()).append('\n')
                 append("title=").append(snapshot?.optString("title").orEmpty()).append('\n')
+                append("user_action=").append(refValue(userAction)).append('\n')
+                append("auth_request_id=").append(refValue(authTask?.optString("requestId").orEmpty())).append('\n')
+                append("auth_state=").append(refValue(authTask?.optString("state").orEmpty())).append('\n')
+                append("external_request_id=").append(refValue(externalPrompt?.optString("requestId").orEmpty())).append('\n')
+                append("risk_challenge_detected=").append(if (snapshot?.optBoolean("riskChallengeDetected") == true) "1" else "0").append('\n')
+                append("risk_challenge_kind=").append(refValue(snapshot?.optString("riskChallengeKind").orEmpty())).append('\n')
+                append("recommended_next_action=").append(refValue(snapshot?.optString("recommendedNextAction").orEmpty())).append('\n')
                 result.optString("error").takeIf { it.isNotBlank() && it != "null" }?.let {
                     append("error=").append(it).append('\n')
                 }
                 result.optJSONObject("data")?.let { data ->
+                    data.optString("authCode").takeIf { it.isNotBlank() }?.let {
+                        append("auth_code=").append(refValue(it)).append('\n')
+                    }
                     data.optString("path").takeIf { it.isNotBlank() }?.let {
                         append("path=").append(refValue(it)).append('\n')
                     }

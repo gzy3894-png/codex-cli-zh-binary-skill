@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.1.3-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.1.3)
+[![Release](https://img.shields.io/badge/release-v2.2.0-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.2.0)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.142.4-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,11 +9,13 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.1.3 更新
+## 重要：2.2.0 更新
 
-2.1.3 是 2.1.2 的真机热修版：保留配置管理器升级，并修复协作浏览器 userscript 在后台 WebView 页面加载后可能未注入、但 `open` 仍误报成功的问题。新版会延迟重试注入、解析注入回调、写入 `userscripts.log`，如果注入失败会把错误反馈给 `codex-browser`，不再静默失败。
+2.2.0 是浏览器协作升级版：新增调用式 Custom Tabs 安全登录任务卡，`auth-open/auth-wait/auth-status/auth-done/auth-cancel/auth-reopen` 会把用户完成、取消、折叠、重开等动作结构化回传给 Agent；官方 Codex 登录可走 `codex 官方登录` / 启动前设备码向导，默认使用 `codex login --device-auth`，由系统浏览器/Custom Tabs 完成授权后再用 `codex login status` 验证。
 
-已经安装 2.0.x/2.1.x 的用户需要从 Releases 下载并覆盖安装 2.1.3 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context` 等 APK 内置桥接命令。
+内置 WebView 继续作为 Agent Browser，保留后台打开、DOM 读取、点击、输入、JS、截图、多标签、Cookie/WebStorage 持久化和 userscript；遇到验证码/风控/外部 scheme 时会进入明确的用户协作状态，而不是让 Agent 猜。
+
+已经安装 2.0.x/2.1.x 的用户需要从 Releases 下载并覆盖安装 2.2.0 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context` 等 APK 内置桥接命令。
 
 注意：普通启动按设计不会自动联网更新 `~/.local/share/codex-zh/scripts` 下的安装/配置脚本。已安装用户覆盖 APK 后，为确保 `codex 配置模式` 也切到最新配置管理器，请手动执行一次：
 
@@ -34,6 +36,9 @@ codex 配置模式
 
 ## 2.0 新功能
 
+- 2.2.0 新增：调用式 Custom Tabs Auth Browser，`auth-open/auth-wait/auth-status/auth-done/auth-cancel/auth-reopen` 支持安全登录/验证任务卡和用户动作回传。
+- 2.2.0 新增：官方 Codex 设备码登录向导，`codex 官方登录` 会调用 `codex login --device-auth`，解析登录链接/验证码并交给 Custom Tabs。
+- 2.2.0 增强：WebView Agent Browser 增加验证码/风控检测、外部 scheme 打开确认、Auth/外部打开状态字段和更明确的折叠/完成/取消事件。
 - 2.1.3 修复：协作浏览器 userscript 注入改为延迟重试、回调解析和日志记录；注入失败会反馈给 `codex-browser`，避免静默失败。
 - 2.1.2 新增/修复：`codex 配置模式` 改为配置管理器，支持配置增删改查；新建/编辑后主动询问保存，切换/退出前保护未保存配置。
 - 2.1.1 修复：`codex-browser` 请求队列发布竞态、桥接轮询异常退出、userscript 注入回调抢跑。
@@ -72,7 +77,7 @@ codex 配置模式
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.1.3` |
+| Android App | `2.2.0` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug 包名 | `com.gzy3894.codexfortui.debug` |
 | Codex CLI | `0.142.4` 中文版 |
@@ -215,11 +220,21 @@ codex-browser present 搜索结果已就绪
 codex-browser user-wait 请完成登录或验证
 codex-browser status
 codex-browser events
+codex-browser auth-open --reason 'Codex 官方登录' --code 'ABCD-EFGH' 'https://chatgpt.com/activate'
+codex-browser auth-wait '<request_id>'
 ```
 
 Agent 可以打开网页、读 DOM、点击、输入、执行 JS、截图、管理多标签、读取历史、验证 Cookie 是否存在、把网页截图推送到文件托盘。`codex-browser` 请求写入队列，多个命令不会互相覆盖；每个请求会写入独立 `results/<request_id>.status/json`。
 
-Cookie 边界需要注意：内嵌 WebView 的 Cookie/WebStorage 会在 App 数据目录中持久化，适合定时签到这类长期任务；但它不共享 Chrome、Edge 或 Custom Tabs 的 Cookie。遇到登录、授权、验证码或风控时，可以切到 Custom Tabs/系统浏览器让用户处理，但这条链路不能承诺把外部浏览器登录态带回 WebView。
+Cookie 边界需要注意：内嵌 WebView 的 Cookie/WebStorage 会在 App 数据目录中持久化，适合定时签到这类长期任务；但它不共享 Chrome、Edge 或 Custom Tabs 的 Cookie。遇到登录、授权、验证码或风控时，可以用 `auth-open` 切到 Custom Tabs/系统浏览器让用户处理；用户点击“我已完成 / 取消 / 折叠 / 重开”会写入 `user_action`、`auth_state`、`needs_user`、`visible/collapsed` 等字段，Agent 不需要猜。
+
+官方 Codex 登录建议运行：
+
+```sh
+codex 官方登录
+```
+
+该命令会调用 `codex login --device-auth`，把登录链接和一次性验证码交给 Custom Tabs 任务卡；完成后用 `codex login status` 验证，不会打印 token、Cookie 或 `auth.json` 内容。
 
 会话时间线用于承载 Agent 的思考、工具、长文本、文件和浏览器协作摘要。整体折叠只隐藏托盘列表，不会清空记录；清空才会删除时间线记录：
 

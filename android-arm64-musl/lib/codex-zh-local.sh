@@ -265,11 +265,101 @@ EOM
   done
 }
 
+codex_for_tui_extract_first_auth_url() {
+  sed -n 's#.*\(https://[^[:space:])"]*\).*#\1#p' "$1" 2>/dev/null | sed -n '1p'
+}
+
+codex_for_tui_extract_first_device_code() {
+  grep -Eo '[A-Z0-9]{4}(-[A-Z0-9]{4})+' "$1" 2>/dev/null | sed -n '1p'
+}
+
+codex_for_tui_device_auth_login() {
+  tmp="${TMPDIR:-/tmp}/codex-device-auth.$$"
+  : > "$tmp" || {
+    printf '%s\n' "错误: 无法创建登录临时文件。" >&2
+    return 1
+  }
+  printf '%s\n' "正在启动 Codex 官方设备码登录..." >&2
+  "$real_bin" login --device-auth > "$tmp" 2>&1 &
+  login_pid="$!"
+  tail -f "$tmp" >&2 &
+  tail_pid="$!"
+  opened=0
+  while kill -0 "$login_pid" 2>/dev/null; do
+    if [ "$opened" = "0" ]; then
+      url="$(codex_for_tui_extract_first_auth_url "$tmp")"
+      if [ -n "$url" ] && command -v codex-browser >/dev/null 2>&1; then
+        code="$(codex_for_tui_extract_first_device_code "$tmp")"
+        codex-browser --no-wait auth-open --reason "Codex 官方登录" --code "$code" "$url" >/dev/null 2>&1 || true
+        opened=1
+      fi
+    fi
+    sleep 1
+  done
+  kill "$tail_pid" >/dev/null 2>&1 || true
+  rc=0
+  wait "$login_pid" || rc="$?"
+  rm -f "$tmp" 2>/dev/null || true
+  if [ "$rc" -eq 0 ] && "$real_bin" login status >/dev/null 2>&1; then
+    printf '%s\n' "Codex 官方登录已通过状态检查。" >&2
+    return 0
+  fi
+  printf '%s\n' "Codex 官方登录未通过状态检查，可稍后运行：codex 官方登录" >&2
+  return "$rc"
+}
+
+codex_for_tui_offer_official_login() {
+  [ "${CODEX_FOR_TUI_OFFICIAL_LOGIN_PROMPT:-1}" = "1" ] || return 0
+  codex_for_tui_is_interactive_start "$@" || return 0
+  [ -s "$CODEX_HOME/install-state/official-login-mode" ] || return 0
+  "$real_bin" login status >/dev/null 2>&1 && return 0
+  if [ "${CODEX_ZH_FORCE_STDIN:-0}" != "1" ] && { [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; }; then
+    return 0
+  fi
+
+  cat >&2 <<'EOM'
+检测到当前使用官方 Codex 登录模式，但 CLI 尚未登录。
+
+推荐使用设备码登录：系统浏览器/Custom Tabs 完成授权，Codex CLI 负责写入本机登录状态。
+
+请选择：
+1. 设备码登录并启动 Codex
+2. 本次跳过，直接启动
+3. 退出到 shell
+EOM
+  while :; do
+    choice="$(codex_for_tui_tty_read "请输入选项编号" "1")"
+    case "$choice" in
+      1|"")
+        codex_for_tui_device_auth_login || return 0
+        return 0
+        ;;
+      2)
+        printf '%s\n' "本次跳过官方登录。" >&2
+        return 0
+        ;;
+      3)
+        printf '%s\n' "已退出。以后运行 codex 官方登录 可重新登录。" >&2
+        exit 0
+        ;;
+      *)
+        printf '%s\n' "请输入 1、2 或 3。" >&2
+        ;;
+    esac
+  done
+}
+
 case "${1:-}" in
+  官方登录|official-login|login-official)
+    shift
+    codex_for_tui_device_auth_login
+    exit $?
+    ;;
   配置模式|configure|config)
     shift
     codex_for_tui_force_configure
     codex_for_tui_offer_hook_auth "$@"
+    codex_for_tui_offer_official_login "$@"
     exec "$real_bin" "$@"
     ;;
   更新|update)
@@ -280,6 +370,7 @@ esac
 
 codex_for_tui_configure_if_missing
 codex_for_tui_offer_hook_auth "$@"
+codex_for_tui_offer_official_login "$@"
 exec "$real_bin" "$@"
 EOF
   } > "$launcher"

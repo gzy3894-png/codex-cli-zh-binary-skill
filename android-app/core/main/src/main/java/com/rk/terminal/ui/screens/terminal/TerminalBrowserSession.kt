@@ -40,6 +40,7 @@ import org.json.JSONObject
 import org.json.JSONTokener
 import java.io.File
 import java.io.FileOutputStream
+import java.util.UUID
 import kotlin.coroutines.resume
 
 data class TerminalBrowserTabSnapshot(
@@ -47,6 +48,23 @@ data class TerminalBrowserTabSnapshot(
     val title: String,
     val url: String,
     val isLoading: Boolean
+)
+
+data class TerminalBrowserAuthSnapshot(
+    val requestId: String,
+    val url: String,
+    val reason: String,
+    val code: String,
+    val state: String,
+    val userAction: String,
+    val active: Boolean
+)
+
+data class TerminalBrowserExternalPromptSnapshot(
+    val requestId: String,
+    val target: String,
+    val scheme: String,
+    val fallbackUrl: String
 )
 
 data class TerminalBrowserSnapshot(
@@ -60,7 +78,12 @@ data class TerminalBrowserSnapshot(
     val message: String = "",
     val needsUser: Boolean = false,
     val lastError: String? = null,
-    val tabs: List<TerminalBrowserTabSnapshot> = emptyList()
+    val tabs: List<TerminalBrowserTabSnapshot> = emptyList(),
+    val authTask: TerminalBrowserAuthSnapshot? = null,
+    val externalPrompt: TerminalBrowserExternalPromptSnapshot? = null,
+    val riskChallengeDetected: Boolean = false,
+    val riskChallengeKind: String = "",
+    val recommendedNextAction: String = ""
 )
 
 private data class BrowserTab(
@@ -71,7 +94,10 @@ private data class BrowserTab(
     var currentUrl: String = "about:blank",
     var isLoading: Boolean = false,
     var lastError: String? = null,
-    var loadWaiter: CompletableDeferred<Unit>? = null
+    var loadWaiter: CompletableDeferred<Unit>? = null,
+    var riskChallengeDetected: Boolean = false,
+    var riskChallengeKind: String = "",
+    var recommendedNextAction: String = ""
 )
 
 private data class BrowserUserScript(
@@ -80,6 +106,24 @@ private data class BrowserUserScript(
     val match: String,
     val path: String,
     val enabled: Boolean
+)
+
+private data class BrowserAuthTask(
+    val requestId: String,
+    val url: String,
+    val reason: String,
+    val code: String,
+    var state: String = "waiting_for_user",
+    var userAction: String = "opened",
+    var active: Boolean = true
+)
+
+private data class BrowserExternalOpenPrompt(
+    val requestId: String,
+    val target: String,
+    val scheme: String,
+    val fallbackUrl: String,
+    val intent: Intent?
 )
 
 class TerminalBrowserSessionManager(
@@ -98,6 +142,8 @@ class TerminalBrowserSessionManager(
     private var userMessage = ""
     private var currentRequestId = ""
     private var activeUserRequestId = ""
+    private var authTask: BrowserAuthTask? = null
+    private var externalOpenPrompt: BrowserExternalOpenPrompt? = null
     private var currentBrowserDir: File? = null
 
     fun snapshot(): TerminalBrowserSnapshot = latestSnapshot
@@ -142,7 +188,13 @@ class TerminalBrowserSessionManager(
     ): JSONObject = withContext(Dispatchers.Main.immediate) {
         currentBrowserDir = browserDir
         val action = request["action"]?.trim().orEmpty().ifBlank { "snapshot" }
-        val requestId = request["request_id"] ?: request["stamp"] ?: System.currentTimeMillis().toString()
+        val requestId = when (action) {
+            "auth_done", "auth_cancel", "auth_cancelled", "auth_collapse", "auth_reopen" ->
+                request["auth_request_id"]?.takeIf { it.isNotBlank() }
+            "external_confirm", "external_cancel" ->
+                request["external_request_id"]?.takeIf { it.isNotBlank() }
+            else -> null
+        } ?: request["request_id"] ?: request["stamp"] ?: System.currentTimeMillis().toString()
         currentRequestId = requestId
         val result = runCatching {
             when (action) {
@@ -177,12 +229,19 @@ class TerminalBrowserSessionManager(
                 "get_readable" -> getReadable()
                 "execute_js", "js" -> executeJs(request.requireValue("script"))
                 "screenshot" -> screenshot(browserDir, requestId, request)
-                "external", "auth", "custom_tab" -> openExternalBrowser(request.requireValue("url"))
+                "external", "auth", "custom_tab", "auth_open" -> openAuthBrowser(request, requestId)
+                "auth_reopen" -> reopenAuthBrowser(request, requestId)
+                "auth_done" -> authDone(request["auth_request_id"] ?: requestId)
+                "auth_cancel", "auth_cancelled" -> authCancelled(request["auth_request_id"] ?: requestId)
+                "auth_collapse" -> authCollapsed(request["auth_request_id"] ?: requestId)
+                "external_confirm" -> confirmExternalOpen(request["external_request_id"] ?: requestId)
+                "external_cancel" -> cancelExternalOpen(request["external_request_id"] ?: requestId)
                 "user_wait" -> userWait(
                     message = request["message"].orEmpty().ifBlank { "请在浏览器中手动处理后继续" },
                     requestId = requestId
                 )
                 "user_done" -> userDone()
+                "user_collapse" -> userCollapse()
                 "user_cancelled" -> userCancelled()
                 "close" -> closeSession()
                 "snapshot" -> JSONObject()
@@ -192,7 +251,26 @@ class TerminalBrowserSessionManager(
         val ok = result.isSuccess
         if (!ok) {
             publish("error", result.exceptionOrNull()?.message.orEmpty())
-        } else if (action !in setOf("open", "navigate", "reload", "user_wait", "present", "close")) {
+        } else if (action !in setOf(
+                "open",
+                "navigate",
+                "reload",
+                "user_wait",
+                "user_done",
+                "user_collapse",
+                "user_cancelled",
+                "present",
+                "close",
+                "auth_open",
+                "auth_reopen",
+                "auth_done",
+                "auth_cancel",
+                "auth_cancelled",
+                "auth_collapse",
+                "external_confirm",
+                "external_cancel"
+            )
+        ) {
             publish("done", action)
         }
         cookieFlush()
@@ -258,6 +336,8 @@ class TerminalBrowserSessionManager(
         needsUser = false
         userMessage = ""
         activeUserRequestId = ""
+        authTask = null
+        externalOpenPrompt = null
         publish("closed", "浏览器已关闭")
         return JSONObject().put("closed", true)
     }
@@ -274,9 +354,13 @@ class TerminalBrowserSessionManager(
         tab.loadWaiter = CompletableDeferred()
         tab.currentUrl = url
         tab.lastError = null
+        tab.riskChallengeDetected = false
+        tab.riskChallengeKind = ""
+        tab.recommendedNextAction = ""
         tab.isLoading = true
         needsUser = false
         userMessage = ""
+        externalOpenPrompt = null
         publish("running", "打开网页")
         waitForHostLayout(tab)
         tab.webView.loadUrl(url)
@@ -579,12 +663,51 @@ class TerminalBrowserSessionManager(
             .put("name", "browser-$requestId.png")
     }
 
-    private fun openExternalBrowser(rawUrl: String): JSONObject {
-        val url = normalizeUrl(rawUrl)
-        val uri = Uri.parse(url)
+    private fun openAuthBrowser(request: Map<String, String>, requestId: String): JSONObject {
+        val url = normalizeUrl(request.requireValue("url"))
+        val reason = request["reason"].orEmpty().ifBlank { "安全登录/验证" }
+        val code = request["code"].orEmpty()
+        authTask = BrowserAuthTask(
+            requestId = requestId,
+            url = url,
+            reason = reason,
+            code = code
+        )
         needsUser = true
-        userMessage = "已在系统浏览器打开，请完成登录/验证后返回"
-        publish("waiting_for_user", userMessage)
+        userMessage = reason
+        activeUserRequestId = requestId
+        publish("waiting_for_user", reason)
+        launchCustomTab(url)
+        return authTaskJson()
+            .put("url", url)
+            .put("external", true)
+    }
+
+    private fun reopenAuthBrowser(request: Map<String, String>, requestId: String): JSONObject {
+        val task = authTask
+        val url = request["url"]?.takeIf { it.isNotBlank() }?.let(::normalizeUrl)
+            ?: task?.url
+            ?: throw IllegalStateException("没有可重新打开的 Auth 任务")
+        val resolvedTask = task ?: BrowserAuthTask(
+            requestId = requestId,
+            url = url,
+            reason = request["reason"].orEmpty().ifBlank { "安全登录/验证" },
+            code = request["code"].orEmpty()
+        )
+        resolvedTask.state = "reopened"
+        resolvedTask.userAction = "reopen"
+        resolvedTask.active = true
+        authTask = resolvedTask
+        needsUser = true
+        userMessage = resolvedTask.reason
+        activeUserRequestId = resolvedTask.requestId
+        publish("reopened", resolvedTask.reason)
+        launchCustomTab(url)
+        return authTaskJson().put("url", url)
+    }
+
+    private fun launchCustomTab(url: String) {
+        val uri = Uri.parse(url)
         Handler(Looper.getMainLooper()).post {
             val opened = runCatching {
                 CustomTabsIntent.Builder()
@@ -599,14 +722,83 @@ class TerminalBrowserSessionManager(
                 )
             }.isSuccess
             if (!opened) {
+                authTask?.apply {
+                    state = "error"
+                    userAction = "open_failed"
+                    active = false
+                }
                 needsUser = false
                 userMessage = ""
                 publish("error", "没有可打开登录页面的浏览器")
             }
         }
+    }
+
+    private fun authDone(requestId: String): JSONObject {
+        val task = authTask ?: BrowserAuthTask(
+            requestId = requestId,
+            url = "",
+            reason = "安全登录/验证",
+            code = ""
+        )
+        task.state = "user_done"
+        task.userAction = "done"
+        task.active = false
+        authTask = task
+        needsUser = false
+        userMessage = ""
+        activeUserRequestId = ""
+        publish("user_done", "用户已完成安全登录/验证")
+        return authTaskJson()
+    }
+
+    private fun authCancelled(requestId: String): JSONObject {
+        val task = authTask ?: BrowserAuthTask(
+            requestId = requestId,
+            url = "",
+            reason = "安全登录/验证",
+            code = ""
+        )
+        task.state = "cancelled"
+        task.userAction = "cancel"
+        task.active = false
+        authTask = task
+        needsUser = false
+        userMessage = ""
+        activeUserRequestId = ""
+        publish("cancelled", "用户已取消安全登录/验证")
+        return authTaskJson()
+    }
+
+    private fun authCollapsed(requestId: String): JSONObject {
+        val task = authTask ?: BrowserAuthTask(
+            requestId = requestId,
+            url = "",
+            reason = "安全登录/验证",
+            code = ""
+        )
+        task.state = "collapsed"
+        task.userAction = "collapse"
+        task.active = true
+        authTask = task
+        needsUser = true
+        userMessage = task.reason
+        activeUserRequestId = task.requestId
+        publish("collapsed", task.reason)
+        return authTaskJson()
+    }
+
+    private fun authTaskJson(): JSONObject {
+        val task = authTask
         return JSONObject()
-            .put("url", url)
-            .put("external", true)
+            .put("auth", task != null)
+            .put("authRequestId", task?.requestId.orEmpty())
+            .put("authUrl", task?.url.orEmpty())
+            .put("authReason", task?.reason.orEmpty())
+            .put("authCode", task?.code.orEmpty())
+            .put("authState", task?.state.orEmpty())
+            .put("userAction", task?.userAction.orEmpty())
+            .put("active", task?.active == true)
     }
 
     private fun userWait(message: String, requestId: String): JSONObject {
@@ -625,12 +817,73 @@ class TerminalBrowserSessionManager(
         return JSONObject().put("userDone", true)
     }
 
+    private fun userCollapse(): JSONObject {
+        publish("collapsed", "用户已折叠，仍等待处理")
+        return JSONObject()
+            .put("userAction", "collapse")
+            .put("collapsed", true)
+    }
+
     private fun userCancelled(): JSONObject {
         needsUser = false
         userMessage = ""
         activeUserRequestId = ""
+        externalOpenPrompt = null
         publish("cancelled", "用户已取消接管")
         return JSONObject().put("userCancelled", true)
+    }
+
+    private fun confirmExternalOpen(requestId: String): JSONObject {
+        val prompt = externalOpenPrompt ?: return JSONObject()
+            .put("externalOpen", false)
+            .put("userAction", "missing")
+        if (requestId.isNotBlank() && requestId != prompt.requestId) {
+            return JSONObject()
+                .put("externalOpen", false)
+                .put("userAction", "ignored")
+                .put("expectedRequestId", prompt.requestId)
+        }
+        externalOpenPrompt = null
+        needsUser = false
+        userMessage = ""
+        var fallbackHandled = false
+        val opened = prompt.intent?.let { intent ->
+            runCatching {
+                initialContext.startActivity(intent)
+            }.onFailure { error ->
+                if (error is ActivityNotFoundException && prompt.fallbackUrl.isNotBlank()) {
+                    activeTabId?.let { tabs[it]?.webView?.loadUrl(prompt.fallbackUrl) }
+                    fallbackHandled = true
+                }
+            }.isSuccess
+        } == true || fallbackHandled
+        publish(if (opened) "done" else "cancelled", if (opened) "已打开外部链接" else "没有可处理的外部链接")
+        return JSONObject()
+            .put("externalOpen", opened)
+            .put("userAction", "confirm")
+            .put("target", prompt.target)
+            .put("scheme", prompt.scheme)
+    }
+
+    private fun cancelExternalOpen(requestId: String): JSONObject {
+        val prompt = externalOpenPrompt ?: return JSONObject()
+            .put("externalOpen", false)
+            .put("userAction", "missing")
+        if (requestId.isNotBlank() && requestId != prompt.requestId) {
+            return JSONObject()
+                .put("externalOpen", false)
+                .put("userAction", "ignored")
+                .put("expectedRequestId", prompt.requestId)
+        }
+        externalOpenPrompt = null
+        needsUser = false
+        userMessage = ""
+        publish("cancelled", "用户已取消打开外部链接")
+        return JSONObject()
+            .put("externalOpen", false)
+            .put("userAction", "cancel")
+            .put("target", prompt.target)
+            .put("scheme", prompt.scheme)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -772,6 +1025,12 @@ class TerminalBrowserSessionManager(
                 tab.currentUrl = url.orEmpty().ifBlank { tab.currentUrl }
                 tab.title = view?.title.orEmpty().ifBlank { tab.currentUrl }
                 tab.isLoading = false
+                detectRiskChallenge(tab, bodyText = "")
+                view?.evaluateJavascript(
+                    "(function(){return (document.body&&document.body.innerText||'').slice(0,4000);})();"
+                ) { raw ->
+                    detectRiskChallenge(tab, bodyText = decodeJsString(raw))
+                }
                 cookieFlush()
                 appendHistory(tab)
                 applyUserScripts(tab) { error ->
@@ -830,27 +1089,17 @@ class TerminalBrowserSessionManager(
         }.getOrNull()
 
         val fallbackUrl = externalIntent?.getStringExtra("browser_fallback_url")
-        var fallbackLoaded = false
-        val opened = externalIntent?.let { intent ->
-            runCatching {
-                initialContext.startActivity(intent)
-            }.onFailure { error ->
-                if (error is ActivityNotFoundException && !fallbackUrl.isNullOrBlank()) {
-                    tab.webView.loadUrl(fallbackUrl)
-                    fallbackLoaded = true
-                }
-            }.isSuccess
-        } == true
-
-        if (opened) {
+        if (externalIntent != null) {
+            externalOpenPrompt = BrowserExternalOpenPrompt(
+                requestId = "external-${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}",
+                target = url,
+                scheme = scheme,
+                fallbackUrl = fallbackUrl.orEmpty(),
+                intent = externalIntent
+            )
             needsUser = true
-            userMessage = "已交给外部应用处理：$scheme"
+            userMessage = "是否打开外部链接：$scheme"
             publish("waiting_for_user", userMessage)
-        } else if (fallbackLoaded || !fallbackUrl.isNullOrBlank()) {
-            if (!fallbackLoaded) {
-                tab.webView.loadUrl(fallbackUrl.orEmpty())
-            }
-            publish("running", "打开 fallback 页面")
         } else {
             tab.lastError = "设备没有可处理的外部链接：$scheme"
             publish("error", tab.lastError.orEmpty())
@@ -923,6 +1172,52 @@ class TerminalBrowserSessionManager(
         }
     }
 
+    private fun detectRiskChallenge(tab: BrowserTab, bodyText: String) {
+        val haystack = listOf(tab.title, tab.currentUrl, bodyText)
+            .joinToString(" ")
+            .replace(Regex("\\s+"), " ")
+            .lowercase()
+        if (haystack.isBlank()) return
+        val challenge = when {
+            "cloudflare" in haystack &&
+                ("challenge" in haystack || "attention required" in haystack) ->
+                "cloudflare_challenge"
+            "recaptcha" in haystack ||
+                "hcaptcha" in haystack ||
+                "turnstile" in haystack ||
+                "captcha" in haystack ||
+                "verify you are human" in haystack ||
+                "security check" in haystack ->
+                "captcha_challenge"
+            "unusual traffic" in haystack ||
+                "automated queries" in haystack ->
+                "search_engine_challenge"
+            "too many requests" in haystack ||
+                "rate limit" in haystack ||
+                "429" in haystack ->
+                "rate_limited"
+            "access denied" in haystack ||
+                "403 forbidden" in haystack ->
+                "access_denied"
+            else -> ""
+        }
+        if (challenge.isBlank()) return
+        tab.riskChallengeDetected = true
+        tab.riskChallengeKind = challenge
+        tab.recommendedNextAction = when (challenge) {
+            "rate_limited" -> "wait_before_retrying_and_reduce_request_rate"
+            "access_denied" -> "stop_automatic_retry_and_use_manual_access"
+            else -> "ask_user_to_complete_verification_manually"
+        }
+        needsUser = true
+        userMessage = when (challenge) {
+            "rate_limited" -> "页面触发频率限制，请稍后再继续"
+            "access_denied" -> "页面拒绝自动访问，请手动处理"
+            else -> "检测到验证码/风控，请手动处理"
+        }
+        publish("waiting_for_user", userMessage)
+    }
+
     private fun activeTab(): BrowserTab {
         return tabs[activeTabId] ?: tabs.values.lastOrNull() ?: createTab()
     }
@@ -952,16 +1247,31 @@ class TerminalBrowserSessionManager(
         message: String = latestSnapshot.message
     ) {
         val active = activeTabId?.let { tabs[it] }
+        val auth = authTask
+        val external = externalOpenPrompt
+        val snapshotStatus = when {
+            auth != null && (auth.active || auth.state in setOf("user_done", "cancelled", "collapsed", "reopened", "error")) -> auth.state
+            status == "collapsed" -> "collapsed"
+            external != null -> "waiting_for_user"
+            needsUser -> "waiting_for_user"
+            else -> status
+        }
+        val snapshotMessage = when {
+            auth != null && auth.active -> auth.reason
+            external != null -> userMessage
+            needsUser -> userMessage
+            else -> message
+        }
         latestSnapshot = TerminalBrowserSnapshot(
-            available = tabs.isNotEmpty(),
-            requestId = activeUserRequestId.ifBlank { currentRequestId },
+            available = tabs.isNotEmpty() || auth != null || external != null,
+            requestId = auth?.requestId ?: activeUserRequestId.ifBlank { currentRequestId },
             activeTabId = active?.id,
             title = active?.title.orEmpty(),
-            currentUrl = active?.currentUrl.orEmpty(),
+            currentUrl = auth?.url ?: active?.currentUrl.orEmpty(),
             isLoading = active?.isLoading == true,
-            status = if (needsUser) "waiting_for_user" else status,
-            message = if (needsUser) userMessage else message,
-            needsUser = needsUser,
+            status = snapshotStatus,
+            message = snapshotMessage,
+            needsUser = needsUser || auth?.active == true || external != null,
             lastError = active?.lastError,
             tabs = tabs.values.map {
                 TerminalBrowserTabSnapshot(
@@ -970,7 +1280,29 @@ class TerminalBrowserSessionManager(
                     url = it.currentUrl,
                     isLoading = it.isLoading
                 )
-            }
+            },
+            authTask = auth?.let {
+                TerminalBrowserAuthSnapshot(
+                    requestId = it.requestId,
+                    url = it.url,
+                    reason = it.reason,
+                    code = it.code,
+                    state = it.state,
+                    userAction = it.userAction,
+                    active = it.active
+                )
+            },
+            externalPrompt = external?.let {
+                TerminalBrowserExternalPromptSnapshot(
+                    requestId = it.requestId,
+                    target = it.target,
+                    scheme = it.scheme,
+                    fallbackUrl = it.fallbackUrl
+                )
+            },
+            riskChallengeDetected = active?.riskChallengeDetected == true,
+            riskChallengeKind = active?.riskChallengeKind.orEmpty(),
+            recommendedNextAction = active?.recommendedNextAction.orEmpty()
         )
         onSnapshot(latestSnapshot)
     }
@@ -1249,6 +1581,26 @@ class TerminalBrowserSessionManager(
             .put("message", snapshot.message)
             .put("needsUser", snapshot.needsUser)
             .put("lastError", snapshot.lastError)
+            .put("riskChallengeDetected", snapshot.riskChallengeDetected)
+            .put("riskChallengeKind", snapshot.riskChallengeKind)
+            .put("recommendedNextAction", snapshot.recommendedNextAction)
+            .put("authTask", snapshot.authTask?.let {
+                JSONObject()
+                    .put("requestId", it.requestId)
+                    .put("url", it.url)
+                    .put("reason", it.reason)
+                    .put("code", it.code)
+                    .put("state", it.state)
+                    .put("userAction", it.userAction)
+                    .put("active", it.active)
+            })
+            .put("externalPrompt", snapshot.externalPrompt?.let {
+                JSONObject()
+                    .put("requestId", it.requestId)
+                    .put("target", it.target)
+                    .put("scheme", it.scheme)
+                    .put("fallbackUrl", it.fallbackUrl)
+            })
             .put("tabs", JSONArray().apply {
                 snapshot.tabs.forEach { tab ->
                     put(

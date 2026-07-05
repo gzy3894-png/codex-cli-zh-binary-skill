@@ -67,8 +67,8 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 32'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.1.3"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 33'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.2.0"'
 }
 
 test_release_workflow_signature_gate() {
@@ -317,11 +317,54 @@ test_browser_bridge_asset() {
   assert_file_contains "$tmp/prefix/local/browser/request" "action=auth"
   assert_file_contains "$tmp/prefix/local/browser/request" "url=https://login.example.test"
 
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait auth-open --reason "Codex 官方登录" --code "ABCD-EFGH" https://device.example.test >/dev/null; then
+    fail "codex-browser should write an auth-open request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=auth_open"
+  assert_file_contains "$tmp/prefix/local/browser/request" "present=1"
+  assert_file_contains "$tmp/prefix/local/browser/request" "reason=Codex 官方登录"
+  assert_file_contains "$tmp/prefix/local/browser/request" "code=ABCD-EFGH"
+  assert_file_contains "$tmp/prefix/local/browser/request" "url=https://device.example.test"
+
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait auth-done test-auth-request >/dev/null; then
+    fail "codex-browser should write an auth-done request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=auth_done"
+  assert_file_contains "$tmp/prefix/local/browser/request" "auth_request_id=test-auth-request"
+
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait auth-reopen test-auth-request >/dev/null; then
+    fail "codex-browser should write an auth-reopen request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=auth_reopen"
+  assert_file_contains "$tmp/prefix/local/browser/request" "auth_request_id=test-auth-request"
+
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait auth-cancel test-auth-request >/dev/null; then
+    fail "codex-browser should write an auth-cancel request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=auth_cancel"
+  assert_file_contains "$tmp/prefix/local/browser/request" "auth_request_id=test-auth-request"
+
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" auth-status missing-auth-request >/dev/null; then
+    fail "codex-browser auth-status should be safe without status file"
+  fi
+
   if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait external https://external.example.test >/dev/null; then
     fail "codex-browser should write an external request"
   fi
   assert_file_contains "$tmp/prefix/local/browser/request" "action=external"
   assert_file_contains "$tmp/prefix/local/browser/request" "url=https://external.example.test"
+
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait external-confirm external-test-request >/dev/null; then
+    fail "codex-browser should write an external-confirm request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=external_confirm"
+  assert_file_contains "$tmp/prefix/local/browser/request" "external_request_id=external-test-request"
+
+  if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait external-cancel external-test-request >/dev/null; then
+    fail "codex-browser should write an external-cancel request"
+  fi
+  assert_file_contains "$tmp/prefix/local/browser/request" "action=external_cancel"
+  assert_file_contains "$tmp/prefix/local/browser/request" "external_request_id=external-test-request"
 
   if ! PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" --no-wait type '#q' 'hello world' >/dev/null; then
     fail "codex-browser should write a type request"
@@ -410,6 +453,8 @@ test_browser_bridge_asset() {
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'pushToFiles'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" '"present" -> present'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" '"collapse" -> JSONObject().put("collapsed", true)'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" '"user_collapse"'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'status == "collapsed" -> "collapsed"'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'activeUserRequestId'
   assert_file_not_contains "$BROWSER_ASSET" 'cp "$req_file" "$legacy_tmp"'
   assert_file_contains "$BROWSER_ASSET" 'cp "$req_tmp" "$legacy_tmp"'
@@ -423,13 +468,16 @@ test_browser_bridge_asset() {
   assert_file_contains "$MAIN_ACTIVITY" 'action == "present"'
   assert_file_contains "$MAIN_ACTIVITY" 'action == "collapse"'
   assert_file_contains "$MAIN_ACTIVITY" 'requestedAction) {'
-  assert_file_contains "$MAIN_ACTIVITY" 'val suppressPresent = action in setOf("collapse", "user_done", "user_cancelled", "close")'
-  assert_file_contains "$MAIN_ACTIVITY" 'effectiveAction in setOf("present", "user_wait")'
+  assert_file_contains "$MAIN_ACTIVITY" '"auth_open", "auth_reopen"'
+  assert_file_contains "$MAIN_ACTIVITY" 'val suppressPresent = action in setOf("collapse", "user_done", "user_cancelled", "auth_collapse", "auth_done", "auth_cancel", "auth_cancelled", "external_cancel", "close")'
+  assert_file_contains "$MAIN_ACTIVITY" 'effectiveAction in setOf("present", "user_wait", "auth_open", "auth_reopen")'
   assert_file_contains "$MAIN_ACTIVITY" 'snapshot?.optBoolean("needsUser") == true'
-  assert_file_contains "$MAIN_ACTIVITY" 'val shouldCollapse = action == "collapse" || action == "user_done" || action == "user_cancelled"'
-  assert_file_contains "$MAIN_ACTIVITY" 'markBrowserUserDone(reason = "user_collapsed")'
+  assert_file_contains "$MAIN_ACTIVITY" 'val shouldCollapse = action in setOf("collapse", "user_done", "user_cancelled", "auth_collapse", "auth_done", "auth_cancel", "auth_cancelled", "external_cancel")'
+  assert_file_contains "$MAIN_ACTIVITY" 'markBrowserAuthCollapsed'
   assert_file_contains "$MAIN_ACTIVITY" '.put("activeItem", activeItem)'
   assert_file_contains "$MAIN_ACTIVITY" 'append("active_item=").append(refValue(activeItem))'
+  assert_file_contains "$MAIN_ACTIVITY" 'append("auth_state=").append(refValue'
+  assert_file_contains "$MAIN_ACTIVITY" 'append("user_action=").append(refValue'
   assert_file_contains "$MAIN_ACTIVITY" 'append("tabs_count=").append(tabsCount)'
   assert_file_contains "$MAIN_ACTIVITY" 'append("item_id=").append(refId)'
   rm -rf "$tmp"

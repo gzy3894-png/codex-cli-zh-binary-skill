@@ -1,5 +1,27 @@
 # Changelog
 
+## Codex for TUI 2.2.0
+
+Codex for TUI 2.2.0 聚焦浏览器协作：把登录/授权/验证码交给调用式 Custom Tabs Auth Browser，同时继续增强内置 WebView Agent Browser。
+
+### 新增
+
+- `codex-browser auth-open/auth-wait/auth-status/auth-done/auth-cancel/auth-reopen`：打开安全登录任务卡，用户完成、取消、折叠、重开都会写回 `user_action/auth_state/visible/collapsed`。
+- `codex 官方登录`：调用 `codex login --device-auth`，解析登录链接和一次性验证码，通过 Custom Tabs 打开，完成后用 `codex login status` 验证。
+- 外部 scheme 打开确认：`intent://`、`mailto:`、`tel:`、`baiduboxapp://` 等不再直接跳走，先让用户确认，并写回确认/取消事件。
+
+### 增强
+
+- WebView Agent Browser 增加验证码/风控检测字段：`risk_challenge_detected`、`risk_challenge_kind`、`recommended_next_action`。
+- Auth Browser 不读取 DOM、密码、Cookie 或 `auth.json`；结果和日志只记录用户动作、链接、一次性 code 和状态，不打印 token/Cookie。
+- 保持旧 `codex-browser open/status/screenshot/auth/external/user-wait` 用法兼容。
+
+### 验证
+
+- 本地仍只运行非 APK 门禁：`sh -n`、`sh tests/codex-for-tui-static-guards.sh`、`sh tests/codex-for-tui-installer-smoke.sh`、`git diff --check`。
+- APK、正式签名和 release 资产仍只通过 GitHub Actions 构建。
+- 正式发布前必须真机验证 auth-open 用户动作回传、Codex device-auth 登录向导、WebView 静默/展示、多标签事件、风控 needs_user、外部 scheme 确认、Cookie/localStorage 持久化、截图推送和旧命令兼容。
+
 ## Codex for TUI 2.1.3
 
 Codex for TUI 2.1.3 是 2.1.2 的真机热修版，重点修复协作浏览器 userscript 自动注入在后台 WebView 场景下可能静默失败的问题。

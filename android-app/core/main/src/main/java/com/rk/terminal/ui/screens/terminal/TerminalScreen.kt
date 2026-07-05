@@ -180,6 +180,9 @@ fun TerminalScreen(
                     onCollapse = mainActivity::collapseBrowserPanel,
                     onClose = mainActivity::closeBrowserSession,
                     onUserDone = { mainActivity.markBrowserUserDone() },
+                    onUserCancel = mainActivity::cancelBrowserUserAction,
+                    onAuthReopen = mainActivity::reopenBrowserAuth,
+                    onExternalConfirm = mainActivity::confirmBrowserExternalOpen,
                     onSelectTab = mainActivity::selectBrowserTabFromUi,
                     onCloseTab = mainActivity::closeBrowserTabFromUi,
                     modifier = Modifier
