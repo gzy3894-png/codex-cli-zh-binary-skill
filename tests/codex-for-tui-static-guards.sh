@@ -67,8 +67,8 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 31'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.1.2"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 32'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.1.3"'
 }
 
 test_release_workflow_signature_gate() {
@@ -401,7 +401,11 @@ test_browser_bridge_asset() {
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'applyUserScripts(tab) {'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'function codexRunUserScript()'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'DOMContentLoaded'
-  assert_file_contains "$TERMINAL_BROWSER_SESSION" '{ finishOne() }'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'buildUserScriptJavascript'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'new Function(codexSource'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'decodeJsString(raw)'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'recordUserScriptResult'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'finishOnce(false, "callback timeout", null)'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'val deadline = System.currentTimeMillis() + 2500'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'pushToFiles'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" '"present" -> present'

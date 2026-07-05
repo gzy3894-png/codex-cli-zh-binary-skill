@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.1.2-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.1.2)
+[![Release](https://img.shields.io/badge/release-v2.1.3-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.1.3)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.142.4-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,13 +9,13 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.1.2 更新
+## 重要：2.1.3 更新
 
-2.1.2 是一步到位的正式版：包含 2.1.1 的协作浏览器热修，并把 `codex 配置模式` 内置升级为配置管理器。配置管理器支持新建、选择、编辑、查看、删除、保存配置；新建或编辑第三方 API 后会主动询问保存，切换或退出前会保护未保存修改，避免配置档为空或丢失。
+2.1.3 是 2.1.2 的真机热修版：保留配置管理器升级，并修复协作浏览器 userscript 在后台 WebView 页面加载后可能未注入、但 `open` 仍误报成功的问题。新版会延迟重试注入、解析注入回调、写入 `userscripts.log`，如果注入失败会把错误反馈给 `codex-browser`，不再静默失败。
 
-已经安装 2.0.x/2.1.x 的用户需要从 Releases 下载并覆盖安装 2.1.2 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context` 和新版配置管理器脚本。
+已经安装 2.0.x/2.1.x 的用户需要从 Releases 下载并覆盖安装 2.1.3 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context` 等 APK 内置桥接命令。
 
-如果你在旧 resume 会话里遇到裸命令不可见，再手动执行一次：
+注意：普通启动按设计不会自动联网更新 `~/.local/share/codex-zh/scripts` 下的安装/配置脚本。已安装用户覆盖 APK 后，为确保 `codex 配置模式` 也切到最新配置管理器，请手动执行一次：
 
 ```sh
 codex 更新
@@ -34,6 +34,7 @@ codex 配置模式
 
 ## 2.0 新功能
 
+- 2.1.3 修复：协作浏览器 userscript 注入改为延迟重试、回调解析和日志记录；注入失败会反馈给 `codex-browser`，避免静默失败。
 - 2.1.2 新增/修复：`codex 配置模式` 改为配置管理器，支持配置增删改查；新建/编辑后主动询问保存，切换/退出前保护未保存配置。
 - 2.1.1 修复：`codex-browser` 请求队列发布竞态、桥接轮询异常退出、userscript 注入回调抢跑。
 - 2.1.0 新增：`codex-browser` 请求队列、多标签列表、历史、Cookie 状态/验证、截图推送文件托盘、userscript 本地注入。
@@ -71,7 +72,7 @@ codex 配置模式
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.1.2` |
+| Android App | `2.1.3` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug 包名 | `com.gzy3894.codexfortui.debug` |
 | Codex CLI | `0.142.4` 中文版 |

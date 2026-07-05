@@ -1,8 +1,26 @@
 # Changelog
 
+## Codex for TUI 2.1.3
+
+Codex for TUI 2.1.3 是 2.1.2 的真机热修版，重点修复协作浏览器 userscript 自动注入在后台 WebView 场景下可能静默失败的问题。
+
+### 修复
+
+- `codex-browser open` 等待 userscript 注入完成；如果注入超时或执行失败，会把错误返回给终端，不再误报页面已可用。
+- userscript 注入改为延迟重试，并通过 `new Function(...)` 隔离执行脚本内容，降低脚本内容破坏注入包装器的概率。
+- 注入回调会解析执行结果，并写入本地 `local/browser/userscripts.log`，便于真机排查是匹配、执行还是 WebView 回调问题。
+- userscript match 支持多条规则和通配符，保留裸字符串 contains 匹配兼容旧命令。
+- README 修正已安装用户更新说明：覆盖 APK 不会自动联网刷新 `~/.local/share/codex-zh/scripts`；需要配置管理器脚本时请显式运行 `codex 更新 && codex-local repair-launcher`。
+
+### 验证
+
+- 本地仍只运行非 APK 门禁：`sh -n`、`sh tests/codex-for-tui-static-guards.sh`、`sh tests/codex-for-tui-installer-smoke.sh`、`git diff --check`。
+- APK、正式签名和 release 资产仍只通过 GitHub Actions 构建。
+- 覆盖安装后必须再次运行 `tests/codex-for-tui-browser-smoke.sh` 真机验证 userscript、多标签、队列、Cookie/WebStorage、截图推送和接管状态。
+
 ## Codex for TUI 2.1.2
 
-Codex for TUI 2.1.2 把配置管理器修复内置到 APK，用户覆盖安装后即可获得新版 `codex 配置模式`，不需要先安装 2.1.1 再手动补脚本更新。
+Codex for TUI 2.1.2 把配置管理器修复合入正式版，不需要先安装 2.1.1。全新安装会拉取最新脚本；已安装用户覆盖 APK 后，如需刷新 `~/.local/share/codex-zh/scripts` 里的配置管理器脚本，仍应显式运行 `codex 更新 && codex-local repair-launcher`。
 
 ### 修复
 

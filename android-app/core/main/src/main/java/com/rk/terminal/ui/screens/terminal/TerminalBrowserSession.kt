@@ -280,8 +280,17 @@ class TerminalBrowserSessionManager(
         publish("running", "打开网页")
         waitForHostLayout(tab)
         tab.webView.loadUrl(url)
-        withTimeoutOrNull(15000) {
+        val loaded = withTimeoutOrNull(20000) {
             tab.loadWaiter?.await()
+        } != null
+        if (!loaded) {
+            tab.lastError = "Page load timed out before userscript completion"
+            publish("error", tab.lastError.orEmpty())
+            throw IllegalStateException(tab.lastError)
+        }
+        tab.lastError?.takeIf { it.startsWith("userscript", ignoreCase = true) }?.let {
+            publish("error", it)
+            throw IllegalStateException(it)
         }
         publish("done", "网页已打开")
         return JSONObject()
@@ -765,10 +774,17 @@ class TerminalBrowserSessionManager(
                 tab.isLoading = false
                 cookieFlush()
                 appendHistory(tab)
-                applyUserScripts(tab) {
+                applyUserScripts(tab) { error ->
+                    if (!error.isNullOrBlank()) {
+                        tab.lastError = error
+                    }
                     tab.loadWaiter?.complete(Unit)
                     tab.loadWaiter = null
-                    publish("done", "网页已加载")
+                    if (error.isNullOrBlank()) {
+                        publish("done", "网页已加载")
+                    } else {
+                        publish("error", error)
+                    }
                 }
             }
 
@@ -975,64 +991,135 @@ class TerminalBrowserSessionManager(
         }
     }
 
-    private fun applyUserScripts(tab: BrowserTab, onComplete: (() -> Unit)? = null) {
+    private fun applyUserScripts(tab: BrowserTab, onComplete: ((String?) -> Unit)? = null) {
         val browserDir = currentBrowserDir
         if (browserDir == null) {
-            onComplete?.invoke()
+            onComplete?.invoke(null)
             return
         }
         val scripts = loadUserScripts(browserDir)
             .filter { it.enabled && userScriptMatches(it.match, tab.currentUrl) }
         if (scripts.isEmpty()) {
-            onComplete?.invoke()
+            onComplete?.invoke(null)
             return
         }
+        val handler = Handler(Looper.getMainLooper())
         var pending = scripts.size
-        fun finishOne() {
+        var firstError: String? = null
+        fun finishOne(script: BrowserUserScript, ok: Boolean, error: String?, raw: String?) {
+            recordUserScriptResult(browserDir, tab, script, ok, error, raw)
+            if (!ok && firstError == null) {
+                firstError = "userscript ${script.name} failed: ${error ?: "unknown error"}"
+            }
             pending -= 1
             if (pending <= 0) {
-                onComplete?.invoke()
+                onComplete?.invoke(firstError)
             }
         }
         scripts.forEach { script ->
             val source = runCatching { File(script.path).readText() }.getOrNull()
             if (source == null) {
-                finishOne()
+                finishOne(script, ok = false, error = "script file unreadable", raw = null)
                 return@forEach
             }
-            tab.webView.post {
-                runCatching {
-                    tab.webView.evaluateJavascript(
-                        """
-                        (function(){
-                          function codexRunUserScript(){
-                            try {
-                              $source
-                              return {ok:true,id:${JSONObject.quote(script.id)}};
-                            } catch (error) {
-                              return {ok:false,id:${JSONObject.quote(script.id)},error:String(error && error.message ? error.message : error)};
-                            }
-                          }
-                          try {
-                            if (!document.body) {
-                              document.addEventListener('DOMContentLoaded', function(){ codexRunUserScript(); }, {once:true});
-                              return JSON.stringify({ok:true,id:${JSONObject.quote(script.id)},deferred:true});
-                            }
-                            return JSON.stringify(codexRunUserScript());
-                          } catch (error) {
-                            return JSON.stringify({ok:false,id:${JSONObject.quote(script.id)},error:String(error && error.message ? error.message : error)});
-                          }
-                        })();
-                        """.trimIndent(),
-                        { finishOne() }
-                    )
-                }.onFailure { finishOne() }
+            var finished = false
+            fun finishOnce(ok: Boolean, error: String?, raw: String?) {
+                if (finished) return
+                finished = true
+                finishOne(script, ok, error, raw)
             }
+            val javascript = buildUserScriptJavascript(script, source)
+            val attempts = listOf(150L, 500L, 1000L)
+            attempts.forEachIndexed { attemptIndex, delayMs ->
+                handler.postDelayed({
+                    if (finished) return@postDelayed
+                    runCatching {
+                        tab.webView.evaluateJavascript(javascript) { raw ->
+                            if (finished) return@evaluateJavascript
+                            val decoded = decodeJsString(raw)
+                            val json = runCatching { JSONObject(decoded) }.getOrNull()
+                            val ok = json?.optBoolean("ok", false) == true
+                            val error = json?.optString("error")?.takeIf { it.isNotBlank() }
+                            if (ok || attemptIndex == attempts.lastIndex) {
+                                finishOnce(ok, error, decoded)
+                            }
+                        }
+                    }.onFailure { error ->
+                        if (attemptIndex == attempts.lastIndex) {
+                            finishOnce(false, error.message, null)
+                        }
+                    }
+                }, delayMs)
+            }
+            handler.postDelayed({
+                finishOnce(false, "callback timeout", null)
+            }, 3500L)
+        }
+    }
+
+    private fun buildUserScriptJavascript(script: BrowserUserScript, source: String): String {
+        val quotedId = JSONObject.quote(script.id)
+        val quotedName = JSONObject.quote(script.name)
+        val quotedSource = JSONObject.quote(source)
+        return """
+            (function(){
+              try {
+                function codexRunUserScript(){
+                  try {
+                    var codexSource = $quotedSource;
+                    var codexFn = new Function(codexSource + "\n//# sourceURL=codex-userscript-" + $quotedId + ".js");
+                    var codexValue = codexFn.call(window);
+                    return {ok:true,id:$quotedId,name:$quotedName,value:codexValue === undefined ? null : String(codexValue)};
+                  } catch (error) {
+                    return {ok:false,id:$quotedId,name:$quotedName,error:String(error && error.message ? error.message : error)};
+                  }
+                }
+                if (!document.body) {
+                  document.addEventListener('DOMContentLoaded', function(){ codexRunUserScript(); }, {once:true});
+                  return JSON.stringify({ok:true,id:$quotedId,name:$quotedName,deferred:true});
+                }
+                return JSON.stringify(codexRunUserScript());
+              } catch (error) {
+                return JSON.stringify({ok:false,id:$quotedId,name:$quotedName,error:String(error && error.message ? error.message : error)});
+              }
+            })();
+        """.trimIndent()
+    }
+
+    private fun recordUserScriptResult(
+        browserDir: File,
+        tab: BrowserTab,
+        script: BrowserUserScript,
+        ok: Boolean,
+        error: String?,
+        raw: String?
+    ) {
+        runCatching {
+            File(browserDir, "userscripts.log").appendText(
+                JSONObject()
+                    .put("timestamp", System.currentTimeMillis())
+                    .put("tabId", tab.id)
+                    .put("url", tab.currentUrl)
+                    .put("scriptId", script.id)
+                    .put("scriptName", script.name)
+                    .put("ok", ok)
+                    .put("error", error)
+                    .put("raw", raw?.take(500))
+                    .toString() + "\n"
+            )
         }
     }
 
     private fun userScriptMatches(match: String, url: String): Boolean {
-        val rule = match.trim()
+        val rules = match
+            .split('\n', '\r', ',', ';')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        if (rules.isEmpty()) return true
+        return rules.any { userScriptRuleMatches(it, url) }
+    }
+
+    private fun userScriptRuleMatches(rule: String, url: String): Boolean {
         if (rule.isBlank() || rule == "*") return true
         if (!rule.contains('*')) return url.contains(rule)
         val parts = rule.split('*').filter { it.isNotEmpty() }
