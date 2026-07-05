@@ -681,6 +681,9 @@ EOF
   assert_file_contains "$tmp/home/.codex/config.toml" 'codex-for-tui-context-hook begin'
   assert_file_contains "$tmp/home/.codex/config.toml" 'command = "codex-rtk hook"'
   assert_file_contains "$tmp/home/.codex/config.toml" 'command = "codex-context hook"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'approval_policy = "never"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'sandbox_mode = "danger-full-access"'
+  assert_file_contains "$tmp/home/.codex/config-profiles/current" 'no-hooks'
   rm -rf "$tmp"
 }
 

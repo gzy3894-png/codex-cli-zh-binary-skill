@@ -28,12 +28,13 @@ codex-local repair-launcher
 codex 配置模式
 ```
 
-如果菜单里能看到 `6. 修复全权限授权`，说明脚本已经更新到包含配置菜单和授权持久化修复的版本。需要修复授权时选择该项；它会把全权限模式持久写入为 `approval_policy = "never"` + `sandbox_mode = "danger-full-access"`。
+如果菜单里能看到 `1. 新建配置 / 2. 选择配置 / 3. 编辑当前配置 / 4. 查看配置 / 5. 删除配置`，说明脚本已经更新到配置管理器版本。新建或编辑第三方 API 后会主动询问是否保存为配置档；切换配置或退出配置模式前，如果当前配置有未保存修改，会先提示保存，避免配置档为空或丢失。
 
-新安装、尚未完成首次安装的用户，首次安装时会拉取当前分支的最新脚本；普通启动仍然不会隐藏联网更新、不会刷新模型、不会覆盖用户配置。已安装用户运行 `codex 更新` 再运行 `codex-local repair-launcher` 后，新启动器会带上最新桥接命令和快捷授权菜单。
+新安装、尚未完成首次安装的用户，首次安装时会拉取当前分支的最新脚本；普通启动仍然不会隐藏联网更新、不会刷新模型、不会覆盖用户配置。已安装用户运行 `codex 更新` 再运行 `codex-local repair-launcher` 后，新启动器会带上最新桥接命令、快捷授权菜单和配置管理器。
 
 ## 2.0 新功能
 
+- 脚本热修：`codex 配置模式` 改为配置管理器，支持配置增删改查；新建/编辑后主动询问保存，切换/退出前保护未保存配置。
 - 2.1.1 修复：`codex-browser` 请求队列发布竞态、桥接轮询异常退出、userscript 注入回调抢跑。
 - 2.1.0 新增：`codex-browser` 请求队列、多标签列表、历史、Cookie 状态/验证、截图推送文件托盘、userscript 本地注入。
 - 2.1.0 新增：内置终端预设背景图，默认透明度为 1；用户自定义背景优先。
@@ -149,7 +150,7 @@ codex-update apply
 codex 配置模式
 ```
 
-`codex 配置模式` 会打开菜单，支持新建/重配、编辑当前配置、选择已保存配置、保存当前配置、刷新模型目录和修复全权限授权。第三方配置会写入 `config.toml`、`auth.json` 和 `model_catalog_json`；通用配置如自动压缩、fast mode、goals、statusline 会保留。全权限模式会同时写入 `approval_policy = "never"` 和 `sandbox_mode = "danger-full-access"`，避免只显示 never 但实际仍受沙箱限制。
+`codex 配置模式` 会打开配置管理器，围绕配置的增、删、改、查和切换工作：新建配置、选择配置、编辑当前配置、查看配置、删除配置、保存当前配置、刷新模型目录和修复全权限授权。第三方配置会写入 `config.toml`、`auth.json` 和 `model_catalog_json`；新建或编辑完成后会主动询问是否保存为配置档，切换或退出前会提示保存未保存修改。通用配置如自动压缩、fast mode、goals、statusline 会保留；全权限模式会同时写入 `approval_policy = "never"` 和 `sandbox_mode = "danger-full-access"`，避免只显示 never 但实际仍受沙箱限制。
 
 第三方模型目录刷新也可以手动执行；它只更新 `model_catalog_json` 指向的模型目录文件，保留当前 `model` 和 `model_reasoning_effort`：
 

@@ -434,7 +434,7 @@ test_config_menu_can_select_saved_profile() {
     codex_config_profile_save primary
     codex_config_write_third_party_config "https://api-b.example.test/v1" "sk-b" "gpt-5.4" "$tmp/models-b.txt"
     codex_config_profile_save secondary
-    printf '%s\n%s\n' "3" "1" |
+    printf '%s\n%s\n%s\n' "2" "1" "9" |
       codex_config_menu >"$tmp/stdout" 2>"$tmp/stderr"
   ) || {
     sed -n '1,200p' "$tmp/stderr" >&2 || true
@@ -445,7 +445,132 @@ test_config_menu_can_select_saved_profile() {
   assert_file_contains "$tmp/home/.codex/config.toml" 'base_url = "https://api-a.example.test/v1"'
   assert_file_contains "$tmp/home/.codex/auth.json" '"OPENAI_API_KEY": "sk-a"'
   assert_file_contains "$tmp/stderr" "Codex 配置模式"
-  assert_file_contains "$tmp/stderr" "选择已保存配置"
+  assert_file_contains "$tmp/stderr" "选择配置"
+  rm -rf "$tmp"
+}
+
+
+test_config_menu_new_profile_prompts_and_saves() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-menu-new-profile.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-config.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_FORCE_STDIN=1
+    codex_config_fetch_models() {
+      cat > "$3" <<'EOF'
+{
+  "data": [
+    {"id":"gpt-5.4"},
+    {"id":"gpt-5.5"}
+  ]
+}
+EOF
+      : > "$4"
+      return 0
+    }
+    printf '%s\n%s\n%s\n%s\n%s\n%s\n' "1" "https://api.example.test" "sk-test" "2" "1" "9" |
+      codex_config_menu >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || {
+    sed -n '1,240p' "$tmp/stderr" >&2 || true
+    fail "config menu should create and save a new profile"
+  }
+
+  assert_file_contains "$tmp/home/.codex/config.toml" 'model = "gpt-5.5"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'base_url = "https://api.example.test/v1"'
+  assert_file_contains "$tmp/home/.codex/config-profiles/current" 'default'
+  assert_file_contains "$tmp/home/.codex/config-profiles/default/config.toml" 'model = "gpt-5.5"'
+  assert_file_contains "$tmp/home/.codex/config-profiles/default/auth.json" '"OPENAI_API_KEY": "sk-test"'
+  [ -s "$tmp/home/.codex/config-profiles/default/model_catalog.json" ] || fail "new profile should save model catalog"
+  assert_file_contains "$tmp/stderr" "是否保存为配置档"
+  assert_file_contains "$tmp/stderr" "保存为 default"
+  rm -rf "$tmp"
+}
+
+test_config_menu_unsaved_switch_can_save_first() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-menu-unsaved-switch.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home"
+  printf '%s\n' "gpt-5.5" > "$tmp/models-a.txt"
+  printf '%s\n' "gpt-5.4" > "$tmp/models-b.txt"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-config.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_FORCE_STDIN=1
+    codex_config_write_third_party_config "https://api-a.example.test/v1" "sk-a" "gpt-5.5" "$tmp/models-a.txt"
+    codex_config_profile_save primary
+    codex_config_write_third_party_config "https://api-b.example.test/v1" "sk-b" "gpt-5.4" "$tmp/models-b.txt"
+    codex_config_profile_save secondary
+    sed 's/model = "gpt-5.4"/model = "unsaved-model"/' "$CODEX_HOME/config.toml" > "$CODEX_HOME/config.toml.tmp"
+    mv "$CODEX_HOME/config.toml.tmp" "$CODEX_HOME/config.toml"
+    printf '%s\n%s\n%s\n%s\n' "2" "1" "1" "9" |
+      codex_config_menu >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || {
+    sed -n '1,260p' "$tmp/stderr" >&2 || true
+    fail "config menu should offer saving dirty current profile before switching"
+  }
+
+  assert_file_contains "$tmp/home/.codex/config.toml" 'model = "gpt-5.5"'
+  assert_file_contains "$tmp/home/.codex/config-profiles/current" 'primary'
+  assert_file_contains "$tmp/home/.codex/config-profiles/secondary/config.toml" 'model = "unsaved-model"'
+  assert_file_contains "$tmp/stderr" "当前配置有未保存修改"
+  assert_file_contains "$tmp/stderr" "保存到当前配置：secondary"
+  rm -rf "$tmp"
+}
+
+test_config_menu_empty_profile_and_bad_input_do_not_exit() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-menu-empty-bad-input.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-config.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_FORCE_STDIN=1
+    printf '%s\n%s\n%s\n' "2" "x" "9" |
+      codex_config_menu >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || {
+    sed -n '1,200p' "$tmp/stderr" >&2 || true
+    fail "config menu should not exit on empty profile list or bad input"
+  }
+
+  assert_file_contains "$tmp/stderr" "没有已保存配置"
+  assert_file_contains "$tmp/stderr" "请输入 0 到 9"
+  rm -rf "$tmp"
+}
+
+test_config_menu_delete_profile_can_cancel() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-menu-delete-cancel.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home"
+  printf '%s\n' "gpt-5.5" > "$tmp/models.txt"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-config.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_FORCE_STDIN=1
+    codex_config_write_third_party_config "https://api.example.test/v1" "sk-a" "gpt-5.5" "$tmp/models.txt"
+    codex_config_profile_save primary
+    printf '%s\n%s\n%s\n%s\n' "5" "1" "n" "9" |
+      codex_config_menu >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || {
+    sed -n '1,220p' "$tmp/stderr" >&2 || true
+    fail "config menu delete should be cancellable"
+  }
+
+  [ -s "$tmp/home/.codex/config-profiles/primary/config.toml" ] || fail "cancelled delete should keep profile"
+  assert_file_contains "$tmp/stderr" "已取消删除"
   rm -rf "$tmp"
 }
 
@@ -621,6 +746,10 @@ run_step test_repair_full_permission_adds_sandbox_mode
 run_step test_model_catalog_uses_current_codex_schema_shapes
 run_step test_profile_save_and_use_switches_only_runtime_config
 run_step test_config_menu_can_select_saved_profile
+run_step test_config_menu_new_profile_prompts_and_saves
+run_step test_config_menu_unsaved_switch_can_save_first
+run_step test_config_menu_empty_profile_and_bad_input_do_not_exit
+run_step test_config_menu_delete_profile_can_cancel
 run_step test_proot_launcher_preserves_codex_args
 run_step test_update_download_failure_is_error
 run_step test_partial_download_failure_is_not_accepted

@@ -888,6 +888,10 @@ codex_config_profiles_root() {
   printf '%s/config-profiles\n' "$(codex_home)"
 }
 
+codex_config_profile_current_file() {
+  printf '%s/current\n' "$(codex_config_profiles_root)"
+}
+
 codex_config_profile_valid_name() {
   name="$1"
   [ -n "$name" ] || return 1
@@ -901,6 +905,93 @@ codex_config_profile_dir() {
   name="$1"
   codex_config_profile_valid_name "$name" || codex_die "配置名称无效，只能使用字母、数字、点、下划线和短横线：$name"
   printf '%s/%s\n' "$(codex_config_profiles_root)" "$name"
+}
+
+codex_config_profile_current_name() {
+  current_file="$(codex_config_profile_current_file)"
+  [ -s "$current_file" ] || return 0
+  name="$(sed -n '1p' "$current_file" 2>/dev/null | tr -d '\r')"
+  codex_config_profile_valid_name "$name" || return 0
+  [ -d "$(codex_config_profile_dir "$name")" ] || return 0
+  printf '%s\n' "$name"
+}
+
+codex_config_profile_mark_current() {
+  name="$1"
+  codex_config_profile_valid_name "$name" || codex_die "配置名称无效，只能使用字母、数字、点、下划线和短横线：$name"
+  root="$(codex_config_profiles_root)"
+  mkdir -p "$root"
+  printf '%s\n' "$name" > "$(codex_config_profile_current_file)"
+  chmod 600 "$(codex_config_profile_current_file)" 2>/dev/null || true
+}
+
+codex_config_profile_clear_current() {
+  rm -f "$(codex_config_profile_current_file)" 2>/dev/null || true
+}
+
+codex_config_profile_list() {
+  root="$(codex_config_profiles_root)"
+  [ -d "$root" ] || return 0
+  find "$root" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | sort
+}
+
+codex_config_profile_count() {
+  codex_config_profile_list | wc -l | tr -d ' '
+}
+
+codex_config_files_same() {
+  left="$1"
+  right="$2"
+  if [ -e "$left" ] || [ -e "$right" ]; then
+    [ -s "$left" ] && [ -s "$right" ] || return 1
+    cmp -s "$left" "$right"
+    return $?
+  fi
+  return 0
+}
+
+codex_config_profile_matches_current() {
+  name="$1"
+  dir="$(codex_config_profile_dir "$name")"
+  home_dir="$(codex_home)"
+  codex_config_files_same "$home_dir/config.toml" "$dir/config.toml" || return 1
+  codex_config_files_same "$home_dir/auth.json" "$dir/auth.json" || return 1
+  codex_config_files_same "$home_dir/model_catalog.json" "$dir/model_catalog.json" || return 1
+  return 0
+}
+
+codex_config_profile_is_dirty() {
+  codex_config_has_runtime_config || return 1
+  current="$(codex_config_profile_current_name)"
+  [ -n "$current" ] || return 0
+  codex_config_profile_matches_current "$current" || return 0
+  return 1
+}
+
+codex_config_profile_status_label() {
+  if ! codex_config_has_runtime_config; then
+    printf '%s\n' "无当前配置"
+    return 0
+  fi
+  current="$(codex_config_profile_current_name)"
+  if [ -z "$current" ]; then
+    printf '%s\n' "未保存当前配置"
+  elif codex_config_profile_is_dirty; then
+    printf '%s\n' "$current（未保存修改）"
+  else
+    printf '%s\n' "$current"
+  fi
+}
+
+codex_config_default_profile_name() {
+  current="$(codex_config_profile_current_name)"
+  [ -n "$current" ] && { printf '%s\n' "$current"; return 0; }
+  if [ "$(codex_config_profile_count)" = "0" ]; then
+    printf '%s\n' "default"
+  else
+    stamp="$(date '+%Y%m%d-%H%M%S' 2>/dev/null || printf '%s' "$$")"
+    printf 'profile-%s\n' "$stamp"
+  fi
 }
 
 codex_config_profile_save() {
@@ -921,6 +1012,7 @@ codex_config_profile_save() {
   rm -rf "$dest"
   mv "$profile_tmp" "$dest"
   chmod 700 "$dest" 2>/dev/null || true
+  codex_config_profile_mark_current "$name"
   codex_info "已保存配置：$name"
 }
 
@@ -953,7 +1045,9 @@ codex_config_profile_use() {
   fi
 
   codex_config_clear_official_mode
+  codex_config_apply_full_permission "$home_dir/config.toml"
   codex_config_ensure_default_hooks
+  codex_config_profile_mark_current "$name"
   codex_info "已切换配置：$name"
 }
 
@@ -964,38 +1058,280 @@ codex_config_profile_new() {
   codex_config_profile_save "$name"
 }
 
-codex_config_profile_list() {
-  root="$(codex_config_profiles_root)"
-  [ -d "$root" ] || return 0
-  find "$root" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | sort
-}
-
-codex_config_profile_choose_use() {
-  work="$(codex_state_root)/profile-menu"
-  mkdir -p "$work"
-  profiles_file="$work/profiles.txt"
-  codex_config_profile_list > "$profiles_file"
-  [ -s "$profiles_file" ] || codex_die "没有已保存配置；可先在配置模式中保存当前配置"
-  printf '%s\n' "已保存配置：" >&2
-  awk '{ printf "%2d. %s\n", NR, $0 }' "$profiles_file" >&2
-  count="$(wc -l < "$profiles_file" | tr -d ' ')"
-  choice="$(codex_config_tty_read "请选择配置编号" "1")"
-  case "$choice" in *[!0-9]*|"") choice=1 ;; esac
-  [ "$choice" -ge 1 ] 2>/dev/null || choice=1
-  [ "$choice" -le "$count" ] 2>/dev/null || choice=1
-  name="$(sed -n "${choice}p" "$profiles_file")"
-  [ -n "$name" ] || codex_die "配置选择为空"
-  codex_config_profile_use "$name"
+codex_config_prompt_profile_name() {
+  prompt="$1"
+  default="${2:-}"
+  CODEX_CONFIG_PROFILE_NAME=""
+  while :; do
+    name="$(codex_config_tty_read "$prompt（b 返回，0 退出）" "$default")"
+    case "$name" in
+      b|B|back|BACK|返回) return 1 ;;
+      0|q|Q|quit|QUIT|退出) codex_info "已退出配置模式。"; exit 0 ;;
+    esac
+    if codex_config_profile_valid_name "$name"; then
+      CODEX_CONFIG_PROFILE_NAME="$name"
+      return 0
+    fi
+    codex_warn "配置名称无效，只能使用字母、数字、点、下划线和短横线。"
+  done
 }
 
 codex_config_profile_save_interactive() {
-  name="$(codex_config_tty_read "请输入配置名称" "")"
-  codex_config_profile_valid_name "$name" || codex_die "配置名称无效，只能使用字母、数字、点、下划线和短横线：$name"
+  default="$(codex_config_default_profile_name)"
+  codex_config_prompt_profile_name "请输入配置名称" "$default" || return 1
+  name="$CODEX_CONFIG_PROFILE_NAME"
   dest="$(codex_config_profile_dir "$name")"
-  if [ -e "$dest" ] && ! codex_config_tty_confirm "配置已存在，是否覆盖？" "n"; then
-    codex_die "已取消保存配置"
+  if [ -e "$dest" ] && ! codex_config_tty_confirm "配置已存在，是否覆盖？" "y"; then
+    codex_warn "已取消保存配置"
+    return 1
   fi
   codex_config_profile_save "$name"
+}
+
+codex_config_profile_choose_name() {
+  prompt="${1:-请选择配置编号}"
+  work="$(codex_state_root)/profile-menu"
+  mkdir -p "$work"
+  profiles_file="$work/profiles.txt"
+  CODEX_CONFIG_SELECTED_PROFILE=""
+  while :; do
+    codex_config_profile_list > "$profiles_file"
+    if [ ! -s "$profiles_file" ]; then
+      codex_warn "没有已保存配置；请先新建或保存当前配置。"
+      return 1
+    fi
+    printf '%s\n' "已保存配置：" >&2
+    awk '{ printf "%2d. %s\n", NR, $0 }' "$profiles_file" >&2
+    printf '%s\n' "b. 返回上一层" >&2
+    printf '%s\n' "0. 退出，不启动 Codex" >&2
+    count="$(wc -l < "$profiles_file" | tr -d ' ')"
+    choice="$(codex_config_tty_read "$prompt" "b")"
+    case "$choice" in
+      b|B|back|BACK|返回) return 1 ;;
+      0|q|Q|quit|QUIT|退出) codex_info "已退出配置模式。"; exit 0 ;;
+      *[!0-9]*|"") codex_warn "请输入有效编号，或输入 b 返回。"; continue ;;
+    esac
+    if [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$count" ] 2>/dev/null; then
+      CODEX_CONFIG_SELECTED_PROFILE="$(sed -n "${choice}p" "$profiles_file")"
+      return 0
+    fi
+    codex_warn "配置编号超出范围。"
+  done
+}
+
+codex_config_confirm_save_dirty_before() {
+  reason="${1:-继续操作}"
+  codex_config_profile_is_dirty || return 0
+  while :; do
+    current="$(codex_config_profile_current_name)"
+    printf '%s\n' "当前配置有未保存修改，$reason 前请选择：" >&2
+    if [ -n "$current" ]; then
+      printf '%s\n' "1. 保存到当前配置：$current（推荐）" >&2
+    else
+      printf '%s\n' "1. 保存为配置档（推荐）" >&2
+    fi
+    printf '%s\n' "2. 另存为新配置" >&2
+    printf '%s\n' "3. 不保存，继续" >&2
+    printf '%s\n' "b. 取消并返回上一层" >&2
+    printf '%s\n' "0. 退出，不启动 Codex" >&2
+    choice="$(codex_config_tty_read "请输入选项编号" "1")"
+    case "$choice" in
+      1|"")
+        if [ -n "$current" ]; then
+          codex_config_profile_save "$current" && return 0
+        else
+          codex_config_profile_save_interactive && return 0
+        fi
+        ;;
+      2)
+        codex_config_profile_save_interactive && return 0
+        ;;
+      3)
+        return 0
+        ;;
+      b|B|back|BACK|返回)
+        return 1
+        ;;
+      0|q|Q|quit|QUIT|退出)
+        codex_info "已退出配置模式。"
+        exit 0
+        ;;
+      *)
+        codex_warn "请输入 1、2、3、b 或 0。"
+        ;;
+    esac
+  done
+}
+
+codex_config_prompt_save_after_write() {
+  default="${1:-$(codex_config_default_profile_name)}"
+  while :; do
+    printf '%s\n' "是否保存为配置档？" >&2
+    printf '%s\n' "1. 保存为 $default（推荐）" >&2
+    printf '%s\n' "2. 输入新名称保存" >&2
+    printf '%s\n' "3. 暂不保存，保留为当前未保存配置" >&2
+    printf '%s\n' "b. 返回菜单" >&2
+    printf '%s\n' "0. 退出，不启动 Codex" >&2
+    choice="$(codex_config_tty_read "请输入选项编号" "1")"
+    case "$choice" in
+      1|"")
+        if [ -e "$(codex_config_profile_dir "$default")" ] && ! codex_config_tty_confirm "配置 $default 已存在，是否覆盖？" "y"; then
+          continue
+        fi
+        codex_config_profile_save "$default"
+        return 0
+        ;;
+      2)
+        codex_config_profile_save_interactive
+        return 0
+        ;;
+      3|b|B|back|BACK|返回)
+        codex_config_profile_clear_current
+        codex_warn "当前配置尚未保存；切换或退出前会再次提示保存。"
+        return 0
+        ;;
+      0|q|Q|quit|QUIT|退出)
+        codex_info "已退出配置模式。"
+        exit 0
+        ;;
+      *)
+        codex_warn "请输入 1、2、3、b 或 0。"
+        ;;
+    esac
+  done
+}
+
+codex_config_profile_choose_use() {
+  codex_config_profile_choose_name "请选择要切换的配置编号" || return 1
+  CODEX_CONFIG_PROFILE_TO_USE="$CODEX_CONFIG_SELECTED_PROFILE"
+  codex_config_confirm_save_dirty_before "切换配置" || return 1
+  codex_config_profile_use "$CODEX_CONFIG_PROFILE_TO_USE"
+}
+
+codex_config_profile_delete_interactive() {
+  codex_config_profile_choose_name "请选择要删除的配置编号" || return 1
+  CODEX_CONFIG_PROFILE_TO_DELETE="$CODEX_CONFIG_SELECTED_PROFILE"
+  dir="$(codex_config_profile_dir "$CODEX_CONFIG_PROFILE_TO_DELETE")"
+  [ -d "$dir" ] || { codex_warn "配置不存在：$CODEX_CONFIG_PROFILE_TO_DELETE"; return 1; }
+  if ! codex_config_tty_confirm "确认删除配置 $CODEX_CONFIG_PROFILE_TO_DELETE？" "n"; then
+    codex_warn "已取消删除。"
+    return 1
+  fi
+  rm -rf "$dir"
+  current="$(codex_config_profile_current_name)"
+  [ "$current" = "$CODEX_CONFIG_PROFILE_TO_DELETE" ] && codex_config_profile_clear_current
+  codex_info "已删除配置：$CODEX_CONFIG_PROFILE_TO_DELETE"
+}
+
+codex_config_profile_summary_from_dir() {
+  label="$1"
+  dir="$2"
+  cfg="$dir/config.toml"
+  auth="$dir/auth.json"
+  catalog="$dir/model_catalog.json"
+  printf '%s\n' "[$label]" >&2
+  if [ ! -s "$cfg" ]; then
+    printf '%s\n' "  config.toml: 缺失" >&2
+    return 0
+  fi
+  printf '%s\n' "  model: $(codex_config_current_model "$cfg")" >&2
+  printf '%s\n' "  base_url: $(codex_config_current_base_url "$cfg")" >&2
+  if codex_config_is_full_permission "$cfg"; then
+    printf '%s\n' "  full_permission: yes" >&2
+  else
+    printf '%s\n' "  full_permission: no" >&2
+  fi
+  [ -s "$auth" ] && printf '%s\n' "  auth.json: 已保存（key 不显示）" >&2 || printf '%s\n' "  auth.json: 缺失" >&2
+  [ -s "$catalog" ] && printf '%s\n' "  model_catalog.json: 已保存" >&2 || printf '%s\n' "  model_catalog.json: 缺失" >&2
+}
+
+codex_config_current_summary() {
+  home_dir="$(codex_home)"
+  tmp_dir="$home_dir"
+  printf '%s\n' "当前配置：$(codex_config_profile_status_label)" >&2
+  codex_config_profile_summary_from_dir "current" "$tmp_dir"
+}
+
+codex_config_profile_view_interactive() {
+  codex_config_current_summary
+  printf '%s\n' "" >&2
+  printf '%s\n' "已保存配置：" >&2
+  if codex_config_profile_list | sed 's/^/  - /' >&2; then
+    :
+  fi
+  printf '%s\n' "" >&2
+  codex_config_profile_choose_name "输入编号查看详情，或 b 返回" || return 0
+  CODEX_CONFIG_PROFILE_TO_VIEW="$CODEX_CONFIG_SELECTED_PROFILE"
+  codex_config_profile_summary_from_dir "$CODEX_CONFIG_PROFILE_TO_VIEW" "$(codex_config_profile_dir "$CODEX_CONFIG_PROFILE_TO_VIEW")"
+}
+
+codex_config_menu_migrate_existing() {
+  codex_config_has_runtime_config || return 0
+  root="$(codex_config_profiles_root)"
+  mkdir -p "$root"
+  current="$(codex_config_profile_current_name)"
+  [ -n "$current" ] && return 0
+  if [ "$(codex_config_profile_count)" = "0" ]; then
+    printf '%s\n' "检测到当前已有配置，但还没有保存档。" >&2
+    while :; do
+      printf '%s\n' "1. 保存为 default（推荐）" >&2
+      printf '%s\n' "2. 输入名称保存" >&2
+      printf '%s\n' "3. 暂不保存" >&2
+      choice="$(codex_config_tty_read "请输入选项编号" "1")"
+      case "$choice" in
+        1|"") codex_config_profile_save default; return 0 ;;
+        2) codex_config_profile_save_interactive; return 0 ;;
+        3) codex_warn "当前配置尚未保存；切换或退出前会再次提示保存。"; return 0 ;;
+        *) codex_warn "请输入 1、2 或 3。" ;;
+      esac
+    done
+  fi
+  for name in $(codex_config_profile_list); do
+    if codex_config_profile_matches_current "$name"; then
+      codex_config_profile_mark_current "$name"
+      return 0
+    fi
+  done
+  codex_warn "当前配置未匹配到已保存配置；切换或退出前会提示保存。"
+}
+
+codex_config_menu_new() {
+  if ( codex_config_prompt_third_party new ); then
+    default="$(codex_config_default_profile_name)"
+    codex_config_prompt_save_after_write "$default"
+  else
+    codex_warn "新建配置未完成，已返回配置模式。"
+  fi
+}
+
+codex_config_menu_edit() {
+  [ -s "$(codex_config_file)" ] || { codex_warn "缺少当前 config.toml，无法编辑；请先新建配置。"; return 1; }
+  current="$(codex_config_profile_current_name)"
+  if ( codex_config_prompt_third_party edit ); then
+    default="${current:-$(codex_config_default_profile_name)}"
+    codex_config_prompt_save_after_write "$default"
+  else
+    codex_warn "编辑配置未完成，已返回配置模式。"
+  fi
+}
+
+codex_config_menu_refresh_models() {
+  if ( codex_config_backup_current; codex_config_refresh_models ); then
+    current="$(codex_config_profile_current_name)"
+    [ -z "$current" ] || codex_config_profile_save "$current" || true
+    codex_info "模型目录刷新完成。"
+  else
+    codex_warn "模型目录刷新失败，已返回配置模式。"
+  fi
+}
+
+codex_config_menu_repair_full_permission() {
+  if ( codex_config_repair_full_permission ); then
+    current="$(codex_config_profile_current_name)"
+    [ -z "$current" ] || codex_config_profile_save "$current" || true
+  else
+    codex_warn "全权限授权修复失败，已返回配置模式。"
+  fi
 }
 
 codex_config_repair_full_permission() {
@@ -1011,48 +1347,66 @@ codex_config_repair_full_permission() {
 }
 
 codex_config_menu() {
-  printf '%s\n' "Codex 配置模式" >&2
-  printf '%s\n' "1. 新建/重配第三方 API" >&2
-  printf '%s\n' "2. 编辑当前第三方配置" >&2
-  printf '%s\n' "3. 选择已保存配置" >&2
-  printf '%s\n' "4. 保存当前配置" >&2
-  printf '%s\n' "5. 刷新模型目录" >&2
-  printf '%s\n' "6. 修复全权限授权" >&2
-  printf '%s\n' "7. 退出，不启动 Codex" >&2
+  codex_config_menu_migrate_existing
   while :; do
-    choice="$(codex_config_tty_read "请输入选项编号" "1")"
+    printf '%s\n' "" >&2
+    printf '%s\n' "Codex 配置模式" >&2
+    printf '%s\n' "当前配置：$(codex_config_profile_status_label)" >&2
+    printf '%s\n' "1. 新建配置" >&2
+    printf '%s\n' "2. 选择配置" >&2
+    printf '%s\n' "3. 编辑当前配置" >&2
+    printf '%s\n' "4. 查看配置" >&2
+    printf '%s\n' "5. 删除配置" >&2
+    printf '%s\n' "6. 保存当前配置" >&2
+    printf '%s\n' "7. 刷新当前模型目录" >&2
+    printf '%s\n' "8. 修复全权限授权" >&2
+    printf '%s\n' "9. 返回并启动 Codex" >&2
+    printf '%s\n' "0. 退出，不启动 Codex" >&2
+    choice="$(codex_config_tty_read "请输入选项编号" "9")"
     case "$choice" in
-      1|"")
-        codex_config_prompt_third_party new
-        return 0
+      1)
+        codex_config_menu_new
         ;;
       2)
-        codex_config_prompt_third_party edit
-        return 0
+        codex_config_profile_choose_use || true
         ;;
       3)
-        codex_config_profile_choose_use
-        return 0
+        codex_config_menu_edit || true
         ;;
       4)
-        codex_config_profile_save_interactive
-        return 0
+        codex_config_profile_view_interactive || true
         ;;
       5)
-        codex_config_backup_current
-        codex_config_refresh_models
-        return 0
+        codex_config_profile_delete_interactive || true
         ;;
       6)
-        codex_config_repair_full_permission
-        return 0
+        if codex_config_has_runtime_config; then
+          codex_config_profile_save_interactive || true
+        else
+          codex_warn "当前没有可保存的配置；请先新建配置。"
+        fi
         ;;
       7)
+        codex_config_menu_refresh_models
+        ;;
+      8)
+        codex_config_menu_repair_full_permission
+        ;;
+      9)
+        codex_config_confirm_save_dirty_before "返回启动 Codex" || continue
+        return 0
+        ;;
+      0|q|Q|quit|QUIT|退出)
+        codex_config_confirm_save_dirty_before "退出配置模式" || continue
         codex_info "已退出配置模式。"
         exit 0
         ;;
+      b|B|back|BACK|返回)
+        codex_config_confirm_save_dirty_before "返回启动 Codex" || continue
+        return 0
+        ;;
       *)
-        codex_warn "请输入 1 到 7。"
+        codex_warn "请输入 0 到 9，或输入 b 返回。"
         ;;
     esac
   done

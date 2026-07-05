@@ -38,7 +38,7 @@ codex-update apply
 codex-local refresh-models
 ```
 
-`codex 更新` 只增量更新脚本，不重装依赖、不替换 Codex 二进制；`codex 配置模式` 重新进入第三方 API 配置引导。安装器不管理 `AGENTS.md`，需要项目规则时请在 Codex 内运行 `/init`。
+`codex 更新` 只增量更新脚本，不重装依赖、不替换 Codex 二进制；`codex 配置模式` 打开配置管理器，支持配置增删改查、切换和未保存保护：新建或编辑后会主动询问保存，切换或退出前会提示保存未保存修改。安装器不管理 `AGENTS.md`，需要项目规则时请在 Codex 内运行 `/init`。
 
 ## 文件面板
 
