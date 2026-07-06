@@ -1,5 +1,22 @@
 # Changelog
 
+## Codex for TUI 2.2.9
+
+Codex for TUI 2.2.9 是 2.2.8 的正式热修版，继续修复后台/折叠 WebView 截图在真机上仍为空图的问题。
+
+### 修复
+
+- 后台截图 capture host 不再用透明宿主，而是挂到 App 内容背后，保持 WebView 处于真实窗口和可见层级中，同时不展开浏览器托盘。
+- 创建 WebView 前启用 `WebView.enableSlowWholeDocumentDraw()`，截图前等待 Choreographer 渲染帧和 visual state，减少刚挂载即截图导致的空白。
+- WebView 截图兜底链路改为普通 `draw()`、自定义 WebView `onDraw()`、`capturePicture()` 和 DOM 文本快照四段，避免单一路径在 Android WebView 上返回灰白图。
+- 继续保留 2.2.7/2.2.8 的 JS 裸表达式、Auth 状态清理和 RTK/context hook 来源显示修复。
+
+### 验证
+
+- 本地仍只运行非 APK 门禁：`git diff --check`、各 bridge asset `sh -n`、`sh tests/codex-for-tui-static-guards.sh`、`sh tests/codex-for-tui-installer-smoke.sh`、`sh -n tests/codex-for-tui-device-smoke.sh`、`sh -n tests/codex-for-tui-browser-smoke.sh`。
+- APK、正式签名和 release 资产仍只通过 GitHub Actions 构建。
+- 真机验证重点：后台截图必须在 `visible=0 collapsed=1` 时生成真实 Example Domain 页面，且不自动展开浏览器托盘。
+
 ## Codex for TUI 2.2.8
 
 Codex for TUI 2.2.8 是 2.2.7 的正式热修版，修复 2.2.7 真机复测发现的后台/折叠 WebView 截图灰白空图问题。

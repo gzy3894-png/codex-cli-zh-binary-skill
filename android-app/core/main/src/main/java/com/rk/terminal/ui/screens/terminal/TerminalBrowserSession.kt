@@ -10,11 +10,13 @@ import android.content.MutableContextWrapper
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
+import android.view.Choreographer
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -88,6 +90,13 @@ data class TerminalBrowserSnapshot(
     val recommendedNextAction: String = ""
 )
 
+@SuppressLint("ViewConstructor")
+private class CapturableWebView(context: Context) : WebView(context) {
+    fun drawWebContent(canvas: Canvas) {
+        super.onDraw(canvas)
+    }
+}
+
 private data class BrowserTab(
     val id: Int,
     val contextWrapper: MutableContextWrapper,
@@ -103,6 +112,12 @@ private data class BrowserTab(
     var riskChallengeDetected: Boolean = false,
     var riskChallengeKind: String = "",
     var recommendedNextAction: String = ""
+)
+
+private data class BrowserPageTextSnapshot(
+    val title: String,
+    val url: String,
+    val text: String
 )
 
 private data class BrowserUserScript(
@@ -684,7 +699,8 @@ class TerminalBrowserSessionManager(
                 captureWidth = width
                 captureHeight = height
                 prepareWebViewForCapture(tab.webView)
-                val bitmap = captureWebViewBitmap(tab.webView, width, height)
+                val pageTextSnapshot = pageTextSnapshot(tab.webView)
+                val bitmap = captureWebViewBitmap(tab.webView, width, height, pageTextSnapshot)
                 withContext(Dispatchers.IO) {
                     file.parentFile?.mkdirs()
                     FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -957,8 +973,12 @@ class TerminalBrowserSessionManager(
     private fun createTab(): BrowserTab {
         val tabId = ++nextTabId
         val contextWrapper = MutableContextWrapper(initialContext)
-        val webView = WebView(contextWrapper).apply {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            runCatching { WebView.enableSlowWholeDocumentDraw() }
+        }
+        val webView = CapturableWebView(contextWrapper).apply {
             setBackgroundColor(Color.WHITE)
+            setWillNotDraw(false)
             isFocusable = true
             isFocusableInTouchMode = true
             settings.javaScriptEnabled = true
@@ -1685,13 +1705,12 @@ class TerminalBrowserSessionManager(
             setBackgroundColor(Color.WHITE)
             clipChildren = false
             clipToPadding = false
-            alpha = 0.01f
             isClickable = false
             isFocusable = false
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
         }
         tab.contextWrapper.baseContext = activity
-        root.addView(host, ViewGroup.LayoutParams(width, height))
+        root.addView(host, 0, ViewGroup.LayoutParams(width, height))
         host.addView(
             tab.webView,
             ViewGroup.LayoutParams(
@@ -1715,7 +1734,36 @@ class TerminalBrowserSessionManager(
         tab.contextWrapper.baseContext = appContext
     }
 
-    private fun captureWebViewBitmap(webView: WebView, width: Int, height: Int): Bitmap {
+    private suspend fun pageTextSnapshot(webView: WebView): BrowserPageTextSnapshot {
+        return runCatching {
+            val raw = webView.evaluate(
+                """
+                (function(){
+                  return JSON.stringify({
+                    title: document.title || '',
+                    url: location.href || '',
+                    text: (document.body && document.body.innerText || '').slice(0, 4000)
+                  });
+                })();
+                """.trimIndent()
+            )
+            val obj = JSONObject(decodeJsString(raw))
+            BrowserPageTextSnapshot(
+                title = obj.optString("title"),
+                url = obj.optString("url"),
+                text = obj.optString("text")
+            )
+        }.getOrElse {
+            BrowserPageTextSnapshot(title = webView.title.orEmpty(), url = webView.url.orEmpty(), text = "")
+        }
+    }
+
+    private fun captureWebViewBitmap(
+        webView: WebView,
+        width: Int,
+        height: Int,
+        pageTextSnapshot: BrowserPageTextSnapshot
+    ): Bitmap {
         val originalLayerType = webView.layerType
         var changedLayerType = false
         return try {
@@ -1727,19 +1775,116 @@ class TerminalBrowserSessionManager(
             if (!isProbablyBlankBitmap(drawn)) {
                 drawn
             } else {
+                val content = drawWebViewContentBitmap(webView, width, height)
+                if (content != null && !isProbablyBlankBitmap(content)) {
+                    drawn.recycle()
+                    return content
+                }
+                content?.recycle()
                 val picture = captureWebViewPictureBitmap(webView, width, height)
                 if (picture != null && !isProbablyBlankBitmap(picture)) {
                     drawn.recycle()
                     picture
                 } else {
                     picture?.recycle()
-                    drawn
+                    val fallback = drawPageTextFallbackBitmap(pageTextSnapshot, width, height)
+                    if (fallback != null && !isProbablyBlankBitmap(fallback)) {
+                        drawn.recycle()
+                        fallback
+                    } else {
+                        fallback?.recycle()
+                        drawn
+                    }
                 }
             }
         } finally {
             if (changedLayerType) {
                 webView.setLayerType(originalLayerType, null)
             }
+        }
+    }
+
+    private fun drawPageTextFallbackBitmap(
+        snapshot: BrowserPageTextSnapshot,
+        width: Int,
+        height: Int
+    ): Bitmap? {
+        val title = snapshot.title.trim()
+        val url = snapshot.url.trim()
+        val body = snapshot.text.trim()
+        if (title.isBlank() && url.isBlank() && body.isBlank()) return null
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(Color.WHITE)
+            val left = (width * 0.08f).coerceAtLeast(48f)
+            val right = width - left
+            var y = (height * 0.12f).coerceAtLeast(80f)
+            val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(32, 33, 36)
+                textSize = (width / 28f).coerceIn(34f, 54f)
+                isFakeBoldText = true
+            }
+            val urlPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(95, 99, 104)
+                textSize = (width / 52f).coerceIn(20f, 30f)
+            }
+            val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(32, 33, 36)
+                textSize = (width / 44f).coerceIn(24f, 36f)
+            }
+            if (title.isNotBlank()) {
+                y = drawWrappedText(canvas, title, titlePaint, left, right, y, maxLines = 3)
+                y += titlePaint.textSize * 0.7f
+            }
+            if (url.isNotBlank()) {
+                y = drawWrappedText(canvas, url, urlPaint, left, right, y, maxLines = 2)
+                y += urlPaint.textSize * 1.4f
+            }
+            if (body.isNotBlank()) {
+                drawWrappedText(canvas, body, bodyPaint, left, right, y, maxLines = 18)
+            }
+        }
+    }
+
+    private fun drawWrappedText(
+        canvas: Canvas,
+        text: String,
+        paint: Paint,
+        left: Float,
+        right: Float,
+        startY: Float,
+        maxLines: Int
+    ): Float {
+        val width = (right - left).coerceAtLeast(1f)
+        val normalized = text.replace('\r', '\n')
+        val lineHeight = paint.fontSpacing * 1.12f
+        var y = startY
+        var lines = 0
+        for (paragraph in normalized.split('\n')) {
+            var remaining = paragraph.trim()
+            if (remaining.isBlank()) {
+                y += lineHeight
+                continue
+            }
+            while (remaining.isNotBlank() && lines < maxLines) {
+                val count = paint.breakText(remaining, true, width, null).coerceAtLeast(1)
+                val line = remaining.take(count).trimEnd()
+                canvas.drawText(line, left, y, paint)
+                y += lineHeight
+                lines += 1
+                remaining = remaining.drop(count).trimStart()
+            }
+            if (lines >= maxLines) break
+        }
+        return y
+    }
+
+    private fun drawWebViewContentBitmap(webView: WebView, width: Int, height: Int): Bitmap? {
+        val capturableWebView = webView as? CapturableWebView ?: return null
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(Color.WHITE)
+            capturableWebView.drawWebContent(canvas)
         }
     }
 
@@ -1806,10 +1951,34 @@ class TerminalBrowserSessionManager(
         resumeHostedWebView(webView)
         webView.requestLayout()
         webView.invalidate()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+            webView.postInvalidateOnAnimation()
+        }
+        awaitChoreographerFrame()
         awaitWebViewVisualState(webView)
         delay(120)
         webView.invalidate()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+            webView.postInvalidateOnAnimation()
+        }
+        awaitChoreographerFrame()
         awaitWebViewVisualState(webView)
+    }
+
+    private suspend fun awaitChoreographerFrame() {
+        withTimeoutOrNull(500) {
+            suspendCancellableCoroutine<Unit> { continuation ->
+                val callback = Choreographer.FrameCallback {
+                    if (continuation.isActive) {
+                        continuation.resume(Unit)
+                    }
+                }
+                Choreographer.getInstance().postFrameCallback(callback)
+                continuation.invokeOnCancellation {
+                    Choreographer.getInstance().removeFrameCallback(callback)
+                }
+            }
+        }
     }
 
     private suspend fun awaitWebViewVisualState(webView: WebView) {
