@@ -30,20 +30,41 @@ find_prefix() {
   return 1
 }
 
+safe_id() {
+  printf '%s' "$1" | tr -cd 'A-Za-z0-9._-' | cut -c 1-120
+}
+
+write_queued_request() {
+  bridge_dir="$1"
+  shift
+  request_file="$bridge_dir/request"
+  queue_dir="$bridge_dir/queue"
+  mkdir -p "$queue_dir"
+  request_id="$(date +%s 2>/dev/null || printf 0).$$"
+  safe_request_id="$(safe_id "$request_id")"
+  req_tmp="$queue_dir/$safe_request_id.req.tmp.$$"
+  req_file="$queue_dir/$safe_request_id.req"
+  {
+    printf 'request_id=%s\n' "$request_id"
+    printf 'stamp=%s\n' "$request_id"
+    printf 'queued=1\n'
+    while [ "$#" -gt 0 ]; do
+      printf '%s=%s\n' "$1" "$2"
+      shift 2
+    done
+  } > "$req_tmp"
+  legacy_tmp="$request_file.tmp.$$"
+  cp "$req_tmp" "$legacy_tmp"
+  mv "$legacy_tmp" "$request_file"
+  mv "$req_tmp" "$req_file"
+  printf '%s\n' "$request_id"
+}
+
 write_panel_request() {
   bridge_dir="$1/local/media-preview"
   action="$2"
   reason="${3:-$2}"
-  request_file="$bridge_dir/request"
-  mkdir -p "$bridge_dir"
-  request_id="$(date +%s 2>/dev/null || printf 0).$$"
-  {
-    printf 'action=%s\n' "$action"
-    printf 'request_id=%s\n' "$request_id"
-    printf 'stamp=%s\n' "$request_id"
-    printf 'reason=%s\n' "$reason"
-  } > "$request_file.tmp.$$"
-  mv "$request_file.tmp.$$" "$request_file"
+  request_id="$(write_queued_request "$bridge_dir" action "$action" reason "$reason")"
   printf '%s\n' "已发送到 Codex for TUI 文件面板: $request_id"
 }
 
@@ -51,17 +72,7 @@ write_item_request() {
   bridge_dir="$1/local/media-preview"
   action="$2"
   item_id="$3"
-  request_file="$bridge_dir/request"
-  mkdir -p "$bridge_dir"
-  request_id="$(date +%s 2>/dev/null || printf 0).$$"
-  {
-    printf 'action=%s\n' "$action"
-    printf 'request_id=%s\n' "$request_id"
-    printf 'stamp=%s\n' "$request_id"
-    printf 'item_id=%s\n' "$item_id"
-    printf 'reason=%s\n' "$action"
-  } > "$request_file.tmp.$$"
-  mv "$request_file.tmp.$$" "$request_file"
+  request_id="$(write_queued_request "$bridge_dir" action "$action" item_id "$item_id" reason "$action")"
   printf '%s\n' "已发送到 Codex for TUI 文件面板: $request_id"
 }
 
@@ -229,8 +240,9 @@ fi
 
 bridge_dir="$prefix/local/media-preview"
 media_dir="$bridge_dir/files"
+queue_dir="$bridge_dir/queue"
 request_file="$bridge_dir/request"
-mkdir -p "$media_dir"
+mkdir -p "$media_dir" "$queue_dir"
 
 stamp="$(date +%s 2>/dev/null || printf 0).$$"
 if [ "$1" = "text" ] && [ "${2:-}" = "--stdin" ]; then
@@ -274,21 +286,27 @@ else
   tmp="$dest.tmp.$$"
   cp "$src" "$tmp"
 fi
-req_tmp="$request_file.tmp.$$"
+safe_stamp="$(safe_id "$stamp")"
+req_tmp="$queue_dir/$safe_stamp.req.tmp.$$"
+req_file="$queue_dir/$safe_stamp.req"
 
 mv "$tmp" "$dest"
 chmod 600 "$dest" 2>/dev/null || true
 
 {
-  printf 'action=show\n'
   printf 'request_id=%s\n' "$stamp"
+  printf 'stamp=%s\n' "$stamp"
+  printf 'queued=1\n'
+  printf 'action=show\n'
   printf 'present=%s\n' "$present"
   printf 'kind=%s\n' "$kind"
   printf 'path=%s\n' "$dest"
   printf 'name=%s\n' "$base"
-  printf 'stamp=%s\n' "$stamp"
 } > "$req_tmp"
-mv "$req_tmp" "$request_file"
+legacy_tmp="$request_file.tmp.$$"
+cp "$req_tmp" "$legacy_tmp"
+mv "$legacy_tmp" "$request_file"
+mv "$req_tmp" "$req_file"
 write_ref_file "$prefix" "$stamp" "$dest" "$base" "$kind"
 
 printf '已发送到 Codex for TUI 文件面板: %s\n' "$base"

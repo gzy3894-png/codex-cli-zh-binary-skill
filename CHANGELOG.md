@@ -1,5 +1,23 @@
 # Changelog
 
+## Codex for TUI 2.2.6
+
+Codex for TUI 2.2.6 是 bridge 并发可靠性、协作浏览器状态同步和发布安全门禁修复版。
+
+### 修复
+
+- 浏览器请求队列按 `request_id` 幂等处理，避免 legacy `request` 与 queue `.req` 同一请求被重复执行。
+- 文件托盘、会话折叠和 Agent 面板请求改为队列化处理，降低快速连续请求覆盖丢失的概率。
+- 协作浏览器导航增加 token/timeout 隔离，避免旧页面回调完成新请求；外部 scheme、fallback 和下载统一进入用户确认路径。
+- 浏览器状态、用户协作状态和 request 结果持续写回本地 bridge 文件，减少 `status/auth-wait` 看到旧状态。
+- Android 存储边界、备份规则、FileProvider 分享范围和 release 签名/Release 上传门禁加固。
+
+### 验证
+
+- 本地仍只运行非 APK 门禁：`git diff --check`、各 bridge asset `sh -n`、`sh tests/codex-for-tui-static-guards.sh`、`sh tests/codex-for-tui-installer-smoke.sh`、`sh -n tests/codex-for-tui-device-smoke.sh`、`sh -n tests/codex-for-tui-browser-smoke.sh`。
+- APK、正式签名和 release 资产仍只通过 GitHub Actions 构建；release 构建必须校验 version/tag、所有 APK 签名和 SHA256SUMS。
+- 真机验证重点：连续 browser/preview/session/panel 请求不重复不丢失，Custom Tabs 完成/取消/折叠信号可回传，浏览器多标签/Cookie/截图和外部链接确认回归。
+
 ## Codex for TUI 2.2.5
 
 Codex for TUI 2.2.5 是 2.2.4 发布前追加的 RTK 安全热修版：保留 RTK 绝对路径修复，同时避免把复杂 `find` 命令错误改写成 `rtk find`。

@@ -360,7 +360,7 @@ private fun BrowserExternalPromptCard(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(
-            text = "是否打开外部链接？",
+            text = if (prompt.kind == "download") "是否下载/打开文件？" else "是否打开外部链接？",
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold
         )
@@ -376,9 +376,18 @@ private fun BrowserExternalPromptCard(
             maxLines = 5,
             overflow = TextOverflow.Ellipsis
         )
+        if (prompt.fallbackUrl.isNotBlank()) {
+            Text(
+                text = "备用网页：${prompt.fallbackUrl}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = onConfirm) {
-                Text("打开")
+                Text(if (prompt.kind == "download") "下载/打开" else "打开")
             }
             TextButton(onClick = onCancel) {
                 Text("取消")

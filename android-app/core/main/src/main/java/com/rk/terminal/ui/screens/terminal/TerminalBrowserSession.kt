@@ -64,7 +64,8 @@ data class TerminalBrowserExternalPromptSnapshot(
     val requestId: String,
     val target: String,
     val scheme: String,
-    val fallbackUrl: String
+    val fallbackUrl: String,
+    val kind: String = "external"
 )
 
 data class TerminalBrowserSnapshot(
@@ -95,6 +96,9 @@ private data class BrowserTab(
     var isLoading: Boolean = false,
     var lastError: String? = null,
     var loadWaiter: CompletableDeferred<Unit>? = null,
+    var loadWaiterToken: Long = 0L,
+    var loadStartedToken: Long = 0L,
+    var loadingMainFrameUrl: String = "",
     var riskChallengeDetected: Boolean = false,
     var riskChallengeKind: String = "",
     var recommendedNextAction: String = ""
@@ -123,7 +127,8 @@ private data class BrowserExternalOpenPrompt(
     val target: String,
     val scheme: String,
     val fallbackUrl: String,
-    val intent: Intent?
+    val intent: Intent?,
+    val kind: String = "external"
 )
 
 class TerminalBrowserSessionManager(
@@ -351,7 +356,12 @@ class TerminalBrowserSessionManager(
         val tab = tabs[activeTabId] ?: createTab()
         val url = normalizeUrl(rawUrl)
         activeTabId = tab.id
-        tab.loadWaiter = CompletableDeferred()
+        val loadToken = tab.loadWaiterToken + 1L
+        val waiter = CompletableDeferred<Unit>()
+        tab.loadWaiterToken = loadToken
+        tab.loadStartedToken = 0L
+        tab.loadingMainFrameUrl = url
+        tab.loadWaiter = waiter
         tab.currentUrl = url
         tab.lastError = null
         tab.riskChallengeDetected = false
@@ -365,12 +375,18 @@ class TerminalBrowserSessionManager(
         waitForHostLayout(tab)
         tab.webView.loadUrl(url)
         val loaded = withTimeoutOrNull(20000) {
-            tab.loadWaiter?.await()
+            waiter.await()
         } != null
         if (!loaded) {
-            tab.lastError = "Page load timed out before userscript completion"
-            publish("error", tab.lastError.orEmpty())
-            throw IllegalStateException(tab.lastError)
+            if (tab.loadWaiter === waiter && tab.loadWaiterToken == loadToken) {
+                tab.loadWaiter = null
+                tab.loadStartedToken = 0L
+                tab.loadingMainFrameUrl = ""
+                tab.isLoading = false
+                tab.lastError = "Page load timed out before userscript completion"
+                publish("error", tab.lastError.orEmpty())
+            }
+            throw IllegalStateException(tab.lastError ?: "Page load timed out or was superseded by another navigation")
         }
         tab.lastError?.takeIf { it.startsWith("userscript", ignoreCase = true) }?.let {
             publish("error", it)
@@ -379,7 +395,7 @@ class TerminalBrowserSessionManager(
         publish("done", "网页已打开")
         return JSONObject()
             .put("tabId", tab.id)
-            .put("url", tab.currentUrl)
+            .put("url", redactSensitiveUrl(tab.currentUrl))
             .put("title", tab.title)
     }
 
@@ -414,7 +430,7 @@ class TerminalBrowserSessionManager(
                         JSONObject()
                             .put("id", tab.id)
                             .put("title", tab.title)
-                            .put("url", tab.currentUrl)
+                            .put("url", redactSensitiveUrl(tab.currentUrl))
                             .put("isLoading", tab.isLoading)
                             .put("canGoBack", tab.webView.canGoBack())
                             .put("canGoForward", tab.webView.canGoForward())
@@ -450,7 +466,9 @@ class TerminalBrowserSessionManager(
         val historyFile = File(browserDir, "history.jsonl")
         if (historyFile.isFile) {
             historyFile.readLines().takeLast(200).forEach { line ->
-                runCatching { JSONObject(line) }.getOrNull()?.let { entries.put(it) }
+                runCatching { JSONObject(line) }.getOrNull()?.let {
+                    entries.put(it.put("url", redactSensitiveUrl(it.optString("url"))))
+                }
             }
         }
         return JSONObject().put("entries", entries).put("count", entries.length())
@@ -469,7 +487,7 @@ class TerminalBrowserSessionManager(
             .filter { it.isNotBlank() }
             .distinct()
         return JSONObject()
-            .put("url", url)
+            .put("url", redactSensitiveUrl(url))
             .put("hasCookies", names.isNotEmpty())
             .put("cookieCount", names.size)
             .put("cookieNames", JSONArray().apply { names.forEach { put(it) } })
@@ -685,7 +703,7 @@ class TerminalBrowserSessionManager(
             launchCustomTab(url)
         }
         return authTaskJson()
-            .put("url", url)
+            .put("url", redactSensitiveUrl(url))
             .put("external", openNow)
             .put("openNow", openNow)
     }
@@ -710,7 +728,7 @@ class TerminalBrowserSessionManager(
         activeUserRequestId = resolvedTask.requestId
         publish("reopened", resolvedTask.reason)
         launchCustomTab(url)
-        return authTaskJson().put("url", url)
+        return authTaskJson().put("url", redactSensitiveUrl(url))
     }
 
     private fun launchCustomTab(url: String) {
@@ -800,12 +818,13 @@ class TerminalBrowserSessionManager(
         return JSONObject()
             .put("auth", task != null)
             .put("authRequestId", task?.requestId.orEmpty())
-            .put("authUrl", task?.url.orEmpty())
+            .put("authUrl", redactSensitiveUrl(task?.url.orEmpty()))
             .put("authReason", task?.reason.orEmpty())
-            .put("authCode", task?.code.orEmpty())
+            .put("authCode", redactAuthCode(task?.code.orEmpty()))
             .put("authState", task?.state.orEmpty())
             .put("userAction", task?.userAction.orEmpty())
             .put("active", task?.active == true)
+            .put("valuesRedacted", true)
     }
 
     private fun userWait(message: String, requestId: String): JSONObject {
@@ -858,18 +877,28 @@ class TerminalBrowserSessionManager(
             runCatching {
                 initialContext.startActivity(intent)
             }.onFailure { error ->
-                if (error is ActivityNotFoundException && prompt.fallbackUrl.isNotBlank()) {
-                    activeTabId?.let { tabs[it]?.webView?.loadUrl(prompt.fallbackUrl) }
+                val fallbackUrl = sanitizeHttpFallback(prompt.fallbackUrl)
+                if (error is ActivityNotFoundException && fallbackUrl.isNotBlank()) {
+                    activeTabId?.let { tabs[it]?.webView?.loadUrl(fallbackUrl) }
                     fallbackHandled = true
                 }
             }.isSuccess
         } == true || fallbackHandled
-        publish(if (opened) "done" else "cancelled", if (opened) "已打开外部链接" else "没有可处理的外部链接")
+        val successMessage = when {
+            fallbackHandled -> "没有外部应用，已在浏览器打开备用链接"
+            prompt.kind == "download" -> "已交给系统下载/打开"
+            else -> "已打开外部链接"
+        }
+        publish(if (opened) "done" else "cancelled", if (opened) successMessage else "没有可处理的外部链接")
         return JSONObject()
             .put("externalOpen", opened)
             .put("userAction", "confirm")
-            .put("target", prompt.target)
+            .put("target", redactSensitiveUrl(prompt.target))
             .put("scheme", prompt.scheme)
+            .put("fallbackUrl", redactSensitiveUrl(sanitizeHttpFallback(prompt.fallbackUrl)))
+            .put("fallbackHandled", fallbackHandled)
+            .put("kind", prompt.kind)
+            .put("valuesRedacted", true)
     }
 
     private fun cancelExternalOpen(requestId: String): JSONObject {
@@ -889,8 +918,11 @@ class TerminalBrowserSessionManager(
         return JSONObject()
             .put("externalOpen", false)
             .put("userAction", "cancel")
-            .put("target", prompt.target)
+            .put("target", redactSensitiveUrl(prompt.target))
             .put("scheme", prompt.scheme)
+            .put("fallbackUrl", redactSensitiveUrl(sanitizeHttpFallback(prompt.fallbackUrl)))
+            .put("kind", prompt.kind)
+            .put("valuesRedacted", true)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -902,11 +934,13 @@ class TerminalBrowserSessionManager(
             isFocusable = true
             isFocusableInTouchMode = true
             settings.javaScriptEnabled = true
-            settings.javaScriptCanOpenWindowsAutomatically = true
+            settings.javaScriptCanOpenWindowsAutomatically = false
             settings.domStorageEnabled = true
             settings.databaseEnabled = true
-            settings.allowContentAccess = true
-            settings.allowFileAccess = true
+            settings.allowContentAccess = false
+            settings.allowFileAccess = false
+            settings.allowFileAccessFromFileURLs = false
+            settings.allowUniversalAccessFromFileURLs = false
             settings.useWideViewPort = true
             settings.loadWithOverviewMode = true
             settings.loadsImagesAutomatically = true
@@ -916,8 +950,9 @@ class TerminalBrowserSessionManager(
             settings.builtInZoomControls = true
             settings.displayZoomControls = false
             settings.mediaPlaybackRequiresUserGesture = false
+            settings.setGeolocationEnabled(false)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 settings.safeBrowsingEnabled = true
@@ -1023,13 +1058,23 @@ class TerminalBrowserSessionManager(
             }
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                tab.currentUrl = url.orEmpty()
+                val startedUrl = url.orEmpty()
+                tab.currentUrl = startedUrl
+                tab.loadingMainFrameUrl = startedUrl
+                tab.loadStartedToken = tab.loadWaiterToken
                 tab.isLoading = true
                 publish("running", "加载中")
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
-                tab.currentUrl = url.orEmpty().ifBlank { tab.currentUrl }
+                val finishedUrl = url.orEmpty().ifBlank { tab.currentUrl }
+                if (tab.loadWaiter != null &&
+                    tab.loadingMainFrameUrl.isNotBlank() &&
+                    !urlsSameForLoad(finishedUrl, tab.loadingMainFrameUrl)
+                ) {
+                    return
+                }
+                tab.currentUrl = finishedUrl
                 tab.title = view?.title.orEmpty().ifBlank { tab.currentUrl }
                 tab.isLoading = false
                 detectRiskChallenge(tab, bodyText = "")
@@ -1040,12 +1085,20 @@ class TerminalBrowserSessionManager(
                 }
                 cookieFlush()
                 appendHistory(tab)
+                val finishedToken = tab.loadWaiterToken
+                val shouldCompleteWaiter = tab.loadWaiter != null &&
+                    tab.loadStartedToken == finishedToken &&
+                    urlsSameForLoad(finishedUrl, tab.loadingMainFrameUrl)
                 applyUserScripts(tab) { error ->
                     if (!error.isNullOrBlank()) {
                         tab.lastError = error
                     }
-                    tab.loadWaiter?.complete(Unit)
-                    tab.loadWaiter = null
+                    if (shouldCompleteWaiter && tab.loadWaiterToken == finishedToken) {
+                        tab.loadWaiter?.complete(Unit)
+                        tab.loadWaiter = null
+                        tab.loadStartedToken = 0L
+                        tab.loadingMainFrameUrl = ""
+                    }
                     if (error.isNullOrBlank()) {
                         publish("done", "网页已加载")
                     } else {
@@ -1060,15 +1113,26 @@ class TerminalBrowserSessionManager(
                 error: WebResourceError?
             ) {
                 if (request?.isForMainFrame != false) {
+                    val errorUrl = request?.url?.toString().orEmpty()
+                    if (tab.loadWaiter != null &&
+                        tab.loadingMainFrameUrl.isNotBlank() &&
+                        errorUrl.isNotBlank() &&
+                        !urlsSameForLoad(errorUrl, tab.loadingMainFrameUrl)
+                    ) {
+                        return
+                    }
                     tab.lastError = error?.description?.toString()
                     tab.isLoading = false
                     tab.loadWaiter?.complete(Unit)
+                    tab.loadWaiter = null
+                    tab.loadStartedToken = 0L
+                    tab.loadingMainFrameUrl = ""
                     publish("error", tab.lastError.orEmpty())
                 }
             }
         }
         webView.setDownloadListener { url, _, _, _, _ ->
-            handleDownloadUrl(url)
+            handleDownloadUrl(url, tab)
         }
         tabs[tabId] = tab
         activeTabId = tabId
@@ -1080,6 +1144,7 @@ class TerminalBrowserSessionManager(
         val url = rawUrl.trim()
         if (url.isBlank()) return false
         val scheme = Uri.parse(url).scheme.orEmpty().lowercase()
+        if (scheme.isBlank()) return false
         if (scheme in WEBVIEW_SCHEMES) return false
 
         val externalIntent = runCatching {
@@ -1095,18 +1160,15 @@ class TerminalBrowserSessionManager(
             }
         }.getOrNull()
 
-        val fallbackUrl = externalIntent?.getStringExtra("browser_fallback_url")
+        val fallbackUrl = sanitizeHttpFallback(externalIntent?.getStringExtra("browser_fallback_url"))
         if (externalIntent != null) {
-            externalOpenPrompt = BrowserExternalOpenPrompt(
-                requestId = "external-${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}",
+            showExternalOpenPrompt(
                 target = url,
                 scheme = scheme,
-                fallbackUrl = fallbackUrl.orEmpty(),
-                intent = externalIntent
+                fallbackUrl = fallbackUrl,
+                intent = externalIntent,
+                kind = "external"
             )
-            needsUser = true
-            userMessage = "是否打开外部链接：$scheme"
-            publish("waiting_for_user", userMessage)
         } else {
             tab.lastError = "设备没有可处理的外部链接：$scheme"
             publish("error", tab.lastError.orEmpty())
@@ -1114,21 +1176,56 @@ class TerminalBrowserSessionManager(
         return true
     }
 
-    private fun handleDownloadUrl(rawUrl: String?) {
+    private fun handleDownloadUrl(rawUrl: String?, tab: BrowserTab) {
         val url = rawUrl?.trim().orEmpty()
         if (url.isBlank()) return
-        val opened = runCatching {
-            initialContext.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                    .addCategory(Intent.CATEGORY_BROWSABLE)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        }.isSuccess
-        if (opened) {
-            publish("waiting_for_user", "已交给系统下载/打开")
-        } else {
-            publish("error", "无法处理下载链接")
+        val uri = Uri.parse(url)
+        val scheme = uri.scheme.orEmpty().lowercase()
+        val intent = runCatching {
+            Intent(Intent.ACTION_VIEW, uri)
+                .addCategory(Intent.CATEGORY_BROWSABLE)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .apply {
+                    setComponent(null)
+                    setSelector(null)
+                }
+        }.getOrNull()
+        if (intent == null) {
+            tab.lastError = "无法处理下载链接"
+            publish("error", tab.lastError.orEmpty())
+            return
         }
+        showExternalOpenPrompt(
+            target = url,
+            scheme = scheme.ifBlank { "download" },
+            fallbackUrl = "",
+            intent = intent,
+            kind = "download"
+        )
+    }
+
+    private fun showExternalOpenPrompt(
+        target: String,
+        scheme: String,
+        fallbackUrl: String,
+        intent: Intent?,
+        kind: String
+    ) {
+        externalOpenPrompt = BrowserExternalOpenPrompt(
+            requestId = "external-${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}",
+            target = target,
+            scheme = scheme,
+            fallbackUrl = sanitizeHttpFallback(fallbackUrl),
+            intent = intent,
+            kind = kind
+        )
+        needsUser = true
+        userMessage = if (kind == "download") {
+            "是否下载/打开文件：$scheme"
+        } else {
+            "是否打开外部链接：$scheme"
+        }
+        publish("waiting_for_user", userMessage)
     }
 
     private fun showJsDialog(
@@ -1274,7 +1371,7 @@ class TerminalBrowserSessionManager(
             requestId = auth?.requestId ?: activeUserRequestId.ifBlank { currentRequestId },
             activeTabId = active?.id,
             title = active?.title.orEmpty(),
-            currentUrl = auth?.url ?: active?.currentUrl.orEmpty(),
+            currentUrl = redactSensitiveUrl(auth?.url ?: active?.currentUrl.orEmpty()),
             isLoading = active?.isLoading == true,
             status = snapshotStatus,
             message = snapshotMessage,
@@ -1284,14 +1381,14 @@ class TerminalBrowserSessionManager(
                 TerminalBrowserTabSnapshot(
                     id = it.id,
                     title = it.title,
-                    url = it.currentUrl,
+                    url = redactSensitiveUrl(it.currentUrl),
                     isLoading = it.isLoading
                 )
             },
             authTask = auth?.let {
                 TerminalBrowserAuthSnapshot(
                     requestId = it.requestId,
-                    url = it.url,
+                    url = redactSensitiveUrl(it.url),
                     reason = it.reason,
                     code = it.code,
                     state = it.state,
@@ -1302,9 +1399,10 @@ class TerminalBrowserSessionManager(
             externalPrompt = external?.let {
                 TerminalBrowserExternalPromptSnapshot(
                     requestId = it.requestId,
-                    target = it.target,
+                    target = redactSensitiveUrl(it.target),
                     scheme = it.scheme,
-                    fallbackUrl = it.fallbackUrl
+                    fallbackUrl = redactSensitiveUrl(it.fallbackUrl),
+                    kind = it.kind
                 )
             },
             riskChallengeDetected = active?.riskChallengeDetected == true,
@@ -1326,7 +1424,7 @@ class TerminalBrowserSessionManager(
                     .put("timestamp", System.currentTimeMillis())
                     .put("tabId", tab.id)
                     .put("title", tab.title)
-                    .put("url", tab.currentUrl)
+                    .put("url", redactSensitiveUrl(tab.currentUrl))
                     .toString() + "\n"
             )
         }
@@ -1440,7 +1538,7 @@ class TerminalBrowserSessionManager(
                 JSONObject()
                     .put("timestamp", System.currentTimeMillis())
                     .put("tabId", tab.id)
-                    .put("url", tab.currentUrl)
+                    .put("url", redactSensitiveUrl(tab.currentUrl))
                     .put("scriptId", script.id)
                     .put("scriptName", script.name)
                     .put("ok", ok)
@@ -1584,7 +1682,7 @@ class TerminalBrowserSessionManager(
             .put("requestId", snapshot.requestId)
             .put("activeTabId", snapshot.activeTabId)
             .put("title", snapshot.title)
-            .put("currentUrl", snapshot.currentUrl)
+            .put("currentUrl", redactSensitiveUrl(snapshot.currentUrl))
             .put("isLoading", snapshot.isLoading)
             .put("status", snapshot.status)
             .put("message", snapshot.message)
@@ -1596,19 +1694,22 @@ class TerminalBrowserSessionManager(
             .put("authTask", snapshot.authTask?.let {
                 JSONObject()
                     .put("requestId", it.requestId)
-                    .put("url", it.url)
+                    .put("url", redactSensitiveUrl(it.url))
                     .put("reason", it.reason)
-                    .put("code", it.code)
+                    .put("code", redactAuthCode(it.code))
                     .put("state", it.state)
                     .put("userAction", it.userAction)
                     .put("active", it.active)
+                    .put("valuesRedacted", true)
             })
             .put("externalPrompt", snapshot.externalPrompt?.let {
                 JSONObject()
                     .put("requestId", it.requestId)
-                    .put("target", it.target)
+                    .put("target", redactSensitiveUrl(it.target))
                     .put("scheme", it.scheme)
-                    .put("fallbackUrl", it.fallbackUrl)
+                    .put("fallbackUrl", redactSensitiveUrl(it.fallbackUrl))
+                    .put("kind", it.kind)
+                    .put("valuesRedacted", true)
             })
             .put("tabs", JSONArray().apply {
                 snapshot.tabs.forEach { tab ->
@@ -1616,7 +1717,7 @@ class TerminalBrowserSessionManager(
                         JSONObject()
                             .put("id", tab.id)
                             .put("title", tab.title)
-                            .put("url", tab.url)
+                            .put("url", redactSensitiveUrl(tab.url))
                             .put("isLoading", tab.isLoading)
                     )
                 }
@@ -1640,6 +1741,104 @@ class TerminalBrowserSessionManager(
         return normalizeUrl(trimmed)
     }
 
+    private fun sanitizeHttpFallback(raw: String?): String {
+        val fallback = raw?.trim().orEmpty()
+        if (fallback.isBlank()) return ""
+        return if (isHttpOrHttpsUrl(fallback)) fallback else ""
+    }
+
+    private fun isHttpOrHttpsUrl(raw: String): Boolean {
+        val scheme = runCatching { Uri.parse(raw.trim()).scheme.orEmpty().lowercase() }
+            .getOrDefault("")
+        return scheme == "http" || scheme == "https"
+    }
+
+    private fun urlsSameForLoad(left: String, right: String): Boolean {
+        if (right.isBlank()) return true
+        return left == right || runCatching {
+            Uri.parse(left).normalizeScheme().toString() == Uri.parse(right).normalizeScheme().toString()
+        }.getOrDefault(false)
+    }
+
+    private fun redactAuthCode(code: String): String {
+        val trimmed = code.trim()
+        if (trimmed.isBlank()) return ""
+        if (trimmed.length <= 4) return "••••"
+        return trimmed.take(2) + "••••" + trimmed.takeLast(2)
+    }
+
+    private fun redactSensitiveUrl(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank()) return ""
+        return runCatching {
+            val uri = Uri.parse(trimmed)
+            val scheme = uri.scheme.orEmpty().lowercase()
+            if (scheme.isNotBlank() && scheme !in setOf("http", "https", "about")) {
+                return@runCatching "$scheme:REDACTED"
+            }
+            val sensitiveKeys = setOf(
+                "access_token",
+                "auth",
+                "authorization",
+                "authuser",
+                "client_secret",
+                "code",
+                "id_token",
+                "jwt",
+                "key",
+                "login_hint",
+                "login_token",
+                "oauth_token",
+                "pass_ticket",
+                "password",
+                "refresh_token",
+                "secret",
+                "session",
+                "sid",
+                "sig",
+                "signature",
+                "skey",
+                "state",
+                "ticket",
+                "token"
+            )
+            val queryNames = runCatching { uri.queryParameterNames }.getOrDefault(emptySet())
+            val hasSensitiveQuery = queryNames.any { it.lowercase() in sensitiveKeys }
+            val fragment = uri.encodedFragment.orEmpty()
+            val lowerFragment = fragment.lowercase()
+            val hasSensitiveFragment = fragment.isNotBlank() &&
+                sensitiveKeys.any { lowerFragment.contains(it) || lowerFragment.contains("${it}%3d") }
+            if (!hasSensitiveQuery && !hasSensitiveFragment) {
+                trimmed
+            } else {
+                val builder = uri.buildUpon()
+                if (hasSensitiveQuery) {
+                    builder.clearQuery()
+                    queryNames.forEach { key ->
+                        val values = uri.getQueryParameters(key)
+                        if (values.isEmpty()) {
+                            builder.appendQueryParameter(
+                                key,
+                                if (key.lowercase() in sensitiveKeys) "REDACTED" else ""
+                            )
+                        } else {
+                            values.forEach { value ->
+                                builder.appendQueryParameter(
+                                    key,
+                                    if (key.lowercase() in sensitiveKeys) "REDACTED" else value
+                                )
+                            }
+                        }
+                    }
+                }
+                if (hasSensitiveFragment) {
+                    builder.encodedFragment("REDACTED")
+                }
+                builder.build().toString()
+            }
+        }.getOrDefault(trimmed)
+    }
+
     private fun decodeJsString(raw: String?): String {
         val text = raw?.trim().orEmpty()
         if (text.isEmpty()) return "{}"
@@ -1659,4 +1858,4 @@ class TerminalBrowserSessionManager(
     }
 }
 
-private val WEBVIEW_SCHEMES = setOf("http", "https", "about", "data", "file", "content")
+private val WEBVIEW_SCHEMES = setOf("http", "https", "about")

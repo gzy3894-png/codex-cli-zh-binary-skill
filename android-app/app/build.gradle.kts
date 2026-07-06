@@ -1,4 +1,5 @@
 import java.util.Properties
+import org.gradle.api.GradleException
 
 plugins {
     alias(libs.plugins.android.application)
@@ -60,11 +61,7 @@ android {
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
             )
-            signingConfig = if (signingConfigs.getByName("release").storeFile?.exists() == true) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            signingConfig = signingConfigs.getByName("release")
             resValue("string","app_name","Codex for TUI")
         }
         debug{
@@ -79,8 +76,8 @@ android {
         applicationId = "com.gzy3894.codexfortui"
         minSdk = 26
         targetSdk = 36
-        versionCode = 38
-        versionName = "2.2.5"
+        versionCode = 39
+        versionName = "2.2.6"
         vectorDrawables {
             useSupportLibrary = true
         }
@@ -102,6 +99,15 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
+        }
+    }
+}
+
+tasks.matching { it.name == "validateSigningRelease" }.configureEach {
+    doFirst {
+        val releaseSigning = android.signingConfigs.getByName("release")
+        if (releaseSigning.storeFile == null || releaseSigning.storeFile?.exists() != true) {
+            throw GradleException("Release signing is required; refusing to fall back to debug/test signing.")
         }
     }
 }

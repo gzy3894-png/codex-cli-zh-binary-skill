@@ -26,7 +26,7 @@
 
 普通启动不会自动联网更新脚本，不会请求 `/models`，不会覆盖 `~/.codex/config.toml`。
 
-Codex for TUI 2.2.5 用户建议覆盖安装最新 APK；2.2.5 修复 RTK hook 绝对路径和复杂 `find` 误改写问题，2.2.3 修复打开 Custom Tabs/外部浏览器后 bridge 停止消费的问题，2.2.2 主要优化 App 侧终端渲染和 bridge 轮询，普通启动规则不变。已经完成首次安装但只需要更新脚本时，可以手动运行：
+Codex for TUI 2.2.6 用户建议覆盖安装最新 APK；2.2.6 修复 bridge 并发请求、浏览器导航/状态同步和发布安全门禁，2.2.5 修复 RTK hook 绝对路径和复杂 `find` 误改写问题，2.2.3 修复打开 Custom Tabs/外部浏览器后 bridge 停止消费的问题，2.2.2 主要优化 App 侧终端渲染和 bridge 轮询，普通启动规则不变。已经完成首次安装但只需要更新脚本时，可以手动运行：
 
 ```sh
 codex 更新
@@ -49,7 +49,7 @@ codex 官方登录
 codex 配置模式
 ```
 
-如果菜单里出现 `6. 修复全权限授权`，说明脚本已经更新到包含配置菜单和授权持久化修复的版本。需要修复授权时选择该项；它会写入 `approval_policy = "never"` 和 `sandbox_mode = "danger-full-access"`。
+如果菜单里出现 `1. 新建配置 / 2. 选择配置 / 3. 编辑当前配置 / 8. 修复全权限授权`，说明脚本已经更新到包含配置菜单和授权持久化修复的版本。需要修复授权时选择第 8 项；它会写入 `approval_policy = "never"` 和 `sandbox_mode = "danger-full-access"`。
 
 只有这些路径会拉取脚本：
 

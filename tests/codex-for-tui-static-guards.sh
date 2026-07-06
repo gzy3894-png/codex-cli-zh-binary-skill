@@ -7,6 +7,7 @@ BUILD_WORKFLOW="$ROOT_DIR/.github/workflows/build-codex-for-tui.yml"
 MKSESSION="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MkSession.kt"
 INIT_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/init.sh"
 APP_BUILD_GRADLE="$ROOT_DIR/android-app/app/build.gradle.kts"
+APP_MANIFEST="$ROOT_DIR/android-app/app/src/main/AndroidManifest.xml"
 BOOTSTRAP="$SCRIPT_DIR/codex-for-tui-bootstrap.sh"
 BOOTSTRAP_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-for-tui-bootstrap.sh"
 PREVIEW_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-preview"
@@ -27,6 +28,11 @@ TERMINAL_BROWSER_SESSION="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/t
 TERMINAL_VIEW_MODEL="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt"
 TERMINAL_BACK_END="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalBackEnd.kt"
 TERMINAL_VIEW_LAYOUT="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewLayout.kt"
+ALPINE_DOCUMENT_PROVIDER="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/AlpineDocumentProvider.kt"
+BACKUP_RULES="$ROOT_DIR/android-app/core/main/src/main/res/xml/backup_rules.xml"
+DATA_EXTRACTION_RULES="$ROOT_DIR/android-app/core/main/src/main/res/xml/data_extraction_rules.xml"
+FILE_PATHS_XML="$ROOT_DIR/android-app/core/main/src/main/res/xml/file_paths.xml"
+NETWORK_SECURITY_CONFIG="$ROOT_DIR/android-app/core/main/src/main/res/xml/network_security_config.xml"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -69,16 +75,30 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 38'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.2.5"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 39'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.2.6"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
-  assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release APK signature'
-  assert_file_contains "$BUILD_WORKFLOW" 'apksigner" verify --print-certs "$apk"'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.2.6'
+  assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
+  assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
+  assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
+  assert_file_contains "$BUILD_WORKFLOW" 'name: Require release signing secrets'
+  assert_file_contains "$BUILD_WORKFLOW" 'Release signing secrets are required; refusing to build a debug/test-signed release APK.'
+  assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release APKs'
+  assert_file_contains "$BUILD_WORKFLOW" 'mapfile -t apks'
+  assert_file_contains "$BUILD_WORKFLOW" 'for apk in "${apks[@]}"; do'
+  assert_file_contains "$BUILD_WORKFLOW" '"$apksigner" verify --print-certs "$apk"'
+  assert_file_contains "$BUILD_WORKFLOW" '"$aapt" dump badging "$apk"'
   assert_file_contains "$BUILD_WORKFLOW" 'Signer #1 certificate SHA-256 digest:'
   assert_file_contains "$BUILD_WORKFLOW" 'Release APK signing certificate mismatch'
+  assert_file_contains "$BUILD_WORKFLOW" 'Release APK versionName mismatch'
+  assert_file_contains "$BUILD_WORKFLOW" 'name: Generate release SHA256SUMS'
+  assert_file_contains "$BUILD_WORKFLOW" 'sha256sum *.apk > SHA256SUMS'
+  assert_file_contains "$BUILD_WORKFLOW" 'android-app/app/build/outputs/apk/release/SHA256SUMS'
+  assert_file_contains "$BUILD_WORKFLOW" 'softprops/action-gh-release@v2'
   assert_file_contains "$BUILD_WORKFLOW" 'artifact_name=codex-for-tui-release-apk'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Build RTK aarch64 musl'
   assert_file_contains "$BUILD_WORKFLOW" 'repository: rtk-ai/rtk'
@@ -87,6 +107,33 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'qemu-aarch64 /tmp/rtk --version'
   assert_file_contains "$BUILD_WORKFLOW" 'cp /tmp/codex-for-tui-rtk/rtk core/main/src/main/assets/rtk'
   assert_file_not_contains "$BUILD_WORKFLOW" 'codex-for-tui-unsigned-or-test-signed-release-apk'
+  assert_file_contains "$APP_BUILD_GRADLE" 'signingConfig = signingConfigs.getByName("release")'
+  assert_file_contains "$APP_BUILD_GRADLE" 'tasks.matching { it.name == "validateSigningRelease" }'
+  assert_file_contains "$APP_BUILD_GRADLE" 'Release signing is required; refusing to fall back to debug/test signing.'
+  assert_file_not_contains "$APP_BUILD_GRADLE" 'signingConfig = signingConfigs.getByName("debug")'
+  assert_file_not_contains "$APP_BUILD_GRADLE" 'signingConfig = if (signingConfigs.getByName("release").storeFile?.exists() == true)'
+}
+
+test_android_security_guards() {
+  assert_file_contains "$APP_MANIFEST" 'android:allowBackup="false"'
+  assert_file_contains "$APP_MANIFEST" 'android:networkSecurityConfig="@xml/network_security_config"'
+  assert_file_contains "$NETWORK_SECURITY_CONFIG" '<base-config cleartextTrafficPermitted="false"'
+  assert_file_contains "$NETWORK_SECURITY_CONFIG" '<domain-config cleartextTrafficPermitted="true"'
+  assert_file_contains "$NETWORK_SECURITY_CONFIG" '<domain>localhost</domain>'
+  assert_file_contains "$NETWORK_SECURITY_CONFIG" '<domain>127.0.0.1</domain>'
+  assert_file_contains "$FILE_PATHS_XML" 'name="media_preview_share"'
+  assert_file_contains "$FILE_PATHS_XML" 'path="media-preview-share/"'
+  assert_file_not_contains "$FILE_PATHS_XML" '<external-path'
+  assert_file_not_contains "$FILE_PATHS_XML" 'path="."'
+  assert_file_contains "$BACKUP_RULES" '<exclude domain="file" path="."'
+  assert_file_contains "$BACKUP_RULES" '<exclude domain="sharedpref" path="."'
+  assert_file_contains "$DATA_EXTRACTION_RULES" '<exclude domain="file" path="."'
+  assert_file_contains "$DATA_EXTRACTION_RULES" '<exclude domain="sharedpref" path="."'
+  assert_file_contains "$ALPINE_DOCUMENT_PROVIDER" 'private fun getDocIdForFile(file: File): String'
+  assert_file_contains "$ALPINE_DOCUMENT_PROVIDER" 'private fun getFileForDocId(docId: String): File'
+  assert_file_contains "$ALPINE_DOCUMENT_PROVIDER" 'private fun isFileInsideBase(file: File): Boolean'
+  assert_file_contains "$ALPINE_DOCUMENT_PROVIDER" 'private fun isSameOrDescendant(parent: File, child: File): Boolean'
+  assert_file_contains "$ALPINE_DOCUMENT_PROVIDER" 'Document path is outside the Alpine home'
 }
 
 test_terminal_performance_guards() {
@@ -102,6 +149,13 @@ test_terminal_performance_guards() {
   assert_file_contains "$MAIN_ACTIVITY" 'FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO'
   assert_file_contains "$MAIN_ACTIVITY" 'private const val BRIDGE_FALLBACK_POLL_MS = 1500L'
   assert_file_contains "$MAIN_ACTIVITY" 'pollBrowserRequestLocked'
+  assert_file_contains "$MAIN_ACTIVITY" 'private fun sanitizeBrowserResult'
+  assert_file_contains "$MAIN_ACTIVITY" 'val persistedResult = sanitizeBrowserResult(result)'
+  assert_file_contains "$MAIN_ACTIVITY" 'browserDir.child("result.json").writeText(persistedResult.toString(2))'
+  assert_file_contains "$MAIN_ACTIVITY" 'requestResultsDir.child("$safeId.json").writeText(persistedResult.toString(2))'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'currentUrl = redactSensitiveUrl(auth?.url ?: active?.currentUrl.orEmpty())'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'target = redactSensitiveUrl(it.target)'
+  assert_file_not_contains "$TERMINAL_BROWSER_SESSION" 'currentUrl = auth?.url ?: active?.currentUrl.orEmpty()'
   assert_file_contains "$MAIN_ACTIVITY" 'override fun onDestroy()'
   assert_file_contains "$MAIN_ACTIVITY" 'pollSessionFoldRequestLocked'
   if awk '
@@ -204,6 +258,17 @@ test_image_preview_bridge_asset() {
   sh -n "$RTK_ASSET" || fail "codex-rtk shell syntax failed"
   sh -n "$BROWSER_SMOKE" || fail "browser smoke shell syntax failed"
   sh -n "$INIT_ASSET" || fail "init.sh shell syntax failed"
+  assert_file_contains "$PREVIEW_ASSET" 'queue_dir="$bridge_dir/queue"'
+  assert_file_contains "$PREVIEW_ASSET" 'cp "$req_tmp" "$legacy_tmp"'
+  assert_file_contains "$PANEL_ASSET" 'queue_dir="$bridge_dir/queue"'
+  assert_file_contains "$PANEL_ASSET" 'cp "$req_tmp" "$legacy_tmp"'
+  assert_file_contains "$PANEL_ASSET" 'mv "$req_tmp" "$req_file"'
+  assert_file_contains "$SESSION_ASSET" 'queue_dir="$bridge_dir/queue"'
+  assert_file_contains "$SESSION_ASSET" 'cp "$req_tmp" "$legacy_tmp"'
+  assert_file_contains "$SESSION_ASSET" 'mv "$req_tmp" "$req_file"'
+  assert_file_not_contains "$PREVIEW_ASSET" 'cp "$req_file" "$legacy_tmp"'
+  assert_file_not_contains "$PANEL_ASSET" 'cp "$req_file" "$legacy_tmp"'
+  assert_file_not_contains "$SESSION_ASSET" 'cp "$req_file" "$legacy_tmp"'
 
   tmp="${TMPDIR:-/tmp}/codex-tui-static-image-preview.$$"
   rm -rf "$tmp"
@@ -239,6 +304,8 @@ test_image_preview_bridge_asset() {
   [ "$fallback_resolved_path" = "$image_path" ] || fail "fallback codex-preview path resolved wrong image path: $fallback_resolved_path"
   assert_file_contains "$tmp/prefix/local/media-preview/request" "action=show"
   assert_file_contains "$tmp/prefix/local/media-preview/request" "present=1"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "queued=1"
+  ls "$tmp/prefix/local/media-preview/queue/"*.req >/dev/null 2>&1 || fail "preview queue request file missing"
   assert_file_contains "$tmp/prefix/local/media-preview/request" "kind=image"
   printf '%s\n' "$output" | grep -F '已发送到 Codex for TUI 文件面板' >/dev/null 2>&1 || fail "preview command did not report success"
 
@@ -505,6 +572,12 @@ test_browser_bridge_asset() {
   assert_file_not_contains "$BROWSER_ASSET" 'cp "$req_file" "$legacy_tmp"'
   assert_file_contains "$BROWSER_ASSET" 'cp "$req_tmp" "$legacy_tmp"'
   assert_file_contains "$MAIN_ACTIVITY" 'queueDir.listFiles()'
+  assert_file_contains "$MAIN_ACTIVITY" 'mediaPreviewQueueObserver'
+  assert_file_contains "$MAIN_ACTIVITY" 'sessionFoldQueueObserver'
+  assert_file_contains "$MAIN_ACTIVITY" 'mediaPreviewProcessedRequestIds'
+  assert_file_contains "$MAIN_ACTIVITY" 'sessionFoldProcessedRequestIds'
+  assert_file_contains "$MAIN_ACTIVITY" 'persistBrowserSnapshot(snapshot)'
+  assert_file_contains "$MAIN_ACTIVITY" '.replace("\n", "\\n")'
   assert_file_contains "$MAIN_ACTIVITY" 'runCatching {'
   assert_file_contains "$MAIN_ACTIVITY" 'writeBrowserBridgeError'
   assert_file_contains "$MAIN_ACTIVITY" 'file.name.removeSuffix(".req")'
@@ -553,6 +626,8 @@ test_agent_panel_bridge_asset() {
   assert_file_contains "$tmp/prefix/local/media-preview/request" "action=present"
   assert_file_contains "$tmp/prefix/local/media-preview/request" "present=1"
   assert_file_contains "$tmp/prefix/local/media-preview/request" "reason=agent_review"
+  assert_file_contains "$tmp/prefix/local/media-preview/request" "queued=1"
+  ls "$tmp/prefix/local/media-preview/queue/"*.req >/dev/null 2>&1 || fail "codex-panel files queue request file missing"
   printf '%s\n' "$output" | grep -F '已发送到 Codex for TUI Agent 面板' >/dev/null 2>&1 || fail "codex-panel did not report success"
 
   PREFIX="$tmp/prefix" sh "$PANEL_ASSET" collapse files agent_collapse >/dev/null || fail "codex-panel files collapse failed"
@@ -572,6 +647,8 @@ test_agent_panel_bridge_asset() {
   PREFIX="$tmp/prefix" sh "$PANEL_ASSET" present browser agent_browser >/dev/null || fail "codex-panel browser present failed"
   assert_file_contains "$tmp/prefix/local/browser/request" "action=present"
   assert_file_contains "$tmp/prefix/local/browser/request" "present=1"
+  assert_file_contains "$tmp/prefix/local/browser/request" "queued=1"
+  ls "$tmp/prefix/local/browser/queue/"*.req >/dev/null 2>&1 || fail "codex-panel browser queue request file missing"
 
   PREFIX="$tmp/prefix" sh "$PANEL_ASSET" collapse browser agent_browser >/dev/null || fail "codex-panel browser collapse failed"
   assert_file_contains "$tmp/prefix/local/browser/request" "action=collapse"
@@ -622,6 +699,8 @@ test_session_fold_bridge_asset() {
   fi
   assert_file_contains "$tmp/prefix/local/session-fold/request" "action=start"
   assert_file_contains "$tmp/prefix/local/session-fold/request" "run_id=run-1"
+  assert_file_contains "$tmp/prefix/local/session-fold/request" "queued=1"
+  ls "$tmp/prefix/local/session-fold/queue/"*.req >/dev/null 2>&1 || fail "codex-session queue request file missing"
   printf '%s\n' "$output" | grep -F 'run_id=run-1' >/dev/null 2>&1 || fail "codex-session start did not print run id"
 
   if ! PREFIX="$tmp/prefix" sh "$SESSION_ASSET" add tool --run run-1 --title '命令' --summary '成功' --status done >/dev/null; then
@@ -1043,6 +1122,7 @@ run_step test_android_session_uses_root_codex_home
 run_step test_bootstrap_asset_is_synced
 run_step test_debug_build_uses_test_package_name
 run_step test_release_workflow_signature_gate
+run_step test_android_security_guards
 run_step test_terminal_performance_guards
 run_step test_image_preview_bridge_asset
 run_step test_browser_bridge_asset

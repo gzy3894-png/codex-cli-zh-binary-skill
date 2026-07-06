@@ -33,22 +33,33 @@ print_file_if_readable() {
   return 1
 }
 
+safe_id() {
+  printf '%s' "$1" | tr -cd 'A-Za-z0-9._-' | cut -c 1-120
+}
+
 write_request() {
   bridge_dir="$1/local/session-fold"
   shift
   request_file="$bridge_dir/request"
-  mkdir -p "$bridge_dir"
+  queue_dir="$bridge_dir/queue"
+  mkdir -p "$queue_dir"
   request_id="$(date +%s 2>/dev/null || printf 0).$$"
-  tmp="$request_file.tmp.$$"
+  safe_request_id="$(safe_id "$request_id")"
+  req_tmp="$queue_dir/$safe_request_id.req.tmp.$$"
+  req_file="$queue_dir/$safe_request_id.req"
   {
     printf 'request_id=%s\n' "$request_id"
     printf 'stamp=%s\n' "$request_id"
+    printf 'queued=1\n'
     while [ "$#" -gt 0 ]; do
       printf '%s=%s\n' "$1" "$2"
       shift 2
     done
-  } > "$tmp"
-  mv "$tmp" "$request_file"
+  } > "$req_tmp"
+  legacy_tmp="$request_file.tmp.$$"
+  cp "$req_tmp" "$legacy_tmp"
+  mv "$legacy_tmp" "$request_file"
+  mv "$req_tmp" "$req_file"
   printf '%s\n' "$request_id"
 }
 

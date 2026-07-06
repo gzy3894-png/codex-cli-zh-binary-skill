@@ -102,6 +102,9 @@ class AlpineDocumentProvider : DocumentsProvider() {
         displayName: String
     ): String {
         val parent = getFileForDocId(parentDocumentId)
+        if (displayName.isBlank() || displayName.contains('/') || displayName.contains('\\')) {
+            throw FileNotFoundException("Invalid document display name")
+        }
         var newFile = File(parent, displayName)
         var noConflictId = 2
         while (newFile.exists()) {
@@ -151,12 +154,7 @@ class AlpineDocumentProvider : DocumentsProvider() {
         val MAX_SEARCH_RESULTS = 50
         while (!pending.isEmpty() && result.count < MAX_SEARCH_RESULTS) {
             val file = pending.removeFirst()
-            val isInsideHome: Boolean = try {
-                file.canonicalPath.startsWith(baseDir.canonicalPath)
-            } catch (e: IOException) {
-                true
-            }
-            if (isInsideHome) {
+            if (isFileInsideBase(file)) {
                 if (file.isDirectory) {
                     file.listFiles()?.let { Collections.addAll(pending, *it) }
                 } else {
@@ -170,7 +168,13 @@ class AlpineDocumentProvider : DocumentsProvider() {
     }
 
     override fun isChildDocument(parentDocumentId: String, documentId: String): Boolean {
-        return documentId.startsWith(parentDocumentId)
+        return try {
+            val parent = getFileForDocId(parentDocumentId)
+            val child = getFileForDocId(documentId)
+            isSameOrDescendant(parent, child)
+        } catch (e: FileNotFoundException) {
+            false
+        }
     }
 
     @Throws(FileNotFoundException::class)
@@ -198,6 +202,47 @@ class AlpineDocumentProvider : DocumentsProvider() {
         row.add(DocumentsContract.Document.COLUMN_LAST_MODIFIED, finalFile.lastModified())
         row.add(DocumentsContract.Document.COLUMN_FLAGS, flags)
         row.add(DocumentsContract.Document.COLUMN_ICON, R.mipmap.ic_launcher)
+    }
+
+    @Throws(FileNotFoundException::class)
+    private fun getDocIdForFile(file: File): String {
+        val canonicalFile = try {
+            file.canonicalFile
+        } catch (e: IOException) {
+            throw FileNotFoundException("Unable to resolve document path")
+        }
+        if (!isFileInsideBase(canonicalFile)) {
+            throw FileNotFoundException("Document path is outside the Alpine home")
+        }
+        return canonicalFile.path
+    }
+
+    @Throws(FileNotFoundException::class)
+    private fun getFileForDocId(docId: String): File {
+        val file = try {
+            File(docId).canonicalFile
+        } catch (e: IOException) {
+            throw FileNotFoundException("Unable to resolve document path")
+        }
+        if (!isFileInsideBase(file)) {
+            throw FileNotFoundException("Document path is outside the Alpine home")
+        }
+        if (!file.exists()) throw FileNotFoundException(file.absolutePath + " not found")
+        return file
+    }
+
+    private fun isFileInsideBase(file: File): Boolean {
+        return try {
+            isSameOrDescendant(baseDir.canonicalFile, file.canonicalFile)
+        } catch (e: IOException) {
+            false
+        }
+    }
+
+    private fun isSameOrDescendant(parent: File, child: File): Boolean {
+        val parentPath = parent.path.trimEnd(File.separatorChar)
+        val childPath = child.path.trimEnd(File.separatorChar)
+        return childPath == parentPath || childPath.startsWith(parentPath + File.separator)
     }
 
     companion object {
@@ -234,16 +279,6 @@ class AlpineDocumentProvider : DocumentsProvider() {
             DocumentsContract.Document.COLUMN_FLAGS,
             DocumentsContract.Document.COLUMN_SIZE
         )
-
-        private fun getDocIdForFile(file: File): String = file.absolutePath
-
-        @Throws(FileNotFoundException::class)
-        private fun getFileForDocId(docId: String): File {
-            val f = File(docId)
-            if (!f.exists()) throw FileNotFoundException(f.absolutePath + " not found")
-            return f
-        }
-
         private fun getMimeType(file: File): String {
             if (file.isDirectory) return DocumentsContract.Document.MIME_TYPE_DIR
             val name = file.name

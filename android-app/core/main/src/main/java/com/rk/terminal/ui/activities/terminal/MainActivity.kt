@@ -75,9 +75,11 @@ class MainActivity : ComponentActivity() {
     private var browserBridgeJob: Job? = null
     private var sessionFoldJob: Job? = null
     private var mediaPreviewObserver: FileObserver? = null
+    private var mediaPreviewQueueObserver: FileObserver? = null
     private var browserRequestObserver: FileObserver? = null
     private var browserQueueObserver: FileObserver? = null
     private var sessionFoldObserver: FileObserver? = null
+    private var sessionFoldQueueObserver: FileObserver? = null
     private val mediaPreviewPollMutex = Mutex()
     private val browserPollMutex = Mutex()
     private val sessionFoldPollMutex = Mutex()
@@ -87,7 +89,9 @@ class MainActivity : ComponentActivity() {
     private var lastSessionFoldRequest = ""
     private var lastBrowserNeedsUserEventKey = ""
     private var lastTerminalPerfStatusWriteAt = 0L
+    private val mediaPreviewProcessedRequestIds = linkedSetOf<String>()
     private val browserProcessedRequestIds = linkedSetOf<String>()
+    private val sessionFoldProcessedRequestIds = linkedSetOf<String>()
     private var browserFileChooserCallback: ((Array<Uri>?) -> Unit)? = null
 
     private val requestNotificationPermission =
@@ -171,6 +175,7 @@ class MainActivity : ComponentActivity() {
             onSnapshot = { snapshot ->
                 val previous = terminalViewModel.browserSnapshot
                 terminalViewModel.updateBrowserSnapshot(snapshot)
+                persistBrowserSnapshot(snapshot)
                 writeBrowserNeedsUserTransition(previous, snapshot)
             },
             launchFileChooser = ::launchBrowserFileChooser
@@ -316,7 +321,7 @@ class MainActivity : ComponentActivity() {
             val status = buildString {
                 append("source=").append(source).append('\n')
                 append("mode=").append(mode).append('\n')
-                append("state=").append(state).append('\n')
+                append("state=").append(refValue(state)).append('\n')
                 append("visible=").append(if (visible) "1" else "0").append('\n')
                 append("collapsed=").append(if (visible) "0" else "1").append('\n')
                 append("reason=").append(refValue(reason)).append('\n')
@@ -356,7 +361,7 @@ class MainActivity : ComponentActivity() {
                 append("event_id=").append(panelEventId()).append('\n')
                 append("source=").append(source).append('\n')
                 append("type=").append(type).append('\n')
-                append("state=").append(state).append('\n')
+                append("state=").append(refValue(state)).append('\n')
                 append("reason=").append(refValue(reason)).append('\n')
                 append("request_id=").append(refValue(requestId)).append('\n')
                 append("item_id=").append(refValue(itemId)).append('\n')
@@ -419,7 +424,7 @@ class MainActivity : ComponentActivity() {
     private fun browserSnapshotExtras(snapshot: TerminalBrowserSnapshot): Map<String, String> {
         return mapOf(
             "tab_id" to snapshot.activeTabId?.toString().orEmpty(),
-            "url" to snapshot.currentUrl,
+            "url" to redactSensitiveUrl(snapshot.currentUrl),
             "title" to snapshot.title,
             "needs_user" to if (snapshot.needsUser) "1" else "0",
             "tabs_count" to snapshot.tabs.size.toString(),
@@ -438,7 +443,7 @@ class MainActivity : ComponentActivity() {
         val externalPrompt = snapshot?.optJSONObject("externalPrompt")
         return mapOf(
             "tab_id" to snapshot?.opt("activeTabId")?.toString().orEmpty(),
-            "url" to snapshot?.optString("currentUrl").orEmpty(),
+            "url" to redactSensitiveUrl(snapshot?.optString("currentUrl").orEmpty()),
             "title" to snapshot?.optString("title").orEmpty(),
             "needs_user" to if (snapshot?.optBoolean("needsUser") == true) "1" else "0",
             "tabs_count" to (snapshot?.optJSONArray("tabs")?.length() ?: 0).toString(),
@@ -450,6 +455,123 @@ class MainActivity : ComponentActivity() {
             "risk_challenge_kind" to snapshot?.optString("riskChallengeKind").orEmpty(),
             "recommended_next_action" to snapshot?.optString("recommendedNextAction").orEmpty()
         )
+    }
+
+    private fun redactAuthCode(code: String): String {
+        val trimmed = code.trim()
+        if (trimmed.isBlank()) return ""
+        if (trimmed.length <= 4) return "••••"
+        return trimmed.take(2) + "••••" + trimmed.takeLast(2)
+    }
+
+    private fun redactSensitiveUrl(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank()) return ""
+        return runCatching {
+            val uri = Uri.parse(trimmed)
+            val scheme = uri.scheme.orEmpty().lowercase(Locale.ROOT)
+            if (scheme.isNotBlank() && scheme !in setOf("http", "https", "about")) {
+                return@runCatching "$scheme:REDACTED"
+            }
+            val sensitiveKeys = setOf(
+                "access_token",
+                "auth",
+                "authorization",
+                "authuser",
+                "client_secret",
+                "code",
+                "id_token",
+                "jwt",
+                "key",
+                "login_hint",
+                "login_token",
+                "oauth_token",
+                "pass_ticket",
+                "password",
+                "refresh_token",
+                "secret",
+                "session",
+                "sid",
+                "sig",
+                "signature",
+                "skey",
+                "state",
+                "ticket",
+                "token"
+            )
+            val queryNames = runCatching { uri.queryParameterNames }.getOrDefault(emptySet())
+            val hasSensitiveQuery = queryNames.any { it.lowercase(Locale.ROOT) in sensitiveKeys }
+            val fragment = uri.encodedFragment.orEmpty()
+            val lowerFragment = fragment.lowercase(Locale.ROOT)
+            val hasSensitiveFragment = fragment.isNotBlank() &&
+                sensitiveKeys.any { lowerFragment.contains(it) || lowerFragment.contains("${it}%3d") }
+            if (!hasSensitiveQuery && !hasSensitiveFragment) {
+                trimmed
+            } else {
+                val builder = uri.buildUpon()
+                if (hasSensitiveQuery) {
+                    builder.clearQuery()
+                    queryNames.forEach { key ->
+                        val values = uri.getQueryParameters(key)
+                        val shouldRedact = key.lowercase(Locale.ROOT) in sensitiveKeys
+                        if (values.isEmpty()) {
+                            builder.appendQueryParameter(key, if (shouldRedact) "REDACTED" else "")
+                        } else {
+                            values.forEach { value ->
+                                builder.appendQueryParameter(key, if (shouldRedact) "REDACTED" else value)
+                            }
+                        }
+                    }
+                }
+                if (hasSensitiveFragment) {
+                    builder.encodedFragment("REDACTED")
+                }
+                builder.build().toString()
+            }
+        }.getOrElse {
+            trimmed.substringBefore('?').take(180) + if (trimmed.contains('?')) "?REDACTED" else ""
+        }
+    }
+
+    private fun sanitizeBrowserResultJson(value: Any?, keyHint: String = ""): Any? {
+        return when (value) {
+            null, JSONObject.NULL -> value
+            is JSONObject -> JSONObject().also { sanitized ->
+                val keys = value.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    sanitized.put(key, sanitizeBrowserResultJson(value.opt(key), key))
+                }
+            }
+            is JSONArray -> JSONArray().also { sanitized ->
+                for (index in 0 until value.length()) {
+                    sanitized.put(sanitizeBrowserResultJson(value.opt(index), keyHint))
+                }
+            }
+            is String -> sanitizeBrowserResultString(keyHint, value)
+            else -> value
+        }
+    }
+
+    private fun sanitizeBrowserResult(result: JSONObject): JSONObject {
+        return (sanitizeBrowserResultJson(result) as? JSONObject ?: JSONObject())
+            .put("valuesRedacted", true)
+    }
+
+    private fun sanitizeBrowserResultString(keyHint: String, value: String): String {
+        val key = keyHint.lowercase(Locale.ROOT)
+        if (value.isBlank()) return value
+        return when {
+            key in setOf("url", "currenturl", "authurl", "target", "fallbackurl") ||
+                key.endsWith("url") -> redactSensitiveUrl(value)
+            key in setOf("authcode", "devicecode", "usercode") -> redactAuthCode(value)
+            key.contains("token") ||
+                key.contains("cookie") ||
+                key.contains("password") ||
+                key.contains("secret") ||
+                key == "raw" -> "REDACTED"
+            else -> value
+        }
     }
 
     private fun writeSessionFoldStatus(
@@ -502,7 +624,7 @@ class MainActivity : ComponentActivity() {
                 append("event_id=").append(panelEventId()).append('\n')
                 append("source=session\n")
                 append("type=").append(type).append('\n')
-                append("state=").append(state).append('\n')
+                append("state=").append(refValue(state)).append('\n')
                 append("reason=").append(refValue(reason)).append('\n')
                 append("request_id=").append(refValue(requestId)).append('\n')
                 append("run_id=").append(refValue(runId)).append('\n')
@@ -832,7 +954,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun refValue(value: String): String {
-        return value.replace('\r', ' ').replace('\n', ' ')
+        return value
+            .replace("\\", "\\\\")
+            .replace("\r", "\\r")
+            .replace("\n", "\\n")
     }
 
     private fun collapseTerminalText(value: String): String {
@@ -1238,6 +1363,19 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private fun persistBrowserSnapshot(snapshot: TerminalBrowserSnapshot) {
+        runCatching {
+            val browserDir = localDir().child("browser")
+            val requestId = snapshot.requestId.ifBlank { "snapshot-${System.currentTimeMillis()}" }
+            val result = JSONObject()
+                .put("ok", true)
+                .put("requestId", requestId)
+                .put("action", "snapshot")
+                .put("snapshot", browserSnapshotJson(snapshot))
+            writeBrowserResult(browserDir, result)
+        }
+    }
+
     private fun writeBrowserNeedsUserTransition(
         previous: TerminalBrowserSnapshot,
         current: TerminalBrowserSnapshot
@@ -1267,8 +1405,8 @@ class MainActivity : ComponentActivity() {
         appendActiveSessionFoldItem(
             kind = TerminalSessionFoldItemKind.BROWSER,
             title = "浏览器等待用户",
-            summary = current.message.ifBlank { current.title.ifBlank { current.currentUrl } },
-            path = current.currentUrl,
+            summary = current.message.ifBlank { current.title.ifBlank { redactSensitiveUrl(current.currentUrl) } },
+            path = redactSensitiveUrl(current.currentUrl),
             status = "waiting_for_user",
             itemId = current.requestId.ifBlank { "browser-${System.currentTimeMillis()}" }
         )
@@ -1304,10 +1442,14 @@ class MainActivity : ComponentActivity() {
     private fun startMediaPreviewBridge() {
         if (mediaPreviewJob?.isActive == true) return
         val previewDir = localDir().child("media-preview").apply { mkdirs() }
+        val queueDir = previewDir.child("queue").apply { mkdirs() }
         mediaPreviewObserver = startBridgeRequestObserver(
             dir = previewDir,
             requestFileName = "request"
         ) {
+            scheduleMediaPreviewPoll()
+        }
+        mediaPreviewQueueObserver = startBridgeQueueObserver(queueDir) {
             scheduleMediaPreviewPoll()
         }
         writeTerminalPerformanceStatus()
@@ -1344,10 +1486,14 @@ class MainActivity : ComponentActivity() {
     private fun startSessionFoldBridge() {
         if (sessionFoldJob?.isActive == true) return
         val foldDir = localDir().child("session-fold").apply { mkdirs() }
+        val queueDir = foldDir.child("queue").apply { mkdirs() }
         sessionFoldObserver = startBridgeRequestObserver(
             dir = foldDir,
             requestFileName = "request"
         ) {
+            scheduleSessionFoldPoll()
+        }
+        sessionFoldQueueObserver = startBridgeQueueObserver(queueDir) {
             scheduleSessionFoldPoll()
         }
         writeTerminalPerformanceStatus()
@@ -1461,21 +1607,27 @@ class MainActivity : ComponentActivity() {
     private fun stopBridgeObservers() {
         mediaPreviewObserver?.stopWatching()
         mediaPreviewObserver = null
+        mediaPreviewQueueObserver?.stopWatching()
+        mediaPreviewQueueObserver = null
         browserRequestObserver?.stopWatching()
         browserRequestObserver = null
         browserQueueObserver?.stopWatching()
         browserQueueObserver = null
         sessionFoldObserver?.stopWatching()
         sessionFoldObserver = null
+        sessionFoldQueueObserver?.stopWatching()
+        sessionFoldQueueObserver = null
         writeTerminalPerformanceStatus()
     }
 
     private fun bridgeMode(): String {
         return if (
             mediaPreviewObserver != null ||
+            mediaPreviewQueueObserver != null ||
             browserRequestObserver != null ||
             browserQueueObserver != null ||
-            sessionFoldObserver != null
+            sessionFoldObserver != null ||
+            sessionFoldQueueObserver != null
         ) {
             "file_observer"
         } else {
@@ -1506,26 +1658,75 @@ class MainActivity : ComponentActivity() {
                     append("bridge_mode=").append(bridgeMode()).append('\n')
                     append("fallback_interval_ms=").append(BRIDGE_FALLBACK_POLL_MS).append('\n')
                     append("media_preview_observer=").append(if (mediaPreviewObserver != null) "1" else "0").append('\n')
+                    append("media_preview_queue_observer=").append(if (mediaPreviewQueueObserver != null) "1" else "0").append('\n')
                     append("browser_request_observer=").append(if (browserRequestObserver != null) "1" else "0").append('\n')
                     append("browser_queue_observer=").append(if (browserQueueObserver != null) "1" else "0").append('\n')
                     append("session_fold_observer=").append(if (sessionFoldObserver != null) "1" else "0").append('\n')
+                    append("session_fold_queue_observer=").append(if (sessionFoldQueueObserver != null) "1" else "0").append('\n')
                     append("stamp=").append(now).append('\n')
                 }
             )
         }
     }
 
+
+    private suspend fun queuedRequestFiles(bridgeDir: File): List<File> = withContext(Dispatchers.IO) {
+        val queueDir = bridgeDir.child("queue")
+        bridgeDir.mkdirs()
+        queueDir.mkdirs()
+        queueDir.listFiles()
+            ?.filter { it.isFile && it.name.endsWith(".req") }
+            ?.sortedBy { it.name }
+            ?: emptyList()
+    }
+
+    private fun isRequestProcessed(cache: LinkedHashSet<String>, requestId: String): Boolean {
+        return requestId.isNotBlank() && cache.contains(requestId)
+    }
+
+    private fun rememberRequestId(cache: LinkedHashSet<String>, requestId: String) {
+        if (requestId.isBlank()) return
+        cache.add(requestId)
+        while (cache.size > 200) {
+            cache.remove(cache.first())
+        }
+    }
+
     private suspend fun pollSessionFoldRequest() {
         val foldDir = localDir().child("session-fold")
         val requestFile = foldDir.child("request")
+        for (file in queuedRequestFiles(foldDir)) {
+            val queuedContent = withContext(Dispatchers.IO) {
+                if (file.isFile) file.readText().trim() else ""
+            }
+            if (queuedContent.isNotBlank()) {
+                val queuedRequest = parseMediaPreviewRequest(queuedContent)
+                val queuedRequestId = panelRequestId(queuedRequest, queuedContent)
+                if (!isRequestProcessed(sessionFoldProcessedRequestIds, queuedRequestId)) {
+                    handleSessionFoldRequestContent(foldDir, queuedContent)
+                    rememberRequestId(sessionFoldProcessedRequestIds, queuedRequestId)
+                }
+            }
+            withContext(Dispatchers.IO) { runCatching { file.delete() } }
+        }
+
         val content = withContext(Dispatchers.IO) {
             foldDir.mkdirs()
             if (requestFile.isFile) requestFile.readText() else ""
         }.trim()
 
         if (content.isBlank() || content == lastSessionFoldRequest) return
+        val requestId = panelRequestId(parseMediaPreviewRequest(content), content)
+        if (isRequestProcessed(sessionFoldProcessedRequestIds, requestId)) {
+            lastSessionFoldRequest = content
+            return
+        }
         lastSessionFoldRequest = content
+        handleSessionFoldRequestContent(foldDir, content)
+        rememberRequestId(sessionFoldProcessedRequestIds, requestId)
+    }
 
+    private suspend fun handleSessionFoldRequestContent(foldDir: File, content: String) {
         val request = parseMediaPreviewRequest(content)
         val requestId = panelRequestId(request, content)
         val action = request["action"].orEmpty()
@@ -1693,7 +1894,10 @@ class MainActivity : ComponentActivity() {
                     if (file.isFile) file.readText().trim() else ""
                 }
                 if (content.isNotBlank()) {
-                    handleBrowserRequestContent(browserDir, content)
+                    val requestId = panelRequestId(parseMediaPreviewRequest(content), content)
+                    if (!isBrowserRequestProcessed(requestId)) {
+                        handleBrowserRequestContent(browserDir, content)
+                    }
                 }
             } catch (error: Exception) {
                 val request = runCatching { parseMediaPreviewRequest(content) }.getOrDefault(emptyMap())
@@ -1757,7 +1961,7 @@ class MainActivity : ComponentActivity() {
             .put("requestId", snapshot.requestId)
             .put("activeTabId", snapshot.activeTabId)
             .put("title", snapshot.title)
-            .put("currentUrl", snapshot.currentUrl)
+            .put("currentUrl", redactSensitiveUrl(snapshot.currentUrl))
             .put("isLoading", snapshot.isLoading)
             .put("status", snapshot.status)
             .put("message", snapshot.message)
@@ -1766,22 +1970,26 @@ class MainActivity : ComponentActivity() {
             .put("riskChallengeDetected", snapshot.riskChallengeDetected)
             .put("riskChallengeKind", snapshot.riskChallengeKind)
             .put("recommendedNextAction", snapshot.recommendedNextAction)
+            .put("valuesRedacted", true)
             .put("authTask", snapshot.authTask?.let {
                 JSONObject()
                     .put("requestId", it.requestId)
-                    .put("url", it.url)
+                    .put("url", redactSensitiveUrl(it.url))
                     .put("reason", it.reason)
-                    .put("code", it.code)
+                    .put("code", redactAuthCode(it.code))
                     .put("state", it.state)
                     .put("userAction", it.userAction)
                     .put("active", it.active)
+                    .put("valuesRedacted", true)
             })
             .put("externalPrompt", snapshot.externalPrompt?.let {
                 JSONObject()
                     .put("requestId", it.requestId)
-                    .put("target", it.target)
+                    .put("target", redactSensitiveUrl(it.target))
                     .put("scheme", it.scheme)
-                    .put("fallbackUrl", it.fallbackUrl)
+                    .put("fallbackUrl", redactSensitiveUrl(it.fallbackUrl))
+                    .put("kind", it.kind)
+                    .put("valuesRedacted", true)
             })
             .put("tabs", JSONArray().apply {
                 snapshot.tabs.forEach { tab ->
@@ -1789,7 +1997,7 @@ class MainActivity : ComponentActivity() {
                         JSONObject()
                             .put("id", tab.id)
                             .put("title", tab.title)
-                            .put("url", tab.url)
+                            .put("url", redactSensitiveUrl(tab.url))
                             .put("isLoading", tab.isLoading)
                     )
                 }
@@ -1864,23 +2072,19 @@ class MainActivity : ComponentActivity() {
         appendActiveSessionFoldItem(
             kind = TerminalSessionFoldItemKind.BROWSER,
             title = snapshot?.optString("title").orEmpty().ifBlank { "浏览器" },
-            summary = snapshot?.optString("currentUrl").orEmpty().ifBlank { request["message"].orEmpty() },
-            path = snapshot?.optString("currentUrl").orEmpty(),
+            summary = redactSensitiveUrl(snapshot?.optString("currentUrl").orEmpty()).ifBlank { request["message"].orEmpty() },
+            path = redactSensitiveUrl(snapshot?.optString("currentUrl").orEmpty()),
             status = state,
             itemId = result.optString("requestId").ifBlank { "browser-${System.currentTimeMillis()}" }
         )
     }
 
     private fun isBrowserRequestProcessed(requestId: String): Boolean {
-        return requestId.isNotBlank() && browserProcessedRequestIds.contains(requestId)
+        return isRequestProcessed(browserProcessedRequestIds, requestId)
     }
 
     private fun rememberBrowserRequestId(requestId: String) {
-        if (requestId.isBlank()) return
-        browserProcessedRequestIds.add(requestId)
-        while (browserProcessedRequestIds.size > 200) {
-            browserProcessedRequestIds.remove(browserProcessedRequestIds.first())
-        }
+        rememberRequestId(browserProcessedRequestIds, requestId)
     }
 
     private suspend fun maybePushBrowserScreenshotToFiles(
@@ -1971,7 +2175,7 @@ class MainActivity : ComponentActivity() {
 
     private fun snapshotSummaryForBrowserScreenshot(result: JSONObject): String {
         val snapshot = result.optJSONObject("snapshot")
-        return snapshot?.optString("currentUrl").orEmpty()
+        return redactSensitiveUrl(snapshot?.optString("currentUrl").orEmpty())
             .ifBlank { snapshot?.optString("title").orEmpty() }
             .ifBlank { "浏览器截图" }
     }
@@ -1979,14 +2183,38 @@ class MainActivity : ComponentActivity() {
     private suspend fun pollMediaPreviewRequest() {
         val previewDir = localDir().child("media-preview")
         val requestFile = previewDir.child("request")
+        for (file in queuedRequestFiles(previewDir)) {
+            val queuedContent = withContext(Dispatchers.IO) {
+                if (file.isFile) file.readText().trim() else ""
+            }
+            if (queuedContent.isNotBlank()) {
+                val queuedRequest = parseMediaPreviewRequest(queuedContent)
+                val queuedRequestId = panelRequestId(queuedRequest, queuedContent)
+                if (!isRequestProcessed(mediaPreviewProcessedRequestIds, queuedRequestId)) {
+                    handleMediaPreviewRequestContent(previewDir, queuedContent)
+                    rememberRequestId(mediaPreviewProcessedRequestIds, queuedRequestId)
+                }
+            }
+            withContext(Dispatchers.IO) { runCatching { file.delete() } }
+        }
+
         val content = withContext(Dispatchers.IO) {
             previewDir.mkdirs()
             if (requestFile.isFile) requestFile.readText() else ""
         }.trim()
 
         if (content.isBlank() || content == lastMediaPreviewRequest) return
+        val requestId = panelRequestId(parseMediaPreviewRequest(content), content)
+        if (isRequestProcessed(mediaPreviewProcessedRequestIds, requestId)) {
+            lastMediaPreviewRequest = content
+            return
+        }
         lastMediaPreviewRequest = content
+        handleMediaPreviewRequestContent(previewDir, content)
+        rememberRequestId(mediaPreviewProcessedRequestIds, requestId)
+    }
 
+    private suspend fun handleMediaPreviewRequestContent(previewDir: File, content: String) {
         val request = parseMediaPreviewRequest(content)
         val action = request["action"].orEmpty().ifBlank { "show" }
         val requestId = panelRequestId(request, content)
@@ -2083,7 +2311,7 @@ class MainActivity : ComponentActivity() {
             mediaFile.isFile && mediaFile.canRead()
         }
         if (!canRead) {
-            writeMediaPreviewStatus(previewDir, "error=unreadable\npath=$mediaPath\n")
+            writeMediaPreviewStatus(previewDir, "error=unreadable\npath=${refValue(mediaPath)}\n")
             writeMediaPreviewResult(previewDir, requestId, action, ok = false, state = "error", reason = "unreadable", error = "unreadable", extra = mapOf("path" to mediaPath))
             writeAgentPanelEvent(source = "files", type = "agent_error", state = "error", reason = "unreadable", requestId = requestId, extra = mapOf("path" to mediaPath))
             writeAgentPanelStatus(source = "files", state = "error", reason = "unreadable", requestId = requestId, extra = mapOf("path" to mediaPath))
@@ -2095,7 +2323,7 @@ class MainActivity : ComponentActivity() {
             "video" -> TerminalMediaPreviewKind.VIDEO
             "text" -> TerminalMediaPreviewKind.TEXT
             else -> {
-                writeMediaPreviewStatus(previewDir, "error=unsupported-kind\npath=$mediaPath\n")
+                writeMediaPreviewStatus(previewDir, "error=unsupported-kind\npath=${refValue(mediaPath)}\n")
                 writeMediaPreviewResult(previewDir, requestId, action, ok = false, state = "error", reason = "unsupported_kind", error = "unsupported_kind", extra = mapOf("path" to mediaPath))
                 writeAgentPanelEvent(source = "files", type = "agent_error", state = "error", reason = "unsupported_kind", requestId = requestId, extra = mapOf("path" to mediaPath))
                 writeAgentPanelStatus(source = "files", state = "error", reason = "unsupported_kind", requestId = requestId, extra = mapOf("path" to mediaPath))
@@ -2251,7 +2479,7 @@ class MainActivity : ComponentActivity() {
         )
         writeMediaPreviewStatus(
             previewDir,
-            "picked=1\nkind=${kind.name.lowercase(Locale.ROOT)}\npath=${target.absolutePath}\n"
+            "picked=1\nkind=${kind.name.lowercase(Locale.ROOT)}\npath=${refValue(target.absolutePath)}\n"
         )
         writeAgentPanelStatus(
             source = "files",
@@ -2532,7 +2760,8 @@ class MainActivity : ComponentActivity() {
             val userAction = result.optJSONObject("data")?.optString("userAction")
                 ?.takeIf { it.isNotBlank() }
                 ?: authTask?.optString("userAction").orEmpty()
-            result
+            val persistedResult = sanitizeBrowserResult(result)
+            persistedResult
                 .put("visible", visible)
                 .put("collapsed", !visible)
                 .put("itemId", "")
@@ -2541,12 +2770,12 @@ class MainActivity : ComponentActivity() {
                 .put("needsUser", snapshot?.optBoolean("needsUser") == true)
                 .put("tabsCount", tabsCount)
                 .put("userAction", userAction)
-            browserDir.child("result.json").writeText(result.toString(2))
+            browserDir.child("result.json").writeText(persistedResult.toString(2))
             val requestResultsDir = browserDir.child("results").apply { mkdirs() }
             val text = buildString {
-                append("request_id=").append(requestId).append('\n')
-                append("state=").append(state).append('\n')
-                append("action=").append(result.optString("action")).append('\n')
+                append("request_id=").append(refValue(requestId)).append('\n')
+                append("state=").append(refValue(state)).append('\n')
+                append("action=").append(refValue(result.optString("action"))).append('\n')
                 append("ok=").append(if (result.optBoolean("ok")) "1" else "0").append('\n')
                 append("needs_user=").append(if (snapshot?.optBoolean("needsUser") == true) "1" else "0").append('\n')
                 append("visible=").append(if (visible) "1" else "0").append('\n')
@@ -2555,8 +2784,8 @@ class MainActivity : ComponentActivity() {
                 append("active_item=").append(refValue(activeItem)).append('\n')
                 append("tab_id=").append(refValue(activeItem)).append('\n')
                 append("tabs_count=").append(tabsCount).append('\n')
-                append("url=").append(snapshot?.optString("currentUrl").orEmpty()).append('\n')
-                append("title=").append(snapshot?.optString("title").orEmpty()).append('\n')
+                append("url=").append(refValue(redactSensitiveUrl(snapshot?.optString("currentUrl").orEmpty()))).append('\n')
+                append("title=").append(refValue(snapshot?.optString("title").orEmpty())).append('\n')
                 append("user_action=").append(refValue(userAction)).append('\n')
                 append("auth_request_id=").append(refValue(authTask?.optString("requestId").orEmpty())).append('\n')
                 append("auth_state=").append(refValue(authTask?.optString("state").orEmpty())).append('\n')
@@ -2565,11 +2794,11 @@ class MainActivity : ComponentActivity() {
                 append("risk_challenge_kind=").append(refValue(snapshot?.optString("riskChallengeKind").orEmpty())).append('\n')
                 append("recommended_next_action=").append(refValue(snapshot?.optString("recommendedNextAction").orEmpty())).append('\n')
                 result.optString("error").takeIf { it.isNotBlank() && it != "null" }?.let {
-                    append("error=").append(it).append('\n')
+                    append("error=").append(refValue(it)).append('\n')
                 }
                 result.optJSONObject("data")?.let { data ->
                     data.optString("authCode").takeIf { it.isNotBlank() }?.let {
-                        append("auth_code=").append(refValue(it)).append('\n')
+                        append("auth_code=").append(refValue(redactAuthCode(it))).append('\n')
                     }
                     data.optString("path").takeIf { it.isNotBlank() }?.let {
                         append("path=").append(refValue(it)).append('\n')
@@ -2589,7 +2818,7 @@ class MainActivity : ComponentActivity() {
             if (requestId.isNotBlank()) {
                 val safeId = requestId.filter { it.isLetterOrDigit() || it == '.' || it == '_' || it == '-' }.take(120)
                 if (safeId.isNotBlank()) {
-                    requestResultsDir.child("$safeId.json").writeText(result.toString(2))
+                    requestResultsDir.child("$safeId.json").writeText(persistedResult.toString(2))
                     requestResultsDir.child("$safeId.status").writeText(text)
                 }
             }

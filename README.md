@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.2.5-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.2.5)
+[![Release](https://img.shields.io/badge/release-v2.2.6-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.2.6)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.142.4-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,15 +9,17 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.2.5 更新
+## 重要：2.2.6 更新
 
-2.2.5 是 RTK hook 安全热修版：`codex-rtk hook` 会把改写结果中的 `rtk ...` 转为 App 内置 RTK 的绝对路径，避免少数登录 shell 的 `PATH` 没带 `$PREFIX/local/bin` 时出现 `rtk: not found`；同时遇到复杂 `find ... -exec ...` 等 RTK 不支持的命令会直接保留原命令，避免误改写失败。2.2.3 的终端输出合帧、Compose 状态去重、bridge 低频兜底轮询，以及打开 Custom Tabs/外部浏览器后 bridge 继续消费请求的修复继续保留。新增 `$PREFIX/local/perf/terminal.status` 作为轻量排障状态文件，便于 Agent 判断合帧和 bridge 工作状态。
+2.2.6 是 bridge 并发可靠性和安全加固版：浏览器、文件托盘、会话折叠和 Agent 面板请求改为更稳的队列/幂等处理，避免同一请求被 legacy request 与 queue 双执行，也避免快速连续请求覆盖丢失；协作浏览器加强导航超时和旧页面回调隔离，外部链接/下载统一进入可确认的用户协作状态；同时收窄敏感数据备份、FileProvider、Release 签名和 GitHub Release 发布门禁。
+
+2.2.5 的 RTK hook 安全热修继续保留：`codex-rtk hook` 会把改写结果中的 `rtk ...` 转为 App 内置 RTK 的绝对路径，避免少数登录 shell 的 `PATH` 没带 `$PREFIX/local/bin` 时出现 `rtk: not found`；同时遇到复杂 `find ... -exec ...` 等 RTK 不支持的命令会直接保留原命令，避免误改写失败。2.2.3 的终端输出合帧、Compose 状态去重、bridge 低频兜底轮询，以及打开 Custom Tabs/外部浏览器后 bridge 继续消费请求的修复继续保留。新增 `$PREFIX/local/perf/terminal.status` 作为轻量排障状态文件，便于 Agent 判断合帧和 bridge 工作状态。
 
 2.2.1 的浏览器协作能力继续保留：`auth-open` 默认只打开 App 内安全登录任务卡，不再自动跳出到 Custom Tabs；用户点击“打开/重开”或 Agent 显式调用 `auth-reopen` / `auth-open --open-now` 时才打开系统浏览器。2.2.0 新增的调用式 Custom Tabs 安全登录任务卡，`auth-open/auth-wait/auth-status/auth-done/auth-cancel/auth-reopen` 会把用户完成、取消、折叠、重开等动作结构化回传给 Agent；官方 Codex 登录可走 `codex 官方登录` / 启动前设备码向导，默认使用 `codex login --device-auth`，在安全登录任务卡中展示链接/验证码，用户点击“打开/重开”进入 Custom Tabs 完成授权后再用 `codex login status` 验证。
 
 内置 WebView 继续作为 Agent Browser，保留后台打开、DOM 读取、点击、输入、JS、截图、多标签、Cookie/WebStorage 持久化和 userscript；遇到验证码/风控/外部 scheme 时会进入明确的用户协作状态，而不是让 Agent 猜。
 
-已经安装 2.0.x/2.1.x/2.2.x 的用户需要从 Releases 下载并覆盖安装 2.2.5 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context` 等 APK 内置桥接命令。
+已经安装 2.0.x/2.1.x/2.2.x 的用户需要从 Releases 下载并覆盖安装 2.2.6 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context` 等 APK 内置桥接命令。
 
 注意：普通启动按设计不会自动联网更新 `~/.local/share/codex-zh/scripts` 下的安装/配置脚本。已安装用户覆盖 APK 后，为确保 `codex 配置模式` 也切到最新配置管理器，请手动执行一次：
 
@@ -38,6 +40,9 @@ codex 配置模式
 
 ## 2.0 新功能
 
+- 2.2.6 修复：bridge 请求队列和 request_id 幂等，避免浏览器请求双执行、文件托盘/session fold/agent panel 快速连续请求丢失。
+- 2.2.6 修复：协作浏览器导航 token、状态落盘、外部链接/下载确认和敏感字段脱敏，减少后台浏览和用户协作状态错乱。
+- 2.2.6 加固：DocumentsProvider 路径边界、备份排除、FileProvider 分享范围、Release 签名和 GitHub Release 资产发布门禁。
 - 2.2.5 修复：RTK hook 使用 App 内置 RTK 绝对路径，并跳过复杂 `find` 改写，避免 `rtk: not found` 和 `rtk find` 不支持参数导致的命令失败。
 - 2.2.4 修复：RTK hook 使用 App 内置 RTK 绝对路径，避免登录 shell `PATH` 缺失时出现 `rtk: not found`。
 - 2.2.3 修复：打开 Custom Tabs/外部浏览器后，文件托盘、浏览器和会话折叠 bridge 继续消费 Agent 请求，避免回到终端后状态卡在旧任务。
@@ -84,9 +89,9 @@ codex 配置模式
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.2.5` |
+| Android App | `2.2.6` |
 | 包名 | `com.gzy3894.codexfortui` |
-| Debug 包名 | `com.gzy3894.codexfortui.debug` |
+| Debug/Test 包名 | `com.gzy3894.codexfortui.test` |
 | Codex CLI | `0.142.4` 中文版 |
 | 二进制目标 | `aarch64-unknown-linux-musl` |
 | 推荐设备 | Android 8.0+、ARM64 |
@@ -411,12 +416,16 @@ hooks = true
 
 ## 构建与验证
 
-本仓库使用 GitHub Actions 构建 release APK。构建前会先运行安装器 smoke test，覆盖 bootstrap 不自动联网、显式脚本更新、本地启动器不 preflight、模型目录显式刷新等路径。
+本仓库使用 GitHub Actions 构建 release APK。构建前会先运行安装器 smoke test 和静态门禁，覆盖 bootstrap 不自动联网、显式脚本更新、本地启动器不 preflight、模型目录显式刷新、bridge/浏览器/发布签名等路径。
 
 本地建议先跑脚本级测试：
 
 ```sh
+git diff --check
 sh tests/codex-for-tui-installer-smoke.sh
+sh tests/codex-for-tui-static-guards.sh
+sh -n tests/codex-for-tui-device-smoke.sh
+sh -n tests/codex-for-tui-browser-smoke.sh
 ```
 
 APK 构建建议交给 GitHub Actions，避免本地 JDK、Android SDK、NDK 和 Gradle 环境差异影响结果。
