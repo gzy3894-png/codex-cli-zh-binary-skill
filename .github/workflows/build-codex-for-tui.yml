@@ -238,13 +238,8 @@ jobs:
             } > /tmp/signing.properties
             echo "Using configured release signing key."
           else
-            cp app/testkey.keystore /tmp/xed.keystore
-            {
-              printf 'keyAlias=testkey\n'
-              printf 'keyPassword=testkey\n'
-              printf 'storePassword=testkey\n'
-            } > /tmp/signing.properties
-            echo "Using repository 2.x release signing key."
+            test -s app/codex-for-tui-2x-release.keystore
+            echo "Using repository 2.x release keystore from app/codex-for-tui-2x-release.keystore."
           fi
           echo "artifact_name=codex-for-tui-release-apk" >> "$GITHUB_OUTPUT"
 

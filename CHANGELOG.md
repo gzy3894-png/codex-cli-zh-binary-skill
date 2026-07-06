@@ -11,6 +11,7 @@ Codex for TUI 2.2.6 是 bridge 并发可靠性、协作浏览器状态同步和�
 - 协作浏览器导航增加 token/timeout 隔离，避免旧页面回调完成新请求；外部 scheme、fallback 和下载统一进入用户确认路径。
 - 浏览器状态、用户协作状态和 request 结果持续写回本地 bridge 文件，减少 `status/auth-wait` 看到旧状态。
 - Android 存储边界、备份规则、FileProvider 分享范围和 release 签名/Release 上传门禁加固。
+- 2.x 既有签名文件从 debug/testkey 命名位置迁移到 `app/codex-for-tui-2x-release.keystore`，release 构建直接走正式 signingConfig 并继续校验旧 2.x 证书指纹。
 
 ### 验证
 

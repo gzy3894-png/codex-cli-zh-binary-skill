@@ -20,6 +20,7 @@ android {
     signingConfigs {
         create("release") {
             val isGITHUB_ACTION = System.getenv("GITHUB_ACTIONS") == "true"
+            val repositoryReleaseKeystore = file("codex-for-tui-2x-release.keystore")
             
             val propertiesFilePath = if (isGITHUB_ACTION) {
                 "/tmp/signing.properties"
@@ -41,14 +42,12 @@ android {
                 
                 storePassword = properties["storePassword"] as String?
             } else {
-                println("Signing properties file not found at $propertiesFilePath")
+                println("Signing properties file not found at $propertiesFilePath; using repository 2.x release keystore.")
+                keyAlias = "testkey"
+                keyPassword = "testkey"
+                storeFile = repositoryReleaseKeystore
+                storePassword = "testkey"
             }
-        }
-        getByName("debug") {
-            storeFile = file(layout.buildDirectory.dir("../testkey.keystore"))
-            storePassword = "testkey"
-            keyAlias = "testkey"
-            keyPassword = "testkey"
         }
     }
     

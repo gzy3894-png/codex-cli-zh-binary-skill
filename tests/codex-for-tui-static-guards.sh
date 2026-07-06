@@ -8,6 +8,8 @@ MKSESSION="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/scre
 INIT_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/init.sh"
 APP_BUILD_GRADLE="$ROOT_DIR/android-app/app/build.gradle.kts"
 APP_MANIFEST="$ROOT_DIR/android-app/app/src/main/AndroidManifest.xml"
+RELEASE_KEYSTORE="$ROOT_DIR/android-app/app/codex-for-tui-2x-release.keystore"
+LEGACY_DEBUG_KEYSTORE="$ROOT_DIR/android-app/app/testkey.keystore"
 BOOTSTRAP="$SCRIPT_DIR/codex-for-tui-bootstrap.sh"
 BOOTSTRAP_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-for-tui-bootstrap.sh"
 PREVIEW_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-preview"
@@ -86,9 +88,9 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Prepare release signing key'
-  assert_file_contains "$BUILD_WORKFLOW" 'cp app/testkey.keystore /tmp/xed.keystore'
-  assert_file_contains "$BUILD_WORKFLOW" 'keyAlias=testkey'
-  assert_file_contains "$BUILD_WORKFLOW" 'Using repository 2.x release signing key.'
+  assert_file_contains "$BUILD_WORKFLOW" 'test -s app/codex-for-tui-2x-release.keystore'
+  assert_file_contains "$BUILD_WORKFLOW" 'Using repository 2.x release keystore from app/codex-for-tui-2x-release.keystore.'
+  assert_file_not_contains "$BUILD_WORKFLOW" 'cp app/testkey.keystore /tmp/xed.keystore'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release APKs'
   assert_file_contains "$BUILD_WORKFLOW" 'mapfile -t apks'
   assert_file_contains "$BUILD_WORKFLOW" 'for apk in "${apks[@]}"; do'
@@ -109,11 +111,18 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'qemu-aarch64 /tmp/rtk --version'
   assert_file_contains "$BUILD_WORKFLOW" 'cp /tmp/codex-for-tui-rtk/rtk core/main/src/main/assets/rtk'
   assert_file_not_contains "$BUILD_WORKFLOW" 'codex-for-tui-unsigned-or-test-signed-release-apk'
+  [ -s "$RELEASE_KEYSTORE" ] || fail "repository 2.x release keystore missing: $RELEASE_KEYSTORE"
+  [ ! -e "$LEGACY_DEBUG_KEYSTORE" ] || fail "legacy debug-named release key should be moved: $LEGACY_DEBUG_KEYSTORE"
+  assert_file_contains "$APP_BUILD_GRADLE" 'val repositoryReleaseKeystore = file("codex-for-tui-2x-release.keystore")'
+  assert_file_contains "$APP_BUILD_GRADLE" 'storeFile = repositoryReleaseKeystore'
+  assert_file_contains "$APP_BUILD_GRADLE" 'keyAlias = "testkey"'
   assert_file_contains "$APP_BUILD_GRADLE" 'signingConfig = signingConfigs.getByName("release")'
   assert_file_contains "$APP_BUILD_GRADLE" 'tasks.matching { it.name == "validateSigningRelease" }'
   assert_file_contains "$APP_BUILD_GRADLE" 'Release signing is required; refusing to fall back to debug/test signing.'
   assert_file_not_contains "$APP_BUILD_GRADLE" 'signingConfig = signingConfigs.getByName("debug")'
   assert_file_not_contains "$APP_BUILD_GRADLE" 'signingConfig = if (signingConfigs.getByName("release").storeFile?.exists() == true)'
+  assert_file_not_contains "$APP_BUILD_GRADLE" 'getByName("debug") {'
+  assert_file_not_contains "$APP_BUILD_GRADLE" 'testkey.keystore'
 }
 
 test_android_security_guards() {

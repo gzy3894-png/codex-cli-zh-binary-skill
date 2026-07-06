@@ -43,6 +43,7 @@ codex 配置模式
 - 2.2.6 修复：bridge 请求队列和 request_id 幂等，避免浏览器请求双执行、文件托盘/session fold/agent panel 快速连续请求丢失。
 - 2.2.6 修复：协作浏览器导航 token、状态落盘、外部链接/下载确认和敏感字段脱敏，减少后台浏览和用户协作状态错乱。
 - 2.2.6 加固：DocumentsProvider 路径边界、备份排除、FileProvider 分享范围、Release 签名和 GitHub Release 资产发布门禁。
+- 2.2.6 加固：2.x 既有正式签名迁移到 `app/codex-for-tui-2x-release.keystore`，release 构建不再借用 debug signingConfig。
 - 2.2.5 修复：RTK hook 使用 App 内置 RTK 绝对路径，并跳过复杂 `find` 改写，避免 `rtk: not found` 和 `rtk find` 不支持参数导致的命令失败。
 - 2.2.4 修复：RTK hook 使用 App 内置 RTK 绝对路径，避免登录 shell `PATH` 缺失时出现 `rtk: not found`。
 - 2.2.3 修复：打开 Custom Tabs/外部浏览器后，文件托盘、浏览器和会话折叠 bridge 继续消费 Agent 请求，避免回到终端后状态卡在旧任务。
