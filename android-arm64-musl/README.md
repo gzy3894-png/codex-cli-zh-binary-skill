@@ -26,7 +26,7 @@
 
 普通启动不会自动联网更新脚本，不会请求 `/models`，不会覆盖 `~/.codex/config.toml`。
 
-Codex for TUI 2.2.4 用户建议覆盖安装最新 APK；2.2.4 修复 RTK hook 在登录 shell `PATH` 缺失时可能出现 `rtk: not found` 的问题，2.2.3 修复打开 Custom Tabs/外部浏览器后 bridge 停止消费的问题，2.2.2 主要优化 App 侧终端渲染和 bridge 轮询，普通启动规则不变。已经完成首次安装但只需要更新脚本时，可以手动运行：
+Codex for TUI 2.2.5 用户建议覆盖安装最新 APK；2.2.5 修复 RTK hook 绝对路径和复杂 `find` 误改写问题，2.2.3 修复打开 Custom Tabs/外部浏览器后 bridge 停止消费的问题，2.2.2 主要优化 App 侧终端渲染和 bridge 轮询，普通启动规则不变。已经完成首次安装但只需要更新脚本时，可以手动运行：
 
 ```sh
 codex 更新

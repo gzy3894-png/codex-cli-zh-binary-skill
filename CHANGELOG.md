@@ -1,5 +1,21 @@
 # Changelog
 
+## Codex for TUI 2.2.5
+
+Codex for TUI 2.2.5 是 2.2.4 发布前追加的 RTK 安全热修版：保留 RTK 绝对路径修复，同时避免把复杂 `find` 命令错误改写成 `rtk find`。
+
+### 修复
+
+- `codex-rtk hook` 遇到带 `-exec`、`-execdir`、`-ok`、`-delete`、`-not`、`-o`、`-a`、括号或 `!` 的复杂 `find` 命令时直接 fail-open，保留原命令执行。
+- 保留 2.2.4 的绝对路径修复：RTK 改写结果中的 `rtk ...` 会转为 App 内置 RTK 二进制路径，避免 `PATH` 缺失导致 `rtk: not found`。
+- 静态门禁新增复杂 `find` 不改写检查，避免后续回退。
+
+### 验证
+
+- 本地仍只运行非 APK 门禁：`sh -n`、`sh tests/codex-for-tui-static-guards.sh`、`sh tests/codex-for-tui-installer-smoke.sh`、`git diff --check`。
+- APK、正式签名和 release 资产仍只通过 GitHub Actions 构建。
+- 真机验证重点：登录 shell 下 `git status` 等 RTK 改写命令使用绝对路径；复杂 `find ... -exec ...` 不被 RTK 改写，避免命令失败。
+
 ## Codex for TUI 2.2.4
 
 Codex for TUI 2.2.4 是 2.2.3 的 RTK hook 热修版，重点修复少数登录 shell 环境下 `PATH` 不含 `$PREFIX/local/bin` 时，RTK 改写后的命令可能报 `rtk: not found` 的问题。

@@ -69,8 +69,8 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 37'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.2.4"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 38'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.2.5"'
 }
 
 test_release_workflow_signature_gate() {
@@ -701,6 +701,10 @@ EOF
   self_sample="{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$tmp/bin/rtk git status\"}}"
   output="$(printf '%s' "$self_sample" | RTK_DISABLED=0 PREFIX="$tmp/no-prefix" PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" hook)"
   [ -z "$output" ] || fail "codex-rtk hook should not rewrite absolute rtk commands"
+
+  find_sample='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"find /tmp -type f -exec ls -l {} \\;"}}'
+  output="$(printf '%s' "$find_sample" | RTK_DISABLED=0 PREFIX="$tmp/no-prefix" PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" hook)"
+  [ -z "$output" ] || fail "codex-rtk hook should not rewrite unsafe find commands"
 
   PREFIX="$tmp/no-prefix" PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" enable >/dev/null || fail "codex-rtk enable failed"
   assert_file_contains "$tmp/home/.codex/config.toml" 'hooks = true'
