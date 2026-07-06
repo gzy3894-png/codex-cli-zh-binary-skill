@@ -1,5 +1,26 @@
 # Changelog
 
+## Codex for TUI 2.3.0
+
+Codex for TUI 2.3.0 是 2.2.9 后的稳定化回归版，重点不是新增大功能，而是把现有移动端协作能力纳入可重复门禁，并修复回归中发现的浏览器重复导航超时问题。
+
+### 修复
+
+- `codex-browser open <当前已加载 URL>` 不再等待新的页面完成回调直到超时；页面已在当前标签加载且未处于 loading 时会直接返回 `state=done`、当前 `url/title/tab_id`，需要强制刷新时继续使用 `codex-browser reload`。
+- 保留 2.2.9 的后台/折叠 WebView 截图兜底链路，`screenshot --push --background` 仍必须保持 `visible=0 collapsed=1` 并生成真实页面内容。
+
+### 稳定化
+
+- 新增 `docs/codex-for-tui-2.3.0-regression.md`，把安装/更新/首启、配置管理器、快捷授权、文件托盘、浏览器、Custom Tabs/Auth、会话折叠和终端性能状态整理成 2.3 发布回归矩阵。
+- 新增 `tests/codex-for-tui-installed-device-smoke.sh`，用于已安装真机环境内检查包版本、命令同步、RTK/context hook、文件托盘、会话折叠、终端 perf 状态、浏览器 JS/后台截图/Auth 残留等关键路径。
+- `tests/codex-for-tui-browser-smoke.sh` 增加重复打开已加载 URL 的回归断言，避免后续把同类超时问题重新带回。
+
+### 验证
+
+- 本地仍只运行非 APK 门禁：`git diff --check`、各 bridge asset `sh -n`、`sh tests/codex-for-tui-static-guards.sh`、`sh tests/codex-for-tui-installer-smoke.sh`、`sh -n tests/codex-for-tui-device-smoke.sh`、`sh -n tests/codex-for-tui-browser-smoke.sh`、`sh -n tests/codex-for-tui-installed-device-smoke.sh`。
+- APK、正式签名和 release 资产仍只通过 GitHub Actions 构建。
+- 真机验证重点：`CODEX_TUI_REQUIRE_HOOKS=1 CODEX_TUI_EXPECTED_VERSION_CODE=43 tests/codex-for-tui-installed-device-smoke.sh` 与 `tests/codex-for-tui-browser-smoke.sh` 必须通过；Release APK 签名证书继续等于 2.x 正式证书指纹。
+
 ## Codex for TUI 2.2.9
 
 Codex for TUI 2.2.9 是 2.2.8 的正式热修版，继续修复后台/折叠 WebView 截图在真机上仍为空图的问题。

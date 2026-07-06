@@ -21,6 +21,7 @@ SESSION_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-session"
 RTK_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-rtk"
 CONTEXT_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-context"
 BROWSER_SMOKE="$ROOT_DIR/tests/codex-for-tui-browser-smoke.sh"
+INSTALLED_DEVICE_SMOKE="$ROOT_DIR/tests/codex-for-tui-installed-device-smoke.sh"
 TERMINAL_TOP_BAR="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalTopBar.kt"
 TERMINAL_SCREEN="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalScreen.kt"
 MEDIA_PREVIEW_PANE="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MediaPreviewPane.kt"
@@ -77,13 +78,13 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 42'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.2.9"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 43'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.0"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.2.9'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.0'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -170,6 +171,9 @@ test_terminal_performance_guards() {
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'clearCompletedUserTasksForPageAction(action)'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'window.eval(source)'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'new Function(source)'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'val alreadyLoaded = tab.currentUrl.isNotBlank()'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'if (alreadyLoaded) {'
+  assert_file_contains "$BROWSER_SMOKE" 'opening the already loaded URL should complete'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'attachOffscreenCaptureHost'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'CapturableWebView'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'WebView.enableSlowWholeDocumentDraw()'
@@ -284,6 +288,7 @@ test_image_preview_bridge_asset() {
   sh -n "$SESSION_ASSET" || fail "codex-session shell syntax failed"
   sh -n "$RTK_ASSET" || fail "codex-rtk shell syntax failed"
   sh -n "$BROWSER_SMOKE" || fail "browser smoke shell syntax failed"
+  sh -n "$INSTALLED_DEVICE_SMOKE" || fail "installed device smoke shell syntax failed"
   sh -n "$INIT_ASSET" || fail "init.sh shell syntax failed"
   assert_file_contains "$PREVIEW_ASSET" 'queue_dir="$bridge_dir/queue"'
   assert_file_contains "$PREVIEW_ASSET" 'cp "$req_tmp" "$legacy_tmp"'

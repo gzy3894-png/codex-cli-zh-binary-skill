@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.2.9-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.2.9)
+[![Release](https://img.shields.io/badge/release-v2.3.0-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.3.0)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.142.4-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,9 +9,11 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.2.9 更新
+## 重要：2.3.0 更新
 
-2.2.9 是 2.2.8 的正式热修版：继续保留 `codex-browser js "document.title"` 裸表达式返回值、Auth 状态清理和 RTK/context 系统托管 hook 状态显示修复，并再次加固 2.2.8 真机复测仍失败的后台 WebView 截图。浏览器在后台/折叠状态下执行 `screenshot --push --background` 会把 capture host 挂到 App 内容背后、启用 `enableSlowWholeDocumentDraw`、等待渲染帧，并在普通 `draw()` 后增加 WebView `onDraw`、`capturePicture` 和 DOM 文本快照兜底来截取真实网页内容，同时不自动展开浏览器托盘。
+2.3.0 是 2.2.9 后的稳定化回归版：补齐 `docs/codex-for-tui-2.3.0-regression.md` 和 `tests/codex-for-tui-installed-device-smoke.sh`，把安装/更新/首启、RTK/context、文件托盘、会话折叠、浏览器后台截图、JS、Auth 状态清理和终端性能状态纳入可重复门禁。真机回归时发现 `codex-browser open` 重复打开当前已加载 URL 可能卡到超时并误报 `Page load timed out before userscript completion`，2.3.0 已修复为直接返回当前页面快照；需要强制刷新时仍使用 `codex-browser reload`。
+
+2.2.9 的后台 WebView 截图修复继续保留：浏览器在后台/折叠状态下执行 `screenshot --push --background` 会把 capture host 挂到 App 内容背后、启用 `enableSlowWholeDocumentDraw`、等待渲染帧，并在普通 `draw()` 后增加 WebView `onDraw`、`capturePicture` 和 DOM 文本快照兜底来截取真实网页内容，同时不自动展开浏览器托盘。
 
 2.2.5 的 RTK hook 安全热修继续保留：`codex-rtk hook` 会把改写结果中的 `rtk ...` 转为 App 内置 RTK 的绝对路径，避免少数登录 shell 的 `PATH` 没带 `$PREFIX/local/bin` 时出现 `rtk: not found`；同时遇到复杂 `find ... -exec ...` 等 RTK 不支持的命令会直接保留原命令，避免误改写失败。2.2.3 的终端输出合帧、Compose 状态去重、bridge 低频兜底轮询，以及打开 Custom Tabs/外部浏览器后 bridge 继续消费请求的修复继续保留。新增 `$PREFIX/local/perf/terminal.status` 作为轻量排障状态文件，便于 Agent 判断合帧和 bridge 工作状态。
 
@@ -19,7 +21,7 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 内置 WebView 继续作为 Agent Browser，保留后台打开、DOM 读取、点击、输入、JS、截图、多标签、Cookie/WebStorage 持久化和 userscript；遇到验证码/风控/外部 scheme 时会进入明确的用户协作状态，而不是让 Agent 猜。
 
-已经安装 2.0.x/2.1.x/2.2.x 的用户需要从 Releases 下载并覆盖安装 2.2.9 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context` 等 APK 内置桥接命令。
+已经安装 2.0.x/2.1.x/2.2.x 的用户需要从 Releases 下载并覆盖安装 2.3.0 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context` 等 APK 内置桥接命令。
 
 注意：普通启动按设计不会自动联网更新 `~/.local/share/codex-zh/scripts` 下的安装/配置脚本。已安装用户覆盖 APK 后，为确保 `codex 配置模式` 也切到最新配置管理器，请手动执行一次：
 
@@ -40,6 +42,8 @@ codex 配置模式
 
 ## 2.0 新功能
 
+- 2.3.0 稳定化：新增 2.3 回归清单和已安装真机 smoke，覆盖安装状态、RTK/context、文件托盘、会话折叠、浏览器后台截图/JS/Auth 和终端 perf 状态。
+- 2.3.0 修复：重复 `codex-browser open <当前已加载 URL>` 不再等待新的页面回调直到超时，而是直接返回当前页面，避免稳定化门禁和日常脚本被误判失败。
 - 2.2.9 修复：2.2.8 真机复测仍失败的后台/折叠 WebView 截图空图，capture host 改为挂在 App 内容背后，并增加 `enableSlowWholeDocumentDraw`、等待帧和 WebView `onDraw` 与 DOM 文本兜底。
 - 2.2.8 尝试修复：后台/折叠 WebView 截图灰白空图，使用透明 capture host、软件层绘制和 `capturePicture` 兜底；部分真机仍为空图，已由 2.2.9 继续修复。
 - 2.2.7 修复：`codex-browser js` 裸表达式返回值、Auth 取消状态残留和 RTK/context 系统托管 hook 状态显示；2.2.7 的后台截图在部分真机上仍可能为空图，2.2.8 仍未完全修复，已由 2.2.9 继续修复。
@@ -93,7 +97,7 @@ codex 配置模式
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.2.9` |
+| Android App | `2.3.0` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug/Test 包名 | `com.gzy3894.codexfortui.test` |
 | Codex CLI | `0.142.4` 中文版 |

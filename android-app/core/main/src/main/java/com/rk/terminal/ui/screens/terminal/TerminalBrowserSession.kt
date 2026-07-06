@@ -373,21 +373,35 @@ class TerminalBrowserSessionManager(
         val tab = tabs[activeTabId] ?: createTab()
         val url = normalizeUrl(rawUrl)
         activeTabId = tab.id
+        val alreadyLoaded = tab.currentUrl.isNotBlank() &&
+            urlsSameForLoad(url, tab.currentUrl) &&
+            !tab.isLoading
+        tab.currentUrl = url
+        tab.lastError = null
+        tab.riskChallengeDetected = false
+        tab.riskChallengeKind = ""
+        tab.recommendedNextAction = ""
+        needsUser = false
+        userMessage = ""
+        externalOpenPrompt = null
+        if (alreadyLoaded) {
+            tab.title = tab.webView.title.orEmpty().ifBlank { tab.title.ifBlank { tab.currentUrl } }
+            tab.isLoading = false
+            cookieFlush()
+            appendHistory(tab)
+            publish("done", "网页已打开")
+            return JSONObject()
+                .put("tabId", tab.id)
+                .put("url", redactSensitiveUrl(tab.currentUrl))
+                .put("title", tab.title)
+        }
         val loadToken = tab.loadWaiterToken + 1L
         val waiter = CompletableDeferred<Unit>()
         tab.loadWaiterToken = loadToken
         tab.loadStartedToken = 0L
         tab.loadingMainFrameUrl = url
         tab.loadWaiter = waiter
-        tab.currentUrl = url
-        tab.lastError = null
-        tab.riskChallengeDetected = false
-        tab.riskChallengeKind = ""
-        tab.recommendedNextAction = ""
         tab.isLoading = true
-        needsUser = false
-        userMessage = ""
-        externalOpenPrompt = null
         publish("running", "打开网页")
         waitForHostLayout(tab)
         tab.webView.loadUrl(url)
