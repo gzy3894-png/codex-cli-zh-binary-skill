@@ -1,5 +1,21 @@
 # Changelog
 
+## Codex for TUI 2.2.4
+
+Codex for TUI 2.2.4 是 2.2.3 的 RTK hook 热修版，重点修复少数登录 shell 环境下 `PATH` 不含 `$PREFIX/local/bin` 时，RTK 改写后的命令可能报 `rtk: not found` 的问题。
+
+### 修复
+
+- `codex-rtk hook` 现在会把 RTK 改写结果中的 `rtk ...` 转为当前 App 内置 RTK 二进制的绝对路径，避免依赖用户 shell 的 `PATH`。
+- hook 会识别已经使用绝对路径的 RTK 命令并直接跳过，避免二次改写或循环。
+- 静态门禁新增绝对路径检查，确保后续不会退回裸 `rtk ...`。
+
+### 验证
+
+- 本地仍只运行非 APK 门禁：`sh -n`、`sh tests/codex-for-tui-static-guards.sh`、`sh tests/codex-for-tui-installer-smoke.sh`、`git diff --check`。
+- APK、正式签名和 release 资产仍只通过 GitHub Actions 构建。
+- 真机验证重点：登录 shell 下即使 `command -v rtk` 为空，RTK hook 也能返回 `$PREFIX/local/bin/rtk ...` 绝对路径，终端命令不再报 `rtk: not found`。
+
 ## Codex for TUI 2.2.3
 
 Codex for TUI 2.2.3 是 2.2.2 的真机门禁热修版，重点修复打开 Custom Tabs/外部浏览器后 bridge 停止消费的问题。

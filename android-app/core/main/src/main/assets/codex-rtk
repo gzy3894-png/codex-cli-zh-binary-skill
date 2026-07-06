@@ -170,6 +170,9 @@ run_hook() {
   esac
   rtk_bin="$(rtk_path 2>/dev/null || true)"
   [ -n "$rtk_bin" ] || exit 0
+  case "$cmd" in
+    "$rtk_bin"|"$rtk_bin "*) exit 0 ;;
+  esac
   code=0
   rewritten="$("$rtk_bin" rewrite "$cmd" 2>/dev/null)" || code="$?"
   code="${code:-0}"
@@ -182,6 +185,10 @@ run_hook() {
   case "$rewritten" in
     *'
 '*) exit 0 ;;
+  esac
+  case "$rewritten" in
+    rtk) rewritten="$rtk_bin" ;;
+    rtk\ *) rewritten="$rtk_bin${rewritten#rtk}" ;;
   esac
   escaped="$(json_escape "$rewritten")"
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"RTK rewrite","updatedInput":{"command":"%s"}}}\n' "$escaped"
