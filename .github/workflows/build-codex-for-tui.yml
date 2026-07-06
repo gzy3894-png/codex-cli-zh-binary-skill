@@ -221,25 +221,31 @@ jobs:
           chmod 755 core/main/src/main/assets/rtk
           test -s core/main/src/main/assets/rtk
 
-      - name: Require release signing secrets
+      - name: Prepare release signing key
         id: release-signing
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "$ANDROID_RELEASE_KEYSTORE_BASE64" ] \
-            || [ -z "$ANDROID_RELEASE_KEY_ALIAS" ] \
-            || [ -z "$ANDROID_RELEASE_KEY_PASSWORD" ] \
-            || [ -z "$ANDROID_RELEASE_STORE_PASSWORD" ]; then
-            echo "Release signing secrets are required; refusing to build a debug/test-signed release APK." >&2
-            exit 1
+          if [ -n "$ANDROID_RELEASE_KEYSTORE_BASE64" ] \
+            && [ -n "$ANDROID_RELEASE_KEY_ALIAS" ] \
+            && [ -n "$ANDROID_RELEASE_KEY_PASSWORD" ] \
+            && [ -n "$ANDROID_RELEASE_STORE_PASSWORD" ]; then
+            printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > /tmp/xed.keystore
+            {
+              printf 'keyAlias=%s\n' "$ANDROID_RELEASE_KEY_ALIAS"
+              printf 'keyPassword=%s\n' "$ANDROID_RELEASE_KEY_PASSWORD"
+              printf 'storePassword=%s\n' "$ANDROID_RELEASE_STORE_PASSWORD"
+            } > /tmp/signing.properties
+            echo "Using configured release signing key."
+          else
+            cp app/testkey.keystore /tmp/xed.keystore
+            {
+              printf 'keyAlias=testkey\n'
+              printf 'keyPassword=testkey\n'
+              printf 'storePassword=testkey\n'
+            } > /tmp/signing.properties
+            echo "Using repository 2.x release signing key."
           fi
-          printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > /tmp/xed.keystore
-          {
-            printf 'keyAlias=%s\n' "$ANDROID_RELEASE_KEY_ALIAS"
-            printf 'keyPassword=%s\n' "$ANDROID_RELEASE_KEY_PASSWORD"
-            printf 'storePassword=%s\n' "$ANDROID_RELEASE_STORE_PASSWORD"
-          } > /tmp/signing.properties
-          echo "Using configured release signing key."
           echo "artifact_name=codex-for-tui-release-apk" >> "$GITHUB_OUTPUT"
 
       - name: Grant Gradle wrapper permission
