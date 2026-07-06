@@ -77,13 +77,13 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 40'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.2.7"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 41'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.2.8"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.2.7'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.2.8'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -171,6 +171,10 @@ test_terminal_performance_guards() {
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'window.eval(source)'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'new Function(source)'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'attachOffscreenCaptureHost'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'alpha = 0.01f'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'captureWebViewPictureBitmap'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'setLayerType(View.LAYER_TYPE_SOFTWARE, null)'
+  assert_file_not_contains "$TERMINAL_BROWSER_SESSION" 'translationX = (appContext.resources.displayMetrics.widthPixels + 64).toFloat()'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'postVisualStateCallback'
   assert_file_contains "$MAIN_ACTIVITY" 'override fun onDestroy()'
   assert_file_contains "$MAIN_ACTIVITY" 'pollSessionFoldRequestLocked'

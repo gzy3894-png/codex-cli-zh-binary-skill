@@ -1,5 +1,21 @@
 # Changelog
 
+## Codex for TUI 2.2.8
+
+Codex for TUI 2.2.8 是 2.2.7 的正式热修版，修复 2.2.7 真机复测发现的后台/折叠 WebView 截图灰白空图问题。
+
+### 修复
+
+- 后台截图临时 capture host 改为窗口内 1% 透明挂载，避免 Android WebView 在屏幕外不可见宿主上跳过真实内容渲染。
+- 截图前临时切换 WebView 软件层绘制；若 `draw()` 结果疑似空白，再使用 `capturePicture()` 兜底，提升 `codex-browser screenshot --push --background` 在折叠状态下截取真实网页的成功率。
+- 保持 2.2.7 的其他修复：`codex-browser js "document.title"` 裸表达式返回值、Auth 取消状态清理，以及 RTK/context 系统级 requirements hook 状态识别。
+
+### 验证
+
+- 本地仍只运行非 APK 门禁：`git diff --check`、各 bridge asset `sh -n`、`sh tests/codex-for-tui-static-guards.sh`、`sh tests/codex-for-tui-installer-smoke.sh`、`sh -n tests/codex-for-tui-device-smoke.sh`、`sh -n tests/codex-for-tui-browser-smoke.sh`。
+- APK、正式签名和 release 资产仍只通过 GitHub Actions 构建。
+- 真机验证重点：2.2.7 已通过的 RTK/context status、JS 裸表达式继续通过；后台截图必须在 `visible=0 collapsed=1` 时生成真实 Example Domain 页面；`auth-cancel` 后普通 `open` 不残留取消状态。
+
 ## Codex for TUI 2.2.7
 
 Codex for TUI 2.2.7 是 2.2.6 的真机回归热修版，重点修复浏览器后台截图、JS 返回值、Auth 状态残留和 RTK/context 快捷授权状态显示。

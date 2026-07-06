@@ -684,10 +684,7 @@ class TerminalBrowserSessionManager(
                 captureWidth = width
                 captureHeight = height
                 prepareWebViewForCapture(tab.webView)
-                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                val canvas = Canvas(bitmap)
-                canvas.drawColor(Color.WHITE)
-                tab.webView.draw(canvas)
+                val bitmap = captureWebViewBitmap(tab.webView, width, height)
                 withContext(Dispatchers.IO) {
                     file.parentFile?.mkdirs()
                     FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -1688,7 +1685,9 @@ class TerminalBrowserSessionManager(
             setBackgroundColor(Color.WHITE)
             clipChildren = false
             clipToPadding = false
-            translationX = (appContext.resources.displayMetrics.widthPixels + 64).toFloat()
+            alpha = 0.01f
+            isClickable = false
+            isFocusable = false
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
         }
         tab.contextWrapper.baseContext = activity
@@ -1714,6 +1713,93 @@ class TerminalBrowserSessionManager(
         (tab.webView.parent as? ViewGroup)?.removeView(tab.webView)
         (host.parent as? ViewGroup)?.removeView(host)
         tab.contextWrapper.baseContext = appContext
+    }
+
+    private fun captureWebViewBitmap(webView: WebView, width: Int, height: Int): Bitmap {
+        val originalLayerType = webView.layerType
+        var changedLayerType = false
+        return try {
+            if (originalLayerType != View.LAYER_TYPE_SOFTWARE) {
+                webView.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+                changedLayerType = true
+            }
+            val drawn = drawWebViewBitmap(webView, width, height)
+            if (!isProbablyBlankBitmap(drawn)) {
+                drawn
+            } else {
+                val picture = captureWebViewPictureBitmap(webView, width, height)
+                if (picture != null && !isProbablyBlankBitmap(picture)) {
+                    drawn.recycle()
+                    picture
+                } else {
+                    picture?.recycle()
+                    drawn
+                }
+            }
+        } finally {
+            if (changedLayerType) {
+                webView.setLayerType(originalLayerType, null)
+            }
+        }
+    }
+
+    private fun drawWebViewBitmap(webView: WebView, width: Int, height: Int): Bitmap {
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(Color.WHITE)
+            webView.draw(canvas)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun captureWebViewPictureBitmap(webView: WebView, width: Int, height: Int): Bitmap? {
+        val picture = webView.capturePicture()
+        if (picture.width <= 0 || picture.height <= 0) return null
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(Color.WHITE)
+            val scale = width.toFloat() / picture.width.toFloat()
+            canvas.save()
+            canvas.scale(scale, scale)
+            picture.draw(canvas)
+            canvas.restore()
+        }
+    }
+
+    private fun isProbablyBlankBitmap(bitmap: Bitmap): Boolean {
+        val width = bitmap.width
+        val height = bitmap.height
+        if (width <= 0 || height <= 0) return true
+        val reference = bitmap.getPixel(width / 2, height / 2)
+        val xStep = (width / 40).coerceAtLeast(1)
+        val yStep = (height / 40).coerceAtLeast(1)
+        var sampled = 0
+        var varied = 0
+        var dark = 0
+        var y = 0
+        while (y < height) {
+            var x = 0
+            while (x < width) {
+                val color = bitmap.getPixel(x, y)
+                sampled += 1
+                if (colorDistance(color, reference) > 18) varied += 1
+                if (Color.alpha(color) > 0 &&
+                    (Color.red(color) < 180 || Color.green(color) < 180 || Color.blue(color) < 180)
+                ) {
+                    dark += 1
+                }
+                x += xStep
+            }
+            y += yStep
+        }
+        return sampled > 0 && varied < 3 && dark < 3
+    }
+
+    private fun colorDistance(left: Int, right: Int): Int {
+        return kotlin.math.abs(Color.red(left) - Color.red(right)) +
+            kotlin.math.abs(Color.green(left) - Color.green(right)) +
+            kotlin.math.abs(Color.blue(left) - Color.blue(right)) +
+            kotlin.math.abs(Color.alpha(left) - Color.alpha(right))
     }
 
     private suspend fun prepareWebViewForCapture(webView: WebView) {
