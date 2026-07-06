@@ -64,14 +64,15 @@ wait_browser_event_after() {
   needle="$2"
   elapsed=0
   while [ "$elapsed" -lt 30 ]; do
-    events="$(codex-browser events 2>/dev/null || true)"
-    if printf '%s\n' "$events" | awk -v start="$start_line" 'NR > start { print }' | grep -F "$needle" >/dev/null 2>&1; then
+    if codex-browser events 2>/dev/null |
+      awk -v start="$start_line" 'NR > start { print }' |
+      grep -F "$needle" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
     elapsed=$((elapsed + 1))
   done
-  printf '%s\n' "$events" >&2
+  codex-browser events 2>/dev/null | tail -n 120 >&2 || true
   fail "browser events after line $start_line did not contain: $needle"
 }
 
