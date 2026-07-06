@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.2.6-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.2.6)
+[![Release](https://img.shields.io/badge/release-v2.2.7-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.2.7)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.142.4-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,9 +9,9 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.2.6 更新
+## 重要：2.2.7 更新
 
-2.2.6 是 bridge 并发可靠性和安全加固版：浏览器、文件托盘、会话折叠和 Agent 面板请求改为更稳的队列/幂等处理，避免同一请求被 legacy request 与 queue 双执行，也避免快速连续请求覆盖丢失；协作浏览器加强导航超时和旧页面回调隔离，外部链接/下载统一进入可确认的用户协作状态；同时收窄敏感数据备份、FileProvider、Release 签名和 GitHub Release 发布门禁。
+2.2.7 是 2.2.6 的真机回归热修版：`codex-browser js "document.title"` 这类裸表达式会正确返回值；浏览器在后台/折叠状态下执行 `screenshot --push --background` 会截取真实 WebView 内容，不会自动展开托盘；`auth-open` 完成或取消后不再污染后续普通网页操作；`codex-rtk status` 和 `codex-context status` 会识别系统级 `/etc/codex/requirements.toml` 托管 hooks，并显示 `*_hook_source`。
 
 2.2.5 的 RTK hook 安全热修继续保留：`codex-rtk hook` 会把改写结果中的 `rtk ...` 转为 App 内置 RTK 的绝对路径，避免少数登录 shell 的 `PATH` 没带 `$PREFIX/local/bin` 时出现 `rtk: not found`；同时遇到复杂 `find ... -exec ...` 等 RTK 不支持的命令会直接保留原命令，避免误改写失败。2.2.3 的终端输出合帧、Compose 状态去重、bridge 低频兜底轮询，以及打开 Custom Tabs/外部浏览器后 bridge 继续消费请求的修复继续保留。新增 `$PREFIX/local/perf/terminal.status` 作为轻量排障状态文件，便于 Agent 判断合帧和 bridge 工作状态。
 
@@ -19,7 +19,7 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 内置 WebView 继续作为 Agent Browser，保留后台打开、DOM 读取、点击、输入、JS、截图、多标签、Cookie/WebStorage 持久化和 userscript；遇到验证码/风控/外部 scheme 时会进入明确的用户协作状态，而不是让 Agent 猜。
 
-已经安装 2.0.x/2.1.x/2.2.x 的用户需要从 Releases 下载并覆盖安装 2.2.6 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context` 等 APK 内置桥接命令。
+已经安装 2.0.x/2.1.x/2.2.x 的用户需要从 Releases 下载并覆盖安装 2.2.7 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context` 等 APK 内置桥接命令。
 
 注意：普通启动按设计不会自动联网更新 `~/.local/share/codex-zh/scripts` 下的安装/配置脚本。已安装用户覆盖 APK 后，为确保 `codex 配置模式` 也切到最新配置管理器，请手动执行一次：
 
@@ -40,6 +40,7 @@ codex 配置模式
 
 ## 2.0 新功能
 
+- 2.2.7 修复：后台 WebView 截图、`codex-browser js` 裸表达式返回值、Auth 取消状态残留和 RTK/context 系统托管 hook 状态显示。
 - 2.2.6 修复：bridge 请求队列和 request_id 幂等，避免浏览器请求双执行、文件托盘/session fold/agent panel 快速连续请求丢失。
 - 2.2.6 修复：协作浏览器导航 token、状态落盘、外部链接/下载确认和敏感字段脱敏，减少后台浏览和用户协作状态错乱。
 - 2.2.6 加固：DocumentsProvider 路径边界、备份排除、FileProvider 分享范围、Release 签名和 GitHub Release 资产发布门禁。
@@ -90,7 +91,7 @@ codex 配置模式
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.2.6` |
+| Android App | `2.2.7` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug/Test 包名 | `com.gzy3894.codexfortui.test` |
 | Codex CLI | `0.142.4` 中文版 |

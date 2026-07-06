@@ -31,6 +31,10 @@ config_file() {
   printf '%s/config.toml\n' "$(codex_home)"
 }
 
+requirements_file() {
+  printf '%s\n' "${CODEX_FOR_TUI_REQUIREMENTS_FILE:-/etc/codex/requirements.toml}"
+}
+
 backup_file() {
   file="$1"
   [ -e "$file" ] || return 0
@@ -108,6 +112,35 @@ set_hooks_feature() {
 hook_configured() {
   cfg="$(config_file)"
   [ -f "$cfg" ] && grep -F "$MARK_BEGIN" "$cfg" >/dev/null 2>&1
+}
+
+requirements_hook_configured() {
+  req="$(requirements_file)"
+  [ -r "$req" ] || return 1
+  awk -v begin="# codex-for-tui-managed-hooks begin" \
+    -v end="# codex-for-tui-managed-hooks end" \
+    -v cmd='command = "codex-rtk hook"' '
+    $0 == begin { in_block = 1; next }
+    $0 == end { in_block = 0; next }
+    in_block && index($0, cmd) { found = 1 }
+    END { if (found) exit 0; exit 1 }
+  ' "$req"
+}
+
+hook_source() {
+  cfg_has=0
+  req_has=0
+  hook_configured && cfg_has=1
+  requirements_hook_configured && req_has=1
+  if [ "$cfg_has" -eq 1 ] && [ "$req_has" -eq 1 ]; then
+    printf '%s\n' "both"
+  elif [ "$req_has" -eq 1 ]; then
+    printf '%s\n' "requirements"
+  elif [ "$cfg_has" -eq 1 ]; then
+    printf '%s\n' "config"
+  else
+    printf '%s\n' "disabled"
+  fi
 }
 
 install_hook_block() {
@@ -227,11 +260,13 @@ status() {
   else
     printf 'hooks_feature=default\n'
   fi
-  if hook_configured; then
+  source="$(hook_source)"
+  if [ "$source" != "disabled" ]; then
     printf 'rtk_hook=enabled\n'
   else
     printf 'rtk_hook=disabled\n'
   fi
+  printf 'rtk_hook_source=%s\n' "$source"
 }
 
 verify() {

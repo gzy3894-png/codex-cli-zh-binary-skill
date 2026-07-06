@@ -77,13 +77,13 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 39'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.2.6"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 40'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.2.7"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.2.6'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.2.7'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -167,6 +167,11 @@ test_terminal_performance_guards() {
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'currentUrl = redactSensitiveUrl(auth?.url ?: active?.currentUrl.orEmpty())'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'target = redactSensitiveUrl(it.target)'
   assert_file_not_contains "$TERMINAL_BROWSER_SESSION" 'currentUrl = auth?.url ?: active?.currentUrl.orEmpty()'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'clearCompletedUserTasksForPageAction(action)'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'window.eval(source)'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'new Function(source)'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'attachOffscreenCaptureHost'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'postVisualStateCallback'
   assert_file_contains "$MAIN_ACTIVITY" 'override fun onDestroy()'
   assert_file_contains "$MAIN_ACTIVITY" 'pollSessionFoldRequestLocked'
   if awk '
@@ -760,6 +765,7 @@ test_codex_rtk_bridge_asset() {
   assert_file_contains "$RTK_ASSET" 'updatedInput'
   assert_file_contains "$RTK_ASSET" 'RTK_DISABLED'
   assert_file_contains "$RTK_ASSET" 'codex-for-tui-rtk-hook begin'
+  assert_file_contains "$RTK_ASSET" 'rtk_hook_source='
 
   sample='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status"}}'
   output="$(printf '%s' "$sample" | RTK_DISABLED=0 PREFIX="$tmp/no-prefix" PATH="$tmp/empty:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" hook)"
@@ -785,6 +791,10 @@ esac
 EOF
   chmod 755 "$tmp/bin/rtk"
 
+  CODEX_FOR_TUI_REQUIREMENTS_FILE="$tmp/requirements.toml" PREFIX="$tmp/no-prefix" PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" status >"$tmp/status" || fail "codex-rtk status failed"
+  assert_file_contains "$tmp/status" 'rtk_hook=disabled'
+  assert_file_contains "$tmp/status" 'rtk_hook_source=disabled'
+
   output="$(printf '%s' "$sample" | RTK_DISABLED=0 PREFIX="$tmp/no-prefix" PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" hook)"
   printf '%s\n' "$output" | grep -F "\"updatedInput\":{\"command\":\"$tmp/bin/rtk git status\"}" >/dev/null 2>&1 || fail "codex-rtk hook did not return absolute updatedInput"
 
@@ -800,9 +810,33 @@ EOF
   assert_file_contains "$tmp/home/.codex/config.toml" 'hooks = true'
   assert_file_contains "$tmp/home/.codex/config.toml" 'codex-for-tui-rtk-hook begin'
   assert_file_contains "$tmp/home/.codex/config.toml" 'command = "codex-rtk hook"'
+  CODEX_FOR_TUI_REQUIREMENTS_FILE="$tmp/requirements.toml" PREFIX="$tmp/no-prefix" PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" status >"$tmp/status" || fail "codex-rtk config status failed"
+  assert_file_contains "$tmp/status" 'rtk_hook=enabled'
+  assert_file_contains "$tmp/status" 'rtk_hook_source=config'
+
+  cat > "$tmp/requirements.toml" <<'EOF'
+[features]
+hooks = true
+
+# codex-for-tui-managed-hooks begin
+[[hooks.PreToolUse]]
+matcher = "^Bash$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "codex-rtk hook"
+timeout = 5
+# codex-for-tui-managed-hooks end
+EOF
+  CODEX_FOR_TUI_REQUIREMENTS_FILE="$tmp/requirements.toml" PREFIX="$tmp/no-prefix" PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" status >"$tmp/status" || fail "codex-rtk both status failed"
+  assert_file_contains "$tmp/status" 'rtk_hook=enabled'
+  assert_file_contains "$tmp/status" 'rtk_hook_source=both'
 
   PREFIX="$tmp/no-prefix" PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" disable >/dev/null || fail "codex-rtk disable failed"
   assert_file_not_contains "$tmp/home/.codex/config.toml" 'codex-for-tui-rtk-hook begin'
+  CODEX_FOR_TUI_REQUIREMENTS_FILE="$tmp/requirements.toml" PREFIX="$tmp/no-prefix" PATH="$tmp/bin:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" status >"$tmp/status" || fail "codex-rtk requirements status failed"
+  assert_file_contains "$tmp/status" 'rtk_hook=enabled'
+  assert_file_contains "$tmp/status" 'rtk_hook_source=requirements'
 
   rm -rf "$tmp"
 }
@@ -819,11 +853,15 @@ test_codex_context_bridge_asset() {
   assert_file_contains "$CONTEXT_ASSET" '[[hooks.SessionStart]]'
   assert_file_contains "$CONTEXT_ASSET" 'matcher = "manual|auto"'
   assert_file_contains "$CONTEXT_ASSET" 'matcher = "startup|resume|compact"'
+  assert_file_contains "$CONTEXT_ASSET" 'context_hook_source='
 
   HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" enable >/dev/null || fail "codex-context enable failed"
   assert_file_contains "$tmp/home/.codex/config.toml" 'hooks = true'
   assert_file_contains "$tmp/home/.codex/config.toml" 'codex-for-tui-context-hook begin'
   assert_file_contains "$tmp/home/.codex/config.toml" 'command = "codex-context hook"'
+  CODEX_FOR_TUI_REQUIREMENTS_FILE="$tmp/requirements.toml" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" status >"$tmp/status" || fail "codex-context config status failed"
+  assert_file_contains "$tmp/status" 'context_hook=enabled'
+  assert_file_contains "$tmp/status" 'context_hook_source=config'
 
   sample='{"hook_event_name":"PreCompact","trigger":"auto"}'
   printf '%s' "$sample" | PREFIX="$tmp/prefix" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" hook
@@ -831,10 +869,31 @@ test_codex_context_bridge_asset() {
   assert_file_contains "$tmp/prefix/local/session-fold/events" 'source=context'
   assert_file_contains "$tmp/prefix/local/session-fold/events" 'type=context_pre_compact'
 
-  HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" status >"$tmp/status" || fail "codex-context status failed"
+  CODEX_FOR_TUI_REQUIREMENTS_FILE="$tmp/requirements.toml" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" status >"$tmp/status" || fail "codex-context status failed"
   assert_file_contains "$tmp/status" 'context_hook=enabled'
+  assert_file_contains "$tmp/status" 'context_hook_source=config'
+  cat > "$tmp/requirements.toml" <<'EOF'
+[features]
+hooks = true
+
+# codex-for-tui-managed-hooks begin
+[[hooks.PreCompact]]
+matcher = "manual|auto"
+
+[[hooks.PreCompact.hooks]]
+type = "command"
+command = "codex-context hook"
+timeout = 5
+# codex-for-tui-managed-hooks end
+EOF
+  CODEX_FOR_TUI_REQUIREMENTS_FILE="$tmp/requirements.toml" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" status >"$tmp/status" || fail "codex-context both status failed"
+  assert_file_contains "$tmp/status" 'context_hook=enabled'
+  assert_file_contains "$tmp/status" 'context_hook_source=both'
   HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" disable >/dev/null || fail "codex-context disable failed"
   assert_file_not_contains "$tmp/home/.codex/config.toml" 'codex-for-tui-context-hook begin'
+  CODEX_FOR_TUI_REQUIREMENTS_FILE="$tmp/requirements.toml" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" status >"$tmp/status" || fail "codex-context requirements status failed"
+  assert_file_contains "$tmp/status" 'context_hook=enabled'
+  assert_file_contains "$tmp/status" 'context_hook_source=requirements'
   sh "$CONTEXT_ASSET" verify >/dev/null || fail "codex-context verify failed"
   rm -rf "$tmp"
 }

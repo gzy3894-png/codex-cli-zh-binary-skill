@@ -90,7 +90,7 @@ codex-browser auth-wait '<request_id>'
 
 官方 Codex 登录建议运行 `codex 官方登录`。启动器会调用 `codex login --device-auth`，解析登录链接和一次性验证码并创建安全登录任务卡；用户可在卡片中点击“打开/重开”进入 Custom Tabs；用户完成后再用 `codex login status` 验证，不打印 token、Cookie 或 `auth.json` 内容。
 
-2.2.5 起 RTK hook 会把 `rtk ...` 改写为 App 内置 RTK 的绝对路径，并跳过复杂 `find` 改写，避免登录 shell `PATH` 缺失时出现 `rtk: not found` 或 `rtk find` 不支持参数导致命令失败；2.2.3 起打开 Custom Tabs/外部浏览器后，文件托盘、浏览器和 session fold bridge 不会因为 Activity 进入后台而停止消费 Agent 请求；2.2.2 起终端输出刷新会按屏幕帧合并，Compose 托盘/浏览器/session fold 状态更新会尽量去重，bridge 请求优先由文件事件触发并保留低频兜底轮询；排障状态写入 `$PREFIX/local/perf/terminal.status`。2.2.1 起 `auth-open` 默认不再自动跳出，2.2.0 起浏览器桥支持 Auth Browser 任务、外部 scheme 打开确认、验证码/风控状态字段和更明确的折叠/完成/取消事件。2.1.3 起浏览器桥对单个坏请求做异常隔离，队列请求先完成 legacy request 再暴露给 App 消费；页面加载会等待 userscript 注入回调后再向终端返回 `open` 完成。userscript 注入使用延迟重试、回调解析和本地 `userscripts.log`，注入失败会反馈给 `codex-browser`，避免 `open -> get-text` 抢跑或静默失败。
+2.2.7 修复后台 WebView 截图、`codex-browser js` 裸表达式返回值、Auth 取消状态残留和 RTK/context 系统托管 hook 状态显示；2.2.5 起 RTK hook 会把 `rtk ...` 改写为 App 内置 RTK 的绝对路径，并跳过复杂 `find` 改写，避免登录 shell `PATH` 缺失时出现 `rtk: not found` 或 `rtk find` 不支持参数导致命令失败；2.2.3 起打开 Custom Tabs/外部浏览器后，文件托盘、浏览器和 session fold bridge 不会因为 Activity 进入后台而停止消费 Agent 请求；2.2.2 起终端输出刷新会按屏幕帧合并，Compose 托盘/浏览器/session fold 状态更新会尽量去重，bridge 请求优先由文件事件触发并保留低频兜底轮询；排障状态写入 `$PREFIX/local/perf/terminal.status`。2.2.1 起 `auth-open` 默认不再自动跳出，2.2.0 起浏览器桥支持 Auth Browser 任务、外部 scheme 打开确认、验证码/风控状态字段和更明确的折叠/完成/取消事件。2.1.3 起浏览器桥对单个坏请求做异常隔离，队列请求先完成 legacy request 再暴露给 App 消费；页面加载会等待 userscript 注入回调后再向终端返回 `open` 完成。userscript 注入使用延迟重试、回调解析和本地 `userscripts.log`，注入失败会反馈给 `codex-browser`，避免 `open -> get-text` 抢跑或静默失败。
 
 ## 构建
 

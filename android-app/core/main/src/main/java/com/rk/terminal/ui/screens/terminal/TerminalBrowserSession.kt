@@ -1,6 +1,8 @@
 package com.rk.terminal.ui.screens.terminal
 
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -27,7 +29,6 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.EditText
-import android.app.AlertDialog
 import androidx.browser.customtabs.CustomTabsIntent
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -201,6 +202,7 @@ class TerminalBrowserSessionManager(
             else -> null
         } ?: request["request_id"] ?: request["stamp"] ?: System.currentTimeMillis().toString()
         currentRequestId = requestId
+        clearCompletedUserTasksForPageAction(action)
         val result = runCatching {
             when (action) {
                 "open", "navigate" -> navigate(request.requireValue("url"))
@@ -638,8 +640,25 @@ class TerminalBrowserSessionManager(
 
     private suspend fun executeJs(script: String): JSONObject = evalObject(
         """
-        const value = (function(){ ${script} })();
-        return {value: String(value === undefined ? '' : value).slice(0, 4000)};
+        const source = ${JSONObject.quote(script)};
+        let value;
+        try {
+          value = window.eval(source);
+        } catch (expressionError) {
+          if (!(expressionError instanceof SyntaxError)) {
+            throw expressionError;
+          }
+          value = (new Function(source)).call(window);
+        }
+        function codexValueToString(value) {
+          if (value === undefined) return '';
+          if (typeof value === 'string') return value;
+          if (value !== null && typeof value === 'object') {
+            try { return JSON.stringify(value); } catch (_) {}
+          }
+          return String(value);
+        }
+        return {value: codexValueToString(value).slice(0, 4000)};
         """.trimIndent()
     )
 
@@ -653,19 +672,31 @@ class TerminalBrowserSessionManager(
         var captureWidth = 0
         var captureHeight = 0
         val bytesWritten = withContext(Dispatchers.Main.immediate) {
-            val (width, height) = layoutWebView(tab.webView)
-            captureWidth = width
-            captureHeight = height
-            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bitmap)
-            canvas.drawColor(Color.WHITE)
-            tab.webView.draw(canvas)
-            withContext(Dispatchers.IO) {
-                file.parentFile?.mkdirs()
-                FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-                file.length()
-            }.also {
-                bitmap.recycle()
+            val parent = tab.webView.parent as? ViewGroup
+            val (targetWidth, targetHeight) = captureSizeFor(tab.webView)
+            val offscreenHost = if (parent == null) {
+                attachOffscreenCaptureHost(tab, targetWidth, targetHeight)
+            } else {
+                null
+            }
+            try {
+                val (width, height) = layoutWebView(tab.webView)
+                captureWidth = width
+                captureHeight = height
+                prepareWebViewForCapture(tab.webView)
+                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(bitmap)
+                canvas.drawColor(Color.WHITE)
+                tab.webView.draw(canvas)
+                withContext(Dispatchers.IO) {
+                    file.parentFile?.mkdirs()
+                    FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                    file.length()
+                }.also {
+                    bitmap.recycle()
+                }
+            } finally {
+                detachOffscreenCaptureHost(tab, offscreenHost)
             }
         }
         val pushToFiles = request["push"] == "1" || request["to_files"] == "1"
@@ -1326,6 +1357,17 @@ class TerminalBrowserSessionManager(
         return tabs[activeTabId] ?: tabs.values.lastOrNull() ?: createTab()
     }
 
+    private fun clearCompletedUserTasksForPageAction(action: String) {
+        if (action !in PAGE_STATE_ACTIONS) return
+        if (authTask?.active == false) {
+            authTask = null
+        }
+        if (!needsUser && authTask == null && externalOpenPrompt == null) {
+            userMessage = ""
+            activeUserRequestId = ""
+        }
+    }
+
     private suspend fun evalObject(command: String): JSONObject {
         val wrapped = """
             (function(){
@@ -1617,17 +1659,98 @@ class TerminalBrowserSessionManager(
     }
 
     private fun layoutWebView(webView: WebView): Pair<Int, Int> {
+        val (width, height) = captureSizeFor(webView)
+        val widthSpec = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY)
+        val heightSpec = View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
+        webView.measure(widthSpec, heightSpec)
+        webView.layout(0, 0, width, height)
+        return width to height
+    }
+
+    private fun captureSizeFor(webView: WebView): Pair<Int, Int> {
         val display = appContext.resources.displayMetrics
         val parent = webView.parent as? View
         val width = listOf(webView.width, webView.measuredWidth, parent?.width ?: 0, display.widthPixels)
             .firstOrNull { it > 0 } ?: 1080
         val height = listOf(webView.height, webView.measuredHeight, parent?.height ?: 0, display.heightPixels)
             .firstOrNull { it > 0 } ?: 1920
+        return width to height
+    }
+
+    private fun attachOffscreenCaptureHost(
+        tab: BrowserTab,
+        width: Int,
+        height: Int
+    ): FrameLayout? {
+        val activity = initialContext as? Activity ?: return null
+        val root = activity.findViewById<ViewGroup>(android.R.id.content) ?: return null
+        val host = FrameLayout(activity).apply {
+            setBackgroundColor(Color.WHITE)
+            clipChildren = false
+            clipToPadding = false
+            translationX = (appContext.resources.displayMetrics.widthPixels + 64).toFloat()
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        }
+        tab.contextWrapper.baseContext = activity
+        root.addView(host, ViewGroup.LayoutParams(width, height))
+        host.addView(
+            tab.webView,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
         val widthSpec = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY)
         val heightSpec = View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
-        webView.measure(widthSpec, heightSpec)
-        webView.layout(0, 0, width, height)
-        return width to height
+        host.measure(widthSpec, heightSpec)
+        host.layout(0, 0, width, height)
+        tab.webView.measure(widthSpec, heightSpec)
+        tab.webView.layout(0, 0, width, height)
+        return host
+    }
+
+    private fun detachOffscreenCaptureHost(tab: BrowserTab, host: FrameLayout?) {
+        if (host == null) return
+        (tab.webView.parent as? ViewGroup)?.removeView(tab.webView)
+        (host.parent as? ViewGroup)?.removeView(host)
+        tab.contextWrapper.baseContext = appContext
+    }
+
+    private suspend fun prepareWebViewForCapture(webView: WebView) {
+        resumeHostedWebView(webView)
+        webView.requestLayout()
+        webView.invalidate()
+        awaitWebViewVisualState(webView)
+        delay(120)
+        webView.invalidate()
+        awaitWebViewVisualState(webView)
+    }
+
+    private suspend fun awaitWebViewVisualState(webView: WebView) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val completed = withTimeoutOrNull(800) {
+                suspendCancellableCoroutine<Unit> { continuation ->
+                    runCatching {
+                        webView.postVisualStateCallback(
+                            System.nanoTime(),
+                            object : WebView.VisualStateCallback() {
+                                override fun onComplete(requestId: Long) {
+                                    if (continuation.isActive) {
+                                        continuation.resume(Unit)
+                                    }
+                                }
+                            }
+                        )
+                    }.onFailure {
+                        if (continuation.isActive) {
+                            continuation.resume(Unit)
+                        }
+                    }
+                }
+            } != null
+            if (completed) return
+        }
+        delay(180)
     }
 
     private fun layoutWebViewInContainer(webView: WebView, container: FrameLayout) {
@@ -1859,3 +1982,35 @@ class TerminalBrowserSessionManager(
 }
 
 private val WEBVIEW_SCHEMES = setOf("http", "https", "about")
+
+private val PAGE_STATE_ACTIONS = setOf(
+    "open",
+    "navigate",
+    "reload",
+    "back",
+    "go_back",
+    "forward",
+    "go_forward",
+    "new_tab",
+    "select_tab",
+    "close_tab",
+    "list_tabs",
+    "history",
+    "clear_history",
+    "cookies_status",
+    "cookies_verify",
+    "cookies_flush",
+    "userscript_add",
+    "userscript_list",
+    "userscript_enable",
+    "userscript_disable",
+    "userscript_remove",
+    "click",
+    "type",
+    "scroll",
+    "get_text",
+    "get_readable",
+    "execute_js",
+    "js",
+    "screenshot"
+)

@@ -1,5 +1,22 @@
 # Changelog
 
+## Codex for TUI 2.2.7
+
+Codex for TUI 2.2.7 是 2.2.6 的真机回归热修版，重点修复浏览器后台截图、JS 返回值、Auth 状态残留和 RTK/context 快捷授权状态显示。
+
+### 修复
+
+- `codex-browser js` 支持裸表达式返回值，`codex-browser js "document.title"` 会返回页面标题，同时兼容旧的 `return ...;` 脚本。
+- 后台/折叠状态下的 WebView 截图会临时使用离屏宿主等待渲染，不再生成白图或灰图，也不会自动展开浏览器托盘。
+- Auth Browser 完成/取消后的状态不再污染后续普通导航、DOM、JS 或截图请求。
+- `codex-rtk status` 和 `codex-context status` 同时识别用户级 `config.toml` 与系统级 `/etc/codex/requirements.toml` 托管 hooks，并输出 `*_hook_source`。
+
+### 验证
+
+- 本地仍只运行非 APK 门禁：`git diff --check`、各 bridge asset `sh -n`、`sh tests/codex-for-tui-static-guards.sh`、`sh tests/codex-for-tui-installer-smoke.sh`、`sh -n tests/codex-for-tui-device-smoke.sh`、`sh -n tests/codex-for-tui-browser-smoke.sh`。
+- APK、正式签名和 release 资产仍只通过 GitHub Actions 构建。
+- 真机验证重点：RTK/context status 显示系统托管 hook 已启用；`js "document.title"` 返回标题；后台截图是真实网页；`auth-cancel` 后普通 `open` 不残留取消状态。
+
 ## Codex for TUI 2.2.6
 
 Codex for TUI 2.2.6 是 bridge 并发可靠性、协作浏览器状态同步和发布安全门禁修复版。
