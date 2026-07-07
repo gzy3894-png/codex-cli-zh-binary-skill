@@ -1,0 +1,251 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd || printf '.')"
+# shellcheck disable=SC1090
+. "$SCRIPT_DIR/codex-ops-lib"
+
+usage() {
+  cat >&2 <<'EOF'
+用法:
+  codex-doctor [--json] [--task-id TASK_ID]
+  codex-doctor [--json] run [--task-id TASK_ID]
+  codex-doctor status|events|summary|resume-hint TASK_ID
+
+说明:
+  只做本地只读/轻量写入自检；不会自动更新脚本、刷新模型或读取 auth.json 内容。
+  每次运行会写入 $PREFIX/local/ops/tasks/<task_id>/{status,events,summary,resume_hint}。
+EOF
+}
+
+json=0
+task_id=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --json) json=1; shift ;;
+    --task-id)
+      [ "$#" -ge 2 ] || { usage; exit 2; }
+      task_id="$2"
+      shift 2
+      ;;
+    --help|-h|help) usage; exit 0 ;;
+    status|events|summary|resume-hint|resume_hint|run) break ;;
+    *) break ;;
+  esac
+done
+
+cmd="${1:-run}"
+case "$cmd" in
+  run) [ "$#" -eq 0 ] || shift ;;
+esac
+
+case "$cmd" in
+  status|events|summary|resume-hint|resume_hint)
+    [ "$#" -eq 2 ] || { usage; exit 2; }
+    file_name="$cmd"
+    [ "$file_name" = "resume-hint" ] && file_name="resume_hint"
+    ops_cat_task_file "$2" "$file_name" || exit 1
+    exit 0
+    ;;
+esac
+
+[ "$cmd" = "run" ] || { usage; exit 2; }
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --json) json=1; shift ;;
+    --task-id)
+      [ "$#" -ge 2 ] || { usage; exit 2; }
+      task_id="$2"
+      shift 2
+      ;;
+    *) usage; exit 2 ;;
+  esac
+done
+
+ops_task_init "codex-doctor" "run" "$task_id"
+checks_file="$OPS_TASK_DIR/checks.jsonl"
+: > "$checks_file"
+total=0
+failures=0
+warnings=0
+
+doctor_check() {
+  check_id="$1"
+  check_status="$2"
+  check_detail="$(ops_redact_value "$3")"
+  check_hint="$(ops_redact_value "${4:-}")"
+  total=$((total + 1))
+  case "$check_status" in
+    pass) ok=true; marker="OK" ;;
+    warn) ok=true; marker="WARN"; warnings=$((warnings + 1)) ;;
+    fail) ok=false; marker="FAIL"; failures=$((failures + 1)) ;;
+    *) ok=false; marker="FAIL"; failures=$((failures + 1)); check_status="fail" ;;
+  esac
+  {
+    printf '{"id":"%s","status":"%s","ok":%s,"detail":"%s","hint":"%s"}\n' \
+      "$(printf '%s' "$check_id" | ops_json_escape)" \
+      "$(printf '%s' "$check_status" | ops_json_escape)" \
+      "$ok" \
+      "$(printf '%s' "$check_detail" | ops_json_escape)" \
+      "$(printf '%s' "$check_hint" | ops_json_escape)"
+  } >> "$checks_file"
+  ops_event "$check_status" "$check_id: $check_detail"
+  if [ "$json" -eq 0 ]; then
+    if [ -n "$check_hint" ] && [ "$check_status" != "pass" ]; then
+      printf '[%s] %s - %s (%s)\n' "$marker" "$check_id" "$check_detail" "$check_hint"
+    else
+      printf '[%s] %s - %s\n' "$marker" "$check_id" "$check_detail"
+    fi
+  fi
+}
+
+prefix="$(ops_prefix 2>/dev/null || true)"
+if [ -n "$prefix" ]; then
+  doctor_check "prefix" pass "PREFIX 可解析：$prefix" ""
+else
+  doctor_check "prefix" fail "找不到可用 PREFIX/HOME" "请在 Codex for TUI 终端内运行"
+fi
+
+ops_root_dir="$(ops_root)"
+ops_tasks="$(ops_tasks_dir)"
+ops_trash="$(ops_trash_dir)"
+if mkdir -p "$ops_tasks" "$ops_trash" 2>/dev/null; then
+  test_file="$ops_root_dir/.doctor-write.$$"
+  if { : > "$test_file"; } 2>/dev/null; then
+    rm -f "$test_file"
+    doctor_check "ops_store" pass "ops 状态目录可写：$ops_root_dir" ""
+  else
+    doctor_check "ops_store" fail "ops 状态目录不可写：$ops_root_dir" "检查 App 数据目录权限"
+  fi
+else
+  doctor_check "ops_store" fail "无法创建 ops 状态目录：$ops_root_dir" "检查 App 数据目录权限"
+fi
+
+missing_cmds=""
+for required_cmd in sh awk sed find mv cp mkdir date wc uname ls; do
+  if command -v "$required_cmd" >/dev/null 2>&1; then
+    :
+  else
+    missing_cmds="${missing_cmds}${missing_cmds:+ }$required_cmd"
+  fi
+done
+if [ -z "$missing_cmds" ]; then
+  doctor_check "busybox_tools" pass "基础 shell 工具可用" ""
+else
+  doctor_check "busybox_tools" fail "缺少基础命令：$missing_cmds" "安装/修复 Alpine BusyBox 环境"
+fi
+
+if [ -r /etc/alpine-release ]; then
+  alpine_version="$(cat /etc/alpine-release 2>/dev/null | head -n 1)"
+  doctor_check "alpine" pass "Alpine $alpine_version" ""
+else
+  doctor_check "alpine" warn "未检测到 /etc/alpine-release" "如果在 Android host shell 运行，可忽略"
+fi
+
+uname_text="$(uname -srm 2>/dev/null || printf 'unknown')"
+doctor_check "kernel" pass "$uname_text" ""
+
+if command -v codex >/dev/null 2>&1; then
+  codex_path="$(command -v codex)"
+  codex_version="$(codex --version 2>/dev/null | head -n 1 || printf '')"
+  [ -n "$codex_version" ] || codex_version="version unavailable"
+  doctor_check "codex_cli" pass "codex 可用：$codex_path ($codex_version)" ""
+else
+  doctor_check "codex_cli" warn "PATH 中未找到 codex" "确认启动器或 codex-local run 是否已安装"
+fi
+
+codex_home="${CODEX_HOME:-${HOME:-}/.codex}"
+if [ -n "$codex_home" ] && [ -d "$codex_home" ]; then
+  doctor_check "codex_home" pass "CODEX_HOME 存在" ""
+else
+  doctor_check "codex_home" warn "CODEX_HOME 不存在" "首次登录/运行后通常会创建"
+fi
+
+config_file="$codex_home/config.toml"
+if [ -r "$config_file" ]; then
+  doctor_check "config" pass "config.toml 可读" ""
+else
+  doctor_check "config" warn "config.toml 不存在或不可读" "需要配置时运行 codex-local configure"
+fi
+
+auth_file="$codex_home/auth.json"
+if [ -e "$auth_file" ]; then
+  if [ -r "$auth_file" ]; then
+    auth_size="$(ls -ln "$auth_file" 2>/dev/null | awk '{ print $5 + 0 }')"
+    doctor_check "auth_storage" pass "认证文件存在，大小 ${auth_size} bytes；未读取文件正文或输出内容" ""
+  else
+    doctor_check "auth_storage" warn "认证文件存在但不可读；未读取文件正文或输出内容" "检查文件权限"
+  fi
+else
+  doctor_check "auth_storage" warn "未发现认证文件" "如需登录，请按 Codex 登录流程配置"
+fi
+
+for asset_name in codex-doctor codex-clean codex-ops codex-ops-lib; do
+  if [ -r "$SCRIPT_DIR/$asset_name" ]; then
+    doctor_check "asset_$asset_name" pass "$asset_name 已随 assets 提供" ""
+  else
+    doctor_check "asset_$asset_name" fail "$asset_name 缺失" "重新打包或修复 assets"
+  fi
+done
+
+if command -v df >/dev/null 2>&1; then
+  free_kb="$(df -k "$prefix" 2>/dev/null | awk 'NR == 2 { print $4 + 0 }')"
+  if [ -n "$free_kb" ] && [ "$free_kb" -gt 51200 ]; then
+    doctor_check "disk_free" pass "可用空间约 ${free_kb} KB" ""
+  else
+    doctor_check "disk_free" warn "可用空间偏低或无法读取" "清理空间前先用 codex-clean scan 查看候选项"
+  fi
+else
+  doctor_check "disk_free" warn "df 不可用，跳过空间检查" ""
+fi
+
+if command -v jq >/dev/null 2>&1; then
+  doctor_check "jq_optional" pass "jq 可用" ""
+else
+  doctor_check "jq_optional" warn "jq 不可用" "JSON 输出仍可用；复杂过滤可安装 jq"
+fi
+
+if [ "$failures" -eq 0 ]; then
+  final_state="success"
+  exit_code=0
+  summary="doctor 完成：$total 项检查，$warnings 个警告，0 个失败。"
+  if [ "$warnings" -gt 0 ]; then
+    resume_hint="查看警告：codex-ops summary $OPS_TASK_ID；需要清理时先运行 codex-clean scan --json"
+  else
+    resume_hint="环境看起来可用；如需清理仅先运行 codex-clean scan --json"
+  fi
+else
+  final_state="failed"
+  exit_code=1
+  summary="doctor 发现问题：$total 项检查，$warnings 个警告，$failures 个失败。"
+  resume_hint="查看详情：codex-ops events $OPS_TASK_ID；修复后重跑 codex-doctor --json"
+fi
+
+ops_task_finish "$final_state" "$summary" "$resume_hint"
+
+if [ "$json" -eq 1 ]; then
+  {
+    printf '{"ok":'
+    if [ "$failures" -eq 0 ]; then printf 'true'; else printf 'false'; fi
+    printf ',"task_id":"%s","task_dir":"%s","total":%s,"warnings":%s,"failures":%s,"summary":"%s","resume_hint":"%s","checks":[' \
+      "$(printf '%s' "$OPS_TASK_ID" | ops_json_escape)" \
+      "$(ops_json_string "$OPS_TASK_DIR")" \
+      "$total" "$warnings" "$failures" \
+      "$(printf '%s' "$summary" | ops_json_escape)" \
+      "$(printf '%s' "$resume_hint" | ops_json_escape)"
+    first=1
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      if [ "$first" -eq 1 ]; then first=0; else printf ','; fi
+      printf '%s' "$line"
+    done < "$checks_file"
+    printf ']}\n'
+  } | tee "$OPS_TASK_DIR/result.json"
+else
+  printf '%s\n' "$summary"
+  printf 'task_id=%s\n' "$OPS_TASK_ID"
+  printf 'resume_hint=%s\n' "$resume_hint"
+fi
+
+exit "$exit_code"

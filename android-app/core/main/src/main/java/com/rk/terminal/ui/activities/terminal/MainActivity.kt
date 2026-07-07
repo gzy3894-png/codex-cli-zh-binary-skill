@@ -58,6 +58,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 private const val BRIDGE_FALLBACK_POLL_MS = 1500L
+private const val BRIDGE_STATUS_SCHEMA_VERSION = "2.3.1"
 private const val TERMINAL_PERF_STATUS_MIN_INTERVAL_MS = 5000L
 private val REQUEST_FILE_OBSERVER_EVENTS =
     FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO
@@ -292,8 +293,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun panelEventId(): String {
-        return "${System.currentTimeMillis()}.${(0..9999).random()}"
+    private fun panelEventId(timestampMs: Long = System.currentTimeMillis()): String {
+        return "$timestampMs.${(0..9999).random()}"
     }
 
     private fun writeAgentPanelStatus(
@@ -305,11 +306,12 @@ class MainActivity : ComponentActivity() {
         extra: Map<String, String> = emptyMap()
     ) {
         try {
+            val timestampMs = System.currentTimeMillis()
             val visible = when (source) {
                 "browser" -> terminalViewModel.browserPanelExpanded
                 else -> terminalViewModel.mediaPreviewExpanded
             }
-            val mode = if (source == "browser") "browser" else "files"
+            val mode = panelMode(source)
             val activeItem = itemId.ifBlank {
                 if (source == "browser") {
                     terminalViewModel.browserSnapshot.activeTabId?.toString().orEmpty()
@@ -318,18 +320,24 @@ class MainActivity : ComponentActivity() {
                 }
             }
             val extras = panelExtrasFor(source, itemId) + extra
+            val needsUser = panelNeedsUser(source, state, extras)
+            val userAction = panelStatusUserAction(state, extras)
             val status = buildString {
                 append("source=").append(source).append('\n')
                 append("mode=").append(mode).append('\n')
+                append("schema_version=").append(BRIDGE_STATUS_SCHEMA_VERSION).append('\n')
+                append("timestamp_ms=").append(timestampMs).append('\n')
                 append("state=").append(refValue(state)).append('\n')
                 append("visible=").append(if (visible) "1" else "0").append('\n')
                 append("collapsed=").append(if (visible) "0" else "1").append('\n')
+                append("needs_user=").append(if (needsUser) "1" else "0").append('\n')
+                append("user_action=").append(refValue(userAction)).append('\n')
                 append("reason=").append(refValue(reason)).append('\n')
                 append("request_id=").append(refValue(requestId)).append('\n')
                 append("item_id=").append(refValue(itemId)).append('\n')
                 append("active_item=").append(refValue(activeItem)).append('\n')
                 appendPanelExtras(extras)
-                append("stamp=").append(panelEventId()).append('\n')
+                append("stamp=").append(panelEventId(timestampMs)).append('\n')
             }
             localDir().child("agent-panel").apply { mkdirs() }.child("status").writeText(status)
         } catch (_: Exception) {
@@ -347,19 +355,26 @@ class MainActivity : ComponentActivity() {
         extra: Map<String, String> = emptyMap()
     ) {
         try {
+            val timestampMs = System.currentTimeMillis()
             val visible = when (source) {
                 "browser" -> terminalViewModel.browserPanelExpanded
                 else -> terminalViewModel.mediaPreviewExpanded
             }
+            val mode = panelMode(source)
             val activeItem = if (source == "browser") {
                 terminalViewModel.browserSnapshot.activeTabId?.toString().orEmpty()
             } else {
                 terminalViewModel.mediaPreviews.lastOrNull()?.stamp.orEmpty()
             }
             val extras = panelExtrasFor(source, itemId) + extra
+            val needsUser = panelNeedsUser(source, state, extras)
+            val userAction = panelEventUserAction(type, extras)
             val event = buildString {
-                append("event_id=").append(panelEventId()).append('\n')
+                append("event_id=").append(panelEventId(timestampMs)).append('\n')
                 append("source=").append(source).append('\n')
+                append("mode=").append(mode).append('\n')
+                append("schema_version=").append(BRIDGE_STATUS_SCHEMA_VERSION).append('\n')
+                append("timestamp_ms=").append(timestampMs).append('\n')
                 append("type=").append(type).append('\n')
                 append("state=").append(refValue(state)).append('\n')
                 append("reason=").append(refValue(reason)).append('\n')
@@ -368,6 +383,8 @@ class MainActivity : ComponentActivity() {
                 append("active_item=").append(refValue(activeItem)).append('\n')
                 append("visible=").append(if (visible) "1" else "0").append('\n')
                 append("collapsed=").append(if (visible) "0" else "1").append('\n')
+                append("needs_user=").append(if (needsUser) "1" else "0").append('\n')
+                append("user_action=").append(refValue(userAction)).append('\n')
                 appendPanelExtras(extras)
                 append("---\n")
             }
@@ -377,10 +394,87 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun panelMode(source: String): String {
+        return when (source) {
+            "browser" -> "browser"
+            "session" -> "session"
+            else -> "files"
+        }
+    }
+
+    private fun truthyBridgeValue(value: String): Boolean {
+        return value == "1" || value.equals("true", ignoreCase = true) || value.equals("yes", ignoreCase = true)
+    }
+
+    private fun panelNeedsUser(
+        source: String,
+        state: String,
+        extras: Map<String, String>
+    ): Boolean {
+        extras["needs_user"]?.takeIf { it.isNotBlank() }?.let { return truthyBridgeValue(it) }
+        extras["needsUser"]?.takeIf { it.isNotBlank() }?.let { return truthyBridgeValue(it) }
+        return when (source) {
+            "browser" -> terminalViewModel.browserSnapshot.needsUser || state == "waiting_for_user"
+            else -> state == "waiting_for_user"
+        }
+    }
+
+    private fun panelStatusUserAction(
+        state: String,
+        extras: Map<String, String>
+    ): String {
+        extras["user_action"]?.takeIf { it.isNotBlank() }?.let { return it }
+        extras["userAction"]?.takeIf { it.isNotBlank() }?.let { return it }
+        return if (state == "waiting_for_user") "wait" else ""
+    }
+
+    private fun panelEventUserAction(
+        type: String,
+        extras: Map<String, String>
+    ): String {
+        extras["user_action"]?.takeIf { it.isNotBlank() }?.let { return it }
+        extras["userAction"]?.takeIf { it.isNotBlank() }?.let { return it }
+        return normalizedUserAction(type)
+    }
+
+    private fun normalizedUserAction(type: String): String {
+        return when (type) {
+            "user_presented" -> "present"
+            "user_collapsed" -> "collapse"
+            "user_cancelled" -> "cancel"
+            "user_cleared" -> "clear"
+            "user_deleted" -> "delete"
+            "user_sent_file" -> "send_file"
+            "user_sent_text" -> "send_text"
+            "user_opened_preview" -> "open_preview"
+            "user_closed_preview" -> "close_preview"
+            "user_shared_preview" -> "share"
+            "user_selected_file" -> "select_file"
+            "user_file_picker_opened" -> "file_picker_open"
+            "user_file_picker_cancelled" -> "file_picker_cancel"
+            "user_file_picker_failed" -> "file_picker_failed"
+            "user_file_ingest_failed" -> "file_ingest_failed"
+            "user_file_unsupported" -> "file_unsupported"
+            "user_upload_picker_opened" -> "upload_picker_open"
+            "user_upload_picker_failed" -> "upload_picker_failed"
+            "user_upload_cancelled" -> "upload_cancel"
+            "user_upload_selected" -> "upload_select"
+            "user_selected_tab" -> "select_tab"
+            "user_closed_tab" -> "close_tab"
+            "user_done", "auth_done" -> "done"
+            "auth_cancelled", "external_open_cancelled" -> "cancel"
+            "auth_collapsed" -> "collapse"
+            "auth_reopened" -> "reopen"
+            "external_open_confirmed" -> "confirm"
+            else -> if (type.startsWith("user_")) type.removePrefix("user_") else ""
+        }
+    }
+
     private fun StringBuilder.appendPanelExtras(extras: Map<String, String>) {
         val reserved = setOf(
-            "event_id", "source", "mode", "type", "state", "reason", "request_id",
-            "item_id", "active_item", "visible", "collapsed", "stamp"
+            "event_id", "source", "mode", "schema_version", "timestamp_ms", "type", "state", "reason", "request_id",
+            "item_id", "active_item", "visible", "collapsed", "needs_user", "needsUser",
+            "user_action", "userAction", "stamp"
         )
         extras.toSortedMap().forEach { (key, value) ->
             if (key.isNotBlank() && key !in reserved) {
@@ -583,14 +677,21 @@ class MainActivity : ComponentActivity() {
         extra: Map<String, String> = emptyMap()
     ) {
         try {
+            val timestampMs = System.currentTimeMillis()
             val activeRun = runId.ifBlank { terminalViewModel.activeSessionFoldRunId }
             val run = terminalViewModel.sessionFoldRuns.firstOrNull { it.id == activeRun }
                 ?: terminalViewModel.sessionFoldRuns.lastOrNull()
             val totalItems = terminalViewModel.sessionFoldRuns.sumOf { it.items.size }
+            val userAction = sessionFoldUserAction("", extra)
             localDir().child("session-fold").apply { mkdirs() }.child("status").writeText(
                 buildString {
                     append("source=session\n")
+                    append("mode=session\n")
+                    append("schema_version=").append(BRIDGE_STATUS_SCHEMA_VERSION).append('\n')
+                    append("timestamp_ms=").append(timestampMs).append('\n')
                     append("state=").append(refValue(state)).append('\n')
+                    append("needs_user=0\n")
+                    append("user_action=").append(refValue(userAction)).append('\n')
                     append("reason=").append(refValue(reason)).append('\n')
                     append("request_id=").append(refValue(requestId)).append('\n')
                     append("run_id=").append(refValue(run?.id ?: activeRun)).append('\n')
@@ -601,7 +702,7 @@ class MainActivity : ComponentActivity() {
                     append("runs=").append(terminalViewModel.sessionFoldRuns.size).append('\n')
                     append("items=").append(totalItems).append('\n')
                     appendSessionFoldExtras(extra)
-                    append("stamp=").append(panelEventId()).append('\n')
+                    append("stamp=").append(panelEventId(timestampMs)).append('\n')
                 }
             )
         } catch (_: Exception) {
@@ -619,12 +720,19 @@ class MainActivity : ComponentActivity() {
         extra: Map<String, String> = emptyMap()
     ) {
         try {
+            val timestampMs = System.currentTimeMillis()
             val run = terminalViewModel.sessionFoldRuns.firstOrNull { it.id == runId }
+            val userAction = sessionFoldUserAction(type, extra)
             val event = buildString {
-                append("event_id=").append(panelEventId()).append('\n')
+                append("event_id=").append(panelEventId(timestampMs)).append('\n')
                 append("source=session\n")
+                append("mode=session\n")
+                append("schema_version=").append(BRIDGE_STATUS_SCHEMA_VERSION).append('\n')
+                append("timestamp_ms=").append(timestampMs).append('\n')
                 append("type=").append(type).append('\n')
                 append("state=").append(refValue(state)).append('\n')
+                append("needs_user=0\n")
+                append("user_action=").append(refValue(userAction)).append('\n')
                 append("reason=").append(refValue(reason)).append('\n')
                 append("request_id=").append(refValue(requestId)).append('\n')
                 append("run_id=").append(refValue(runId)).append('\n')
@@ -653,13 +761,21 @@ class MainActivity : ComponentActivity() {
         extra: Map<String, String> = emptyMap()
     ) {
         try {
+            val timestampMs = System.currentTimeMillis()
             val run = terminalViewModel.sessionFoldRuns.firstOrNull { it.id == runId }
+            val userAction = sessionFoldUserAction(action, extra)
             localDir().child("session-fold").apply { mkdirs() }.child("result").writeText(
                 buildString {
+                    append("source=session\n")
+                    append("mode=session\n")
+                    append("schema_version=").append(BRIDGE_STATUS_SCHEMA_VERSION).append('\n')
+                    append("timestamp_ms=").append(timestampMs).append('\n')
                     append("request_id=").append(refValue(requestId)).append('\n')
                     append("action=").append(refValue(action)).append('\n')
                     append("ok=").append(if (ok) "1" else "0").append('\n')
                     append("state=").append(refValue(state)).append('\n')
+                    append("needs_user=0\n")
+                    append("user_action=").append(refValue(userAction)).append('\n')
                     append("reason=").append(refValue(reason)).append('\n')
                     append("run_id=").append(refValue(runId)).append('\n')
                     append("item_id=").append(refValue(itemId)).append('\n')
@@ -675,9 +791,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun sessionFoldUserAction(type: String, extras: Map<String, String>): String {
+        extras["user_action"]?.takeIf { it.isNotBlank() }?.let { return it }
+        extras["userAction"]?.takeIf { it.isNotBlank() }?.let { return it }
+        return normalizedUserAction(type)
+    }
+
     private fun StringBuilder.appendSessionFoldExtras(extras: Map<String, String>) {
         val reserved = setOf(
-            "event_id", "source", "type", "state", "reason", "request_id", "run_id",
+            "event_id", "source", "mode", "schema_version", "timestamp_ms", "type", "state",
+            "needs_user", "needsUser", "user_action", "userAction", "reason", "request_id", "run_id",
             "item_id", "active_run", "collapsed", "timeline_collapsed", "runs", "items",
             "stamp", "ok", "action"
         )
@@ -958,6 +1081,31 @@ class MainActivity : ComponentActivity() {
             .replace("\\", "\\\\")
             .replace("\r", "\\r")
             .replace("\n", "\\n")
+    }
+
+    private fun bridgeTextKeys(text: String): Set<String> {
+        return text.lineSequence().mapNotNull { line ->
+            val idx = line.indexOf('=')
+            if (idx > 0) line.substring(0, idx).trim() else null
+        }.toSet()
+    }
+
+    private fun bridgeTextValue(text: String, key: String): String {
+        val prefix = "$key="
+        return text.lineSequence()
+            .firstOrNull { it.startsWith(prefix) }
+            ?.substring(prefix.length)
+            .orEmpty()
+    }
+
+    private fun StringBuilder.appendBridgeFieldIfMissing(
+        existingKeys: Set<String>,
+        key: String,
+        value: String
+    ) {
+        if (key !in existingKeys) {
+            append(key).append('=').append(refValue(value)).append('\n')
+        }
     }
 
     private fun collapseTerminalText(value: String): String {
@@ -1413,27 +1561,63 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun primeMediaPreviewRequestCache() {
-        lastMediaPreviewRequest = try {
-            val requestFile = localDir().child("media-preview").child("request")
-            if (requestFile.isFile) requestFile.readText().trim() else ""
-        } catch (_: Exception) {
-            ""
-        }
+        val previewDir = localDir().child("media-preview")
+        lastMediaPreviewRequest = primeRecoverableRequestCache(
+            bridgeDir = previewDir,
+            resultFileName = "result",
+            processedCache = mediaPreviewProcessedRequestIds
+        )
     }
 
     private fun primeBrowserRequestCache() {
+        val browserDir = localDir().child("browser")
         lastBrowserRequest = try {
-            val requestFile = localDir().child("browser").child("request")
-            if (requestFile.isFile) requestFile.readText().trim() else ""
+            val requestFile = browserDir.child("request")
+            val content = if (requestFile.isFile) requestFile.readText().trim() else ""
+            if (content.isBlank()) {
+                ""
+            } else {
+                val requestId = panelRequestId(parseMediaPreviewRequest(content), content)
+                if (browserRequestResultMatches(browserDir, requestId)) {
+                    rememberBrowserRequestId(requestId)
+                    content
+                } else {
+                    ""
+                }
+            }
         } catch (_: Exception) {
             ""
         }
     }
 
     private fun primeSessionFoldRequestCache() {
-        lastSessionFoldRequest = try {
-            val requestFile = localDir().child("session-fold").child("request")
-            if (requestFile.isFile) requestFile.readText().trim() else ""
+        val foldDir = localDir().child("session-fold")
+        lastSessionFoldRequest = primeRecoverableRequestCache(
+            bridgeDir = foldDir,
+            resultFileName = "result",
+            processedCache = sessionFoldProcessedRequestIds
+        )
+    }
+
+    private fun primeRecoverableRequestCache(
+        bridgeDir: File,
+        resultFileName: String,
+        processedCache: LinkedHashSet<String>
+    ): String {
+        return try {
+            val requestFile = bridgeDir.child("request")
+            val content = if (requestFile.isFile) requestFile.readText().trim() else ""
+            if (content.isBlank()) {
+                ""
+            } else {
+                val requestId = panelRequestId(parseMediaPreviewRequest(content), content)
+                if (bridgeResultMatchesRequest(bridgeDir, resultFileName, requestId)) {
+                    rememberRequestId(processedCache, requestId)
+                    content
+                } else {
+                    ""
+                }
+            }
         } catch (_: Exception) {
             ""
         }
@@ -1650,11 +1834,33 @@ class MainActivity : ComponentActivity() {
         runCatching {
             localDir().child("perf").apply { mkdirs() }.child("terminal.status").writeText(
                 buildString {
+                    append("source=ops\n")
+                    append("mode=ops\n")
+                    append("schema_version=").append(BRIDGE_STATUS_SCHEMA_VERSION).append('\n')
+                    append("timestamp_ms=").append(now).append('\n')
+                    append("state=ready\n")
+                    append("needs_user=0\n")
+                    append("user_action=\n")
                     append("render_requests=").append(render.renderRequests).append('\n')
                     append("render_frames=").append(render.renderFrames).append('\n')
                     append("coalesced_requests=").append(render.coalescedRequests).append('\n')
                     append("burst_mode=").append(if (render.burstMode) "1" else "0").append('\n')
                     append("last_frame_ms=").append(render.lastFrameMs).append('\n')
+                    append("avg_frame_ms=").append(render.avgFrameMs).append('\n')
+                    append("max_frame_ms=").append(render.maxFrameMs).append('\n')
+                    append("last_request_ms=").append(render.lastRequestMs).append('\n')
+                    append("last_request_age_ms=").append(render.lastRequestAgeMs).append('\n')
+                    append("last_request_to_frame_ms=").append(render.lastRequestToFrameMs).append('\n')
+                    append("input_events=").append(render.inputEvents).append('\n')
+                    append("last_input_ms=").append(render.lastInputMs).append('\n')
+                    append("last_input_age_ms=").append(render.lastInputAgeMs).append('\n')
+                    append("recent_window_ms=").append(render.recentWindowMs).append('\n')
+                    append("recent_window_age_ms=").append(render.recentWindowAgeMs).append('\n')
+                    append("recent_input_events=").append(render.recentInputEvents).append('\n')
+                    append("recent_render_requests=").append(render.recentRenderRequests).append('\n')
+                    append("recent_coalesced_requests=").append(render.recentCoalescedRequests).append('\n')
+                    append("slow_frames_16ms=").append(render.slowFrames16Ms).append('\n')
+                    append("slow_frames_32ms=").append(render.slowFrames32Ms).append('\n')
                     append("bridge_mode=").append(bridgeMode()).append('\n')
                     append("fallback_interval_ms=").append(BRIDGE_FALLBACK_POLL_MS).append('\n')
                     append("media_preview_observer=").append(if (mediaPreviewObserver != null) "1" else "0").append('\n')
@@ -1680,6 +1886,41 @@ class MainActivity : ComponentActivity() {
             ?: emptyList()
     }
 
+    private fun safeBridgeRequestId(requestId: String): String {
+        return requestId.filter { it.isLetterOrDigit() || it == '.' || it == '_' || it == '-' }.take(120)
+    }
+
+    private fun bridgeResultMatchesRequest(
+        bridgeDir: File,
+        resultFileName: String,
+        requestId: String
+    ): Boolean {
+        if (requestId.isBlank()) return false
+        return bridgeStatusFileMatchesRequest(bridgeDir.child(resultFileName), requestId)
+    }
+
+    private fun browserRequestResultMatches(browserDir: File, requestId: String): Boolean {
+        if (requestId.isBlank()) return false
+        val safeId = safeBridgeRequestId(requestId)
+        val resultsDir = browserDir.child("results")
+        return (safeId.isNotBlank() && (
+            bridgeStatusFileMatchesRequest(resultsDir.child("$safeId.status"), requestId) ||
+                resultsDir.child("$safeId.json").isFile
+            )) ||
+            bridgeStatusFileMatchesRequest(browserDir.child("status"), requestId)
+    }
+
+    private fun bridgeStatusFileMatchesRequest(file: File, requestId: String): Boolean {
+        if (requestId.isBlank() || !file.isFile) return false
+        val expected = "request_id=${refValue(requestId)}"
+        val rawExpected = "request_id=$requestId"
+        return runCatching {
+            file.useLines { lines ->
+                lines.take(80).any { line -> line == expected || line == rawExpected }
+            }
+        }.getOrDefault(false)
+    }
+
     private fun isRequestProcessed(cache: LinkedHashSet<String>, requestId: String): Boolean {
         return requestId.isNotBlank() && cache.contains(requestId)
     }
@@ -1702,7 +1943,7 @@ class MainActivity : ComponentActivity() {
             if (queuedContent.isNotBlank()) {
                 val queuedRequest = parseMediaPreviewRequest(queuedContent)
                 val queuedRequestId = panelRequestId(queuedRequest, queuedContent)
-                if (!isRequestProcessed(sessionFoldProcessedRequestIds, queuedRequestId)) {
+                if (!isSessionFoldRequestProcessed(foldDir, queuedRequestId)) {
                     handleSessionFoldRequestContent(foldDir, queuedContent)
                     rememberRequestId(sessionFoldProcessedRequestIds, queuedRequestId)
                 }
@@ -1717,13 +1958,22 @@ class MainActivity : ComponentActivity() {
 
         if (content.isBlank() || content == lastSessionFoldRequest) return
         val requestId = panelRequestId(parseMediaPreviewRequest(content), content)
-        if (isRequestProcessed(sessionFoldProcessedRequestIds, requestId)) {
+        if (isSessionFoldRequestProcessed(foldDir, requestId)) {
             lastSessionFoldRequest = content
             return
         }
         lastSessionFoldRequest = content
         handleSessionFoldRequestContent(foldDir, content)
         rememberRequestId(sessionFoldProcessedRequestIds, requestId)
+    }
+
+    private fun isSessionFoldRequestProcessed(foldDir: File, requestId: String): Boolean {
+        if (isRequestProcessed(sessionFoldProcessedRequestIds, requestId)) return true
+        if (bridgeResultMatchesRequest(foldDir, "result", requestId)) {
+            rememberRequestId(sessionFoldProcessedRequestIds, requestId)
+            return true
+        }
+        return false
     }
 
     private suspend fun handleSessionFoldRequestContent(foldDir: File, content: String) {
@@ -1895,7 +2145,7 @@ class MainActivity : ComponentActivity() {
                 }
                 if (content.isNotBlank()) {
                     val requestId = panelRequestId(parseMediaPreviewRequest(content), content)
-                    if (!isBrowserRequestProcessed(requestId)) {
+                    if (!isBrowserRequestProcessed(browserDir, requestId)) {
                         handleBrowserRequestContent(browserDir, content)
                     }
                 }
@@ -1925,7 +2175,10 @@ class MainActivity : ComponentActivity() {
 
         if (content.isBlank() || content == lastBrowserRequest) return
         val requestId = panelRequestId(parseMediaPreviewRequest(content), content)
-        if (isBrowserRequestProcessed(requestId)) return
+        if (isBrowserRequestProcessed(browserDir, requestId)) {
+            lastBrowserRequest = content
+            return
+        }
         lastBrowserRequest = content
         handleBrowserRequestContent(browserDir, content)
     }
@@ -2079,8 +2332,13 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    private fun isBrowserRequestProcessed(requestId: String): Boolean {
-        return isRequestProcessed(browserProcessedRequestIds, requestId)
+    private fun isBrowserRequestProcessed(browserDir: File, requestId: String): Boolean {
+        if (isRequestProcessed(browserProcessedRequestIds, requestId)) return true
+        if (browserRequestResultMatches(browserDir, requestId)) {
+            rememberBrowserRequestId(requestId)
+            return true
+        }
+        return false
     }
 
     private fun rememberBrowserRequestId(requestId: String) {
@@ -2190,7 +2448,7 @@ class MainActivity : ComponentActivity() {
             if (queuedContent.isNotBlank()) {
                 val queuedRequest = parseMediaPreviewRequest(queuedContent)
                 val queuedRequestId = panelRequestId(queuedRequest, queuedContent)
-                if (!isRequestProcessed(mediaPreviewProcessedRequestIds, queuedRequestId)) {
+                if (!isMediaPreviewRequestProcessed(previewDir, queuedRequestId)) {
                     handleMediaPreviewRequestContent(previewDir, queuedContent)
                     rememberRequestId(mediaPreviewProcessedRequestIds, queuedRequestId)
                 }
@@ -2205,13 +2463,22 @@ class MainActivity : ComponentActivity() {
 
         if (content.isBlank() || content == lastMediaPreviewRequest) return
         val requestId = panelRequestId(parseMediaPreviewRequest(content), content)
-        if (isRequestProcessed(mediaPreviewProcessedRequestIds, requestId)) {
+        if (isMediaPreviewRequestProcessed(previewDir, requestId)) {
             lastMediaPreviewRequest = content
             return
         }
         lastMediaPreviewRequest = content
         handleMediaPreviewRequestContent(previewDir, content)
         rememberRequestId(mediaPreviewProcessedRequestIds, requestId)
+    }
+
+    private fun isMediaPreviewRequestProcessed(previewDir: File, requestId: String): Boolean {
+        if (isRequestProcessed(mediaPreviewProcessedRequestIds, requestId)) return true
+        if (bridgeResultMatchesRequest(previewDir, "result", requestId)) {
+            rememberRequestId(mediaPreviewProcessedRequestIds, requestId)
+            return true
+        }
+        return false
     }
 
     private suspend fun handleMediaPreviewRequestContent(previewDir: File, content: String) {
@@ -2635,17 +2902,38 @@ class MainActivity : ComponentActivity() {
     private fun writeMediaPreviewStatus(previewDir: File, text: String) {
         try {
             previewDir.mkdirs()
+            val timestampMs = System.currentTimeMillis()
             val visible = terminalViewModel.mediaPreviewExpanded
+            val existingKeys = bridgeTextKeys(text)
+            val state = bridgeTextValue(text, "state").ifBlank { inferMediaPreviewState(text) }
+            val needsUser = state == "waiting_for_user"
+            val userAction = bridgeTextValue(text, "user_action")
             previewDir.child("status").writeText(
                 buildString {
                     append(text)
                     if (!text.endsWith('\n')) append('\n')
-                    append("visible=").append(if (visible) "1" else "0").append('\n')
-                    append("collapsed=").append(if (visible) "0" else "1").append('\n')
+                    appendBridgeFieldIfMissing(existingKeys, "source", "files")
+                    appendBridgeFieldIfMissing(existingKeys, "mode", "files")
+                    appendBridgeFieldIfMissing(existingKeys, "schema_version", BRIDGE_STATUS_SCHEMA_VERSION)
+                    appendBridgeFieldIfMissing(existingKeys, "timestamp_ms", timestampMs.toString())
+                    appendBridgeFieldIfMissing(existingKeys, "state", state)
+                    appendBridgeFieldIfMissing(existingKeys, "needs_user", if (needsUser) "1" else "0")
+                    appendBridgeFieldIfMissing(existingKeys, "user_action", userAction)
+                    appendBridgeFieldIfMissing(existingKeys, "visible", if (visible) "1" else "0")
+                    appendBridgeFieldIfMissing(existingKeys, "collapsed", if (visible) "0" else "1")
                 }
             )
         } catch (_: Exception) {
             // Best-effort debug marker for terminal-side troubleshooting.
+        }
+    }
+
+    private fun inferMediaPreviewState(text: String): String {
+        return when {
+            text.lineSequence().any { it.startsWith("error=") } -> "error"
+            text.lineSequence().any { it == "closed=1" || it == "cleared=1" } -> "closed"
+            text.lineSequence().any { it == "picked=1" || it == "shown=1" } -> "ready"
+            else -> ""
         }
     }
 
@@ -2719,15 +3007,24 @@ class MainActivity : ComponentActivity() {
     ) {
         try {
             previewDir.mkdirs()
+            val timestampMs = System.currentTimeMillis()
             val visible = terminalViewModel.mediaPreviewExpanded
             val activeItem = terminalViewModel.mediaPreviews.lastOrNull()?.let { previewReferenceId(it) }.orEmpty()
             val extras = panelExtrasFor("files", itemId) + extra
+            val needsUser = state == "waiting_for_user"
+            val userAction = panelEventUserAction(action, extras)
             previewDir.child("result").writeText(
                 buildString {
+                    append("source=files\n")
+                    append("mode=files\n")
+                    append("schema_version=").append(BRIDGE_STATUS_SCHEMA_VERSION).append('\n')
+                    append("timestamp_ms=").append(timestampMs).append('\n')
                     append("request_id=").append(refValue(requestId)).append('\n')
                     append("action=").append(refValue(action)).append('\n')
                     append("ok=").append(if (ok) "1" else "0").append('\n')
                     append("state=").append(refValue(state)).append('\n')
+                    append("needs_user=").append(if (needsUser) "1" else "0").append('\n')
+                    append("user_action=").append(refValue(userAction)).append('\n')
                     append("reason=").append(refValue(reason)).append('\n')
                     append("item_id=").append(refValue(itemId)).append('\n')
                     append("active_item=").append(refValue(activeItem)).append('\n')
@@ -2745,6 +3042,7 @@ class MainActivity : ComponentActivity() {
     private fun writeBrowserResult(browserDir: File, result: JSONObject) {
         try {
             browserDir.mkdirs()
+            val timestampMs = System.currentTimeMillis()
             val snapshot = result.optJSONObject("snapshot")
             val state = if (result.optBoolean("ok")) {
                 snapshot?.optString("status")?.takeIf { it.isNotBlank() } ?: "done"
@@ -2752,6 +3050,7 @@ class MainActivity : ComponentActivity() {
                 "error"
             }
             val visible = terminalViewModel.browserPanelExpanded
+            val needsUser = snapshot?.optBoolean("needsUser") == true
             val activeItem = snapshot?.opt("activeTabId")?.toString().orEmpty()
             val tabsCount = (snapshot?.optJSONArray("tabs")?.length() ?: 0).toString()
             val requestId = result.optString("requestId")
@@ -2762,22 +3061,35 @@ class MainActivity : ComponentActivity() {
                 ?: authTask?.optString("userAction").orEmpty()
             val persistedResult = sanitizeBrowserResult(result)
             persistedResult
+                .put("source", "browser")
+                .put("mode", "browser")
+                .put("schemaVersion", BRIDGE_STATUS_SCHEMA_VERSION)
+                .put("schema_version", BRIDGE_STATUS_SCHEMA_VERSION)
+                .put("timestampMs", timestampMs)
+                .put("timestamp_ms", timestampMs)
+                .put("state", state)
                 .put("visible", visible)
                 .put("collapsed", !visible)
                 .put("itemId", "")
                 .put("activeItem", activeItem)
                 .put("reason", result.optString("action"))
-                .put("needsUser", snapshot?.optBoolean("needsUser") == true)
+                .put("needsUser", needsUser)
+                .put("needs_user", needsUser)
                 .put("tabsCount", tabsCount)
                 .put("userAction", userAction)
+                .put("user_action", userAction)
             browserDir.child("result.json").writeText(persistedResult.toString(2))
             val requestResultsDir = browserDir.child("results").apply { mkdirs() }
             val text = buildString {
+                append("source=browser\n")
+                append("mode=browser\n")
+                append("schema_version=").append(BRIDGE_STATUS_SCHEMA_VERSION).append('\n')
+                append("timestamp_ms=").append(timestampMs).append('\n')
                 append("request_id=").append(refValue(requestId)).append('\n')
                 append("state=").append(refValue(state)).append('\n')
                 append("action=").append(refValue(result.optString("action"))).append('\n')
                 append("ok=").append(if (result.optBoolean("ok")) "1" else "0").append('\n')
-                append("needs_user=").append(if (snapshot?.optBoolean("needsUser") == true) "1" else "0").append('\n')
+                append("needs_user=").append(if (needsUser) "1" else "0").append('\n')
                 append("visible=").append(if (visible) "1" else "0").append('\n')
                 append("collapsed=").append(if (visible) "0" else "1").append('\n')
                 append("item_id=\n")
@@ -2816,14 +3128,16 @@ class MainActivity : ComponentActivity() {
             }
             browserDir.child("status").writeText(text)
             if (requestId.isNotBlank()) {
-                val safeId = requestId.filter { it.isLetterOrDigit() || it == '.' || it == '_' || it == '-' }.take(120)
+                val safeId = safeBridgeRequestId(requestId)
                 if (safeId.isNotBlank()) {
                     requestResultsDir.child("$safeId.json").writeText(persistedResult.toString(2))
                     requestResultsDir.child("$safeId.status").writeText(text)
                 }
             }
             browserDir.child("logs").mkdirs()
-            browserDir.child("logs").child("session.log").appendText(text.lines().take(4).joinToString(" ") + "\n")
+            browserDir.child("logs").child("session.log").appendText(
+                "timestamp_ms=$timestampMs request_id=${refValue(requestId)} state=${refValue(state)} action=${refValue(result.optString("action"))} ok=${if (result.optBoolean("ok")) "1" else "0"}\n"
+            )
             writeAgentPanelStatus(
                 source = "browser",
                 state = state,

@@ -1,0 +1,277 @@
+#!/usr/bin/env sh
+# Shared helpers for Codex for TUI ops scripts.
+# POSIX/BusyBox sh compatible: do not use bash-only syntax here.
+
+ops_now() {
+  date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date '+%s' 2>/dev/null || printf '0'
+}
+
+ops_safe_id() {
+  printf '%s' "$1" | tr -cd 'A-Za-z0-9._-' | cut -c 1-120
+}
+
+ops_find_prefix() {
+  if [ -n "${CODEX_OPS_PREFIX:-}" ]; then
+    printf '%s\n' "$CODEX_OPS_PREFIX"
+    return 0
+  fi
+  if [ -n "${PREFIX:-}" ]; then
+    printf '%s\n' "$PREFIX"
+    return 0
+  fi
+  if [ -n "${PKG:-}" ]; then
+    if [ -d "/data/user/0/$PKG" ]; then
+      printf '%s\n' "/data/user/0/$PKG"
+      return 0
+    fi
+    if [ -d "/data/data/$PKG" ]; then
+      printf '%s\n' "/data/data/$PKG"
+      return 0
+    fi
+  fi
+  if [ -n "${HOME:-}" ]; then
+    printf '%s\n' "$HOME"
+    return 0
+  fi
+  return 1
+}
+
+ops_prefix() {
+  ops_find_prefix
+}
+
+ops_root() {
+  printf '%s/local/ops\n' "$(ops_prefix)"
+}
+
+ops_tasks_dir() {
+  printf '%s/tasks\n' "$(ops_root)"
+}
+
+ops_trash_dir() {
+  printf '%s/trash\n' "$(ops_root)"
+}
+
+ops_json_escape() {
+  awk '
+    BEGIN { ORS = "" }
+    {
+      gsub(/\\/, "\\\\")
+      gsub(/"/, "\\\"")
+      gsub(/\t/, "\\t")
+      gsub(/\r/, "\\r")
+      if (NR > 1) {
+        printf "\\n"
+      }
+      printf "%s", $0
+    }
+  '
+}
+
+ops_is_sensitive_value() {
+  ops_sensitive_value="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$ops_sensitive_value" in
+    *token*|*cookie*|*secret*|*authorization*|*key*|*auth.json*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+ops_redact_value() {
+  if ops_is_sensitive_value "$1"; then
+    printf '%s' '<redacted-sensitive-value>'
+  else
+    printf '%s' "$1"
+  fi
+}
+
+ops_redact_stream() {
+  awk '
+    {
+      line = $0
+      low = tolower(line)
+      if (low ~ /(token|cookie|secret|authorization|key|auth\.json)/) {
+        print "[redacted sensitive line]"
+      } else {
+        print line
+      }
+    }
+  '
+}
+
+ops_json_string() {
+  ops_json_string_value="$(ops_redact_value "$1")"
+  printf '%s' "$ops_json_string_value" | ops_json_escape
+}
+
+ops_file_size() {
+  if [ -f "$1" ]; then
+    wc -c < "$1" 2>/dev/null | awk '{ print $1 + 0 }'
+  elif [ -d "$1" ] && command -v du >/dev/null 2>&1; then
+    du -sk "$1" 2>/dev/null | awk '{ print ($1 + 0) * 1024 }'
+  else
+    printf '0\n'
+  fi
+}
+
+ops_task_path() {
+  ops_task_path_id="$(ops_safe_id "$1")"
+  [ -n "$ops_task_path_id" ] || return 1
+  case "$ops_task_path_id" in
+    .|..) return 1 ;;
+  esac
+  ops_is_sensitive_value "$ops_task_path_id" && return 1
+  printf '%s/%s\n' "$(ops_tasks_dir)" "$ops_task_path_id"
+}
+
+ops_generate_task_id() {
+  ops_generate_stamp="$(date '+%Y%m%d-%H%M%S' 2>/dev/null || date '+%s' 2>/dev/null || printf '0')"
+  ops_generate_suffix="$(printf '%s' "$$" | tr -cd '0-9')"
+  printf '%s-%s-%s\n' "$ops_generate_stamp" "${1:-task}" "$ops_generate_suffix"
+}
+
+ops_task_init() {
+  OPS_COMPONENT="$1"
+  OPS_ACTION="$2"
+  OPS_TASK_ID="$(ops_safe_id "${3:-}")"
+  case "$OPS_TASK_ID" in
+    .|..) OPS_TASK_ID="" ;;
+  esac
+  if [ -n "$OPS_TASK_ID" ] && ops_is_sensitive_value "$OPS_TASK_ID"; then
+    OPS_TASK_ID=""
+  fi
+  if [ -z "$OPS_TASK_ID" ]; then
+    OPS_TASK_ID="$(ops_safe_id "$(ops_generate_task_id "$OPS_ACTION")")"
+  fi
+  OPS_TASK_DIR="$(ops_task_path "$OPS_TASK_ID")" || return 1
+  OPS_TASK_STARTED_AT="$(ops_now)"
+  mkdir -p "$OPS_TASK_DIR"
+  : > "$OPS_TASK_DIR/events"
+  : > "$OPS_TASK_DIR/summary"
+  : > "$OPS_TASK_DIR/resume_hint"
+  ops_task_status running "started"
+  ops_event info "$OPS_COMPONENT $OPS_ACTION started"
+}
+
+ops_task_status() {
+  ops_task_state="$1"
+  ops_task_message="$(ops_redact_value "${2:-}")"
+  [ -n "${OPS_TASK_DIR:-}" ] || return 0
+  ops_task_updated_at="$(ops_now)"
+  {
+    printf 'task_id=%s\n' "$OPS_TASK_ID"
+    printf 'component=%s\n' "$OPS_COMPONENT"
+    printf 'action=%s\n' "$OPS_ACTION"
+    printf 'state=%s\n' "$ops_task_state"
+    printf 'started_at=%s\n' "${OPS_TASK_STARTED_AT:-$ops_task_updated_at}"
+    printf 'updated_at=%s\n' "$ops_task_updated_at"
+    printf 'task_dir=%s\n' "$(ops_redact_value "$OPS_TASK_DIR")"
+    if [ -n "$ops_task_message" ]; then
+      printf 'message=%s\n' "$ops_task_message"
+    fi
+  } > "$OPS_TASK_DIR/status.tmp.$$"
+  mv "$OPS_TASK_DIR/status.tmp.$$" "$OPS_TASK_DIR/status"
+}
+
+ops_event() {
+  ops_event_level="$1"
+  ops_event_message="$(ops_redact_value "${2:-}")"
+  [ -n "${OPS_TASK_DIR:-}" ] || return 0
+  ops_event_ts="$(ops_now)"
+  {
+    printf '{"ts":"%s","level":"%s","message":"' "$(printf '%s' "$ops_event_ts" | ops_json_escape)" "$(printf '%s' "$ops_event_level" | ops_json_escape)"
+    printf '%s' "$ops_event_message" | ops_json_escape
+    printf '"}\n'
+  } >> "$OPS_TASK_DIR/events"
+}
+
+ops_write_summary() {
+  [ -n "${OPS_TASK_DIR:-}" ] || return 0
+  printf '%s\n' "$(ops_redact_value "${1:-}")" > "$OPS_TASK_DIR/summary"
+}
+
+ops_write_resume_hint() {
+  [ -n "${OPS_TASK_DIR:-}" ] || return 0
+  printf '%s\n' "$(ops_redact_value "${1:-}")" > "$OPS_TASK_DIR/resume_hint"
+}
+
+ops_task_finish() {
+  ops_finish_state="$1"
+  ops_finish_summary="${2:-}"
+  ops_finish_hint="${3:-}"
+  ops_write_summary "$ops_finish_summary"
+  ops_write_resume_hint "$ops_finish_hint"
+  ops_event info "$ops_finish_summary"
+  ops_task_status "$ops_finish_state" "$ops_finish_summary"
+}
+
+ops_task_file() {
+  ops_task_file_id="$(ops_safe_id "$1")"
+  ops_task_file_name="$2"
+  case "$ops_task_file_name" in
+    status|events|summary|resume_hint|manifest.tsv|result.json|checks.jsonl|moves.tsv)
+      ;;
+    resume-hint)
+      ops_task_file_name="resume_hint"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  [ -n "$ops_task_file_id" ] || return 1
+  case "$ops_task_file_id" in
+    .|..) return 1 ;;
+  esac
+  ops_is_sensitive_value "$ops_task_file_id" && return 1
+  printf '%s/%s/%s\n' "$(ops_tasks_dir)" "$ops_task_file_id" "$ops_task_file_name"
+}
+
+ops_cat_task_file() {
+  ops_cat_file="$(ops_task_file "$1" "$2")" || return 1
+  [ -r "$ops_cat_file" ] || return 1
+  cat "$ops_cat_file" | ops_redact_stream
+}
+
+ops_status_value() {
+  ops_status_file="$1"
+  ops_status_key="$2"
+  [ -r "$ops_status_file" ] || return 1
+  awk -F= -v key="$ops_status_key" '
+    $1 == key {
+      sub(/^[^=]*=/, "")
+      print
+      found = 1
+      exit
+    }
+    END {
+      if (!found) {
+        exit 1
+      }
+    }
+  ' "$ops_status_file"
+}
+
+ops_write_result_json() {
+  [ -n "${OPS_TASK_DIR:-}" ] || return 0
+  cat > "$OPS_TASK_DIR/result.json"
+}
+
+ops_require_task_id() {
+  ops_require_id="$(ops_safe_id "${1:-}")"
+  if [ -z "$ops_require_id" ]; then
+    printf '%s\n' "缺少 task_id" >&2
+    return 1
+  fi
+  case "$ops_require_id" in
+    .|..)
+      printf '%s\n' "无效 task_id" >&2
+      return 1
+      ;;
+  esac
+  if ops_is_sensitive_value "$ops_require_id"; then
+    printf '%s\n' "task_id 包含敏感字段，拒绝输出" >&2
+    return 1
+  fi
+  printf '%s\n' "$ops_require_id"
+}

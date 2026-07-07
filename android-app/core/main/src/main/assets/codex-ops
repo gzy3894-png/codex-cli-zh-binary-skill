@@ -1,0 +1,292 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd || printf '.')"
+# shellcheck disable=SC1090
+. "$SCRIPT_DIR/codex-ops-lib"
+
+usage() {
+  cat >&2 <<'EOF'
+用法:
+  codex-ops [--json] doctor
+  codex-ops [--json] list [--limit N]
+  codex-ops [--json] status [TASK_ID]
+  codex-ops [--json] events [TASK_ID]
+  codex-ops [--json] summary TASK_ID
+  codex-ops [--json] resume-hint [TASK_ID]
+  codex-ops [--json] path TASK_ID
+
+说明:
+  任务状态默认落盘到 $PREFIX/local/ops/tasks/<task_id>/。
+  回收站默认位于 $PREFIX/local/ops/trash/<task_id>/。
+EOF
+}
+
+json=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --json) json=1; shift ;;
+    --help|-h|help) usage; exit 0 ;;
+    *) break ;;
+  esac
+done
+
+cmd="${1:-doctor}"
+[ "$#" -eq 0 ] || shift
+
+json_error() {
+  json_error_message="$1"
+  if [ "$json" -eq 1 ]; then
+    printf '{"ok":false,"error":"%s"}\n' "$(printf '%s' "$json_error_message" | ops_json_escape)"
+  else
+    printf '%s\n' "$json_error_message" >&2
+  fi
+}
+
+print_task_file() {
+  print_task_id="$(ops_require_task_id "${1:-}")" || { json_error "缺少 task_id"; exit 2; }
+  print_name="$2"
+  print_file="$(ops_task_file "$print_task_id" "$print_name" 2>/dev/null || true)"
+  if [ -z "$print_file" ] || [ ! -r "$print_file" ]; then
+    json_error "找不到任务文件: $print_task_id/$print_name"
+    exit 1
+  fi
+  case "$json:$print_name" in
+    1:status)
+      state="$(ops_status_value "$print_file" state 2>/dev/null || printf '')"
+      updated_at="$(ops_status_value "$print_file" updated_at 2>/dev/null || printf '')"
+      message="$(ops_status_value "$print_file" message 2>/dev/null || printf '')"
+      printf '{"ok":true,"task_id":"%s","state":"%s","updated_at":"%s","message":"%s"}\n' \
+        "$(printf '%s' "$print_task_id" | ops_json_escape)" \
+        "$(printf '%s' "$state" | ops_json_escape)" \
+        "$(printf '%s' "$updated_at" | ops_json_escape)" \
+        "$(ops_json_string "$message")"
+      ;;
+    1:events)
+      printf '{"ok":true,"task_id":"%s","events":[' "$(printf '%s' "$print_task_id" | ops_json_escape)"
+      first=1
+      while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        if [ "$first" -eq 1 ]; then
+          first=0
+        else
+          printf ','
+        fi
+        printf '%s' "$line"
+      done < "$print_file"
+      printf ']}\n'
+      ;;
+    1:summary|1:resume_hint|1:resume-hint)
+      value="$(cat "$print_file" | ops_redact_stream)"
+      key="$print_name"
+      [ "$key" = "resume-hint" ] && key="resume_hint"
+      printf '{"ok":true,"task_id":"%s","%s":"%s"}\n' \
+        "$(printf '%s' "$print_task_id" | ops_json_escape)" \
+        "$key" \
+        "$(printf '%s' "$value" | ops_json_escape)"
+      ;;
+    *)
+      cat "$print_file" | ops_redact_stream
+      ;;
+  esac
+}
+
+latest_task_id() {
+  tasks="$(ops_tasks_dir)"
+  [ -d "$tasks" ] || return 1
+  for task_path in $(ls -1t "$tasks" 2>/dev/null || true); do
+    task_id="$(ops_safe_id "$task_path")"
+    [ -n "$task_id" ] || continue
+    ops_is_sensitive_value "$task_id" && continue
+    [ -d "$tasks/$task_id" ] || continue
+    printf '%s\n' "$task_id"
+    return 0
+  done
+  return 1
+}
+
+print_default_ops_file() {
+  print_name="$1"
+  root="$(ops_root)"
+  mkdir -p "$root"
+  case "$print_name" in
+    status)
+      default_file="$root/status"
+      ;;
+    events)
+      default_file="$root/events"
+      ;;
+    resume_hint|resume-hint)
+      default_file="$root/resume_hint"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  if [ -r "$default_file" ]; then
+    if [ "$json" -eq 1 ]; then
+      value="$(cat "$default_file" | ops_redact_stream)"
+      key="$print_name"
+      [ "$key" = "resume-hint" ] && key="resume_hint"
+      case "$print_name" in
+        status)
+          printf '{"ok":true,"source":"ops","status":"%s"}\n' "$(printf '%s' "$value" | ops_json_escape)"
+          ;;
+        events)
+          printf '{"ok":true,"source":"ops","events":"%s"}\n' "$(printf '%s' "$value" | ops_json_escape)"
+          ;;
+        *)
+          printf '{"ok":true,"source":"ops","%s":"%s"}\n' "$key" "$(printf '%s' "$value" | ops_json_escape)"
+          ;;
+      esac
+    else
+      cat "$default_file" | ops_redact_stream
+    fi
+    return 0
+  fi
+
+  task_id="$(latest_task_id 2>/dev/null || true)"
+  if [ -n "$task_id" ]; then
+    print_task_file "$task_id" "$print_name"
+    return $?
+  fi
+
+  if [ "$json" -eq 1 ]; then
+    key="$print_name"
+    [ "$key" = "resume-hint" ] && key="resume_hint"
+    printf '{"ok":true,"source":"ops","state":"empty","%s":""}\n' "$key"
+  else
+    case "$print_name" in
+      status) printf 'state=empty\n' ;;
+      events) : ;;
+      *) printf '没有可续连任务；可先运行 codex-doctor 或 codex-clean scan\n' ;;
+    esac
+  fi
+}
+
+case "$cmd" in
+  doctor)
+    prefix="$(ops_prefix)"
+    root="$(ops_root)"
+    tasks="$(ops_tasks_dir)"
+    trash="$(ops_trash_dir)"
+    mkdir -p "$tasks" "$trash"
+    writable=true
+    test_file="$root/.write-test.$$"
+    if { : > "$test_file"; } 2>/dev/null; then
+      rm -f "$test_file"
+    else
+      writable=false
+    fi
+    if [ "$json" -eq 1 ]; then
+      printf '{"ok":%s,"prefix":"%s","ops_root":"%s","tasks_dir":"%s","trash_dir":"%s"}\n' \
+        "$writable" \
+        "$(ops_json_string "$prefix")" \
+        "$(ops_json_string "$root")" \
+        "$(ops_json_string "$tasks")" \
+        "$(ops_json_string "$trash")"
+    else
+      printf 'prefix=%s\n' "$(ops_redact_value "$prefix")"
+      printf 'ops_root=%s\n' "$(ops_redact_value "$root")"
+      printf 'tasks_dir=%s\n' "$(ops_redact_value "$tasks")"
+      printf 'trash_dir=%s\n' "$(ops_redact_value "$trash")"
+      printf 'writable=%s\n' "$writable"
+    fi
+    [ "$writable" = true ] || exit 1
+    ;;
+  list)
+    limit=20
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --limit)
+          [ "$#" -ge 2 ] || { usage; exit 2; }
+          limit="$2"
+          shift 2
+          ;;
+        *) usage; exit 2 ;;
+      esac
+    done
+    tasks="$(ops_tasks_dir)"
+    mkdir -p "$tasks"
+    if [ "$json" -eq 1 ]; then
+      printf '{"ok":true,"tasks":['
+      count=0
+      first=1
+      for task_path in $(ls -1t "$tasks" 2>/dev/null | sed -n "1,${limit}p"); do
+        task_id="$(ops_safe_id "$task_path")"
+        [ -n "$task_id" ] || continue
+        ops_is_sensitive_value "$task_id" && continue
+        status_file="$tasks/$task_id/status"
+        state="$(ops_status_value "$status_file" state 2>/dev/null || printf '')"
+        action="$(ops_status_value "$status_file" action 2>/dev/null || printf '')"
+        updated_at="$(ops_status_value "$status_file" updated_at 2>/dev/null || printf '')"
+        if [ "$first" -eq 1 ]; then first=0; else printf ','; fi
+        printf '{"task_id":"%s","state":"%s","action":"%s","updated_at":"%s"}' \
+          "$(printf '%s' "$task_id" | ops_json_escape)" \
+          "$(printf '%s' "$state" | ops_json_escape)" \
+          "$(printf '%s' "$action" | ops_json_escape)" \
+          "$(printf '%s' "$updated_at" | ops_json_escape)"
+        count=$((count + 1))
+      done
+      printf '],"count":%s}\n' "$count"
+    else
+      count=0
+      for task_path in $(ls -1t "$tasks" 2>/dev/null || true); do
+        task_id="$(ops_safe_id "$task_path")"
+        [ -n "$task_id" ] || continue
+        ops_is_sensitive_value "$task_id" && continue
+        printf '%s\n' "$task_id"
+        count=$((count + 1))
+        [ "$count" -ge "$limit" ] && break
+      done
+    fi
+    ;;
+  status)
+    if [ "$#" -eq 0 ]; then
+      print_default_ops_file status
+    elif [ "$#" -eq 1 ]; then
+      print_task_file "$1" status
+    else
+      usage; exit 2
+    fi
+    ;;
+  events)
+    if [ "$#" -eq 0 ]; then
+      print_default_ops_file events
+    elif [ "$#" -eq 1 ]; then
+      print_task_file "$1" events
+    else
+      usage; exit 2
+    fi
+    ;;
+  summary)
+    [ "$#" -eq 1 ] || { usage; exit 2; }
+    print_task_file "$1" summary
+    ;;
+  resume-hint|resume_hint)
+    if [ "$#" -eq 0 ]; then
+      print_default_ops_file resume_hint
+    elif [ "$#" -eq 1 ]; then
+      print_task_file "$1" resume_hint
+    else
+      usage; exit 2
+    fi
+    ;;
+  path)
+    [ "$#" -eq 1 ] || { usage; exit 2; }
+      task_id="$(ops_require_task_id "$1")" || exit 2
+    task_dir="$(ops_task_path "$task_id")" || exit 1
+    if [ "$json" -eq 1 ]; then
+      printf '{"ok":true,"task_id":"%s","task_dir":"%s"}\n' \
+        "$(printf '%s' "$task_id" | ops_json_escape)" \
+        "$(ops_json_string "$task_dir")"
+    else
+      printf '%s\n' "$(ops_redact_value "$task_dir")"
+    fi
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac

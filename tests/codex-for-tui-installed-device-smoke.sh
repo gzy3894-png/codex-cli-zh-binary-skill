@@ -104,7 +104,7 @@ printf 'prefix=%s\n' "$prefix"
 
 for cmd in \
   codex codex-update codex-local codex-browser codex-preview codex-panel \
-  codex-session codex-rtk codex-context
+  codex-session codex-rtk codex-context codex-doctor codex-clean codex-ops
 do
   need_cmd "$cmd"
   printf 'cmd_%s=%s\n' "$cmd" "$(command -v "$cmd")"
@@ -152,6 +152,26 @@ cleanup() {
   rm -rf "$tmp"
 }
 trap cleanup EXIT INT TERM
+
+doctor_json="$(codex-doctor --json 2>&1)" || fail "codex-doctor --json failed"
+assert_contains "$doctor_json" '"ok":true' "codex-doctor json"
+codex-ops status >/dev/null || fail "codex-ops status failed"
+codex-ops events >/dev/null || fail "codex-ops events failed"
+codex-ops resume-hint >/dev/null || fail "codex-ops resume-hint failed"
+
+clean_probe="$tmp/codex-clean-probe.tmp"
+printf 'installed clean probe\n' > "$clean_probe"
+clean_scan="$(codex-clean scan --path "$tmp" --all-ages 2>&1)" || fail "codex-clean scan failed"
+clean_scan_id="$(printf '%s\n' "$clean_scan" | sed -n 's/^task_id=//p' | sed -n '1p')"
+[ -n "$clean_scan_id" ] || fail "codex-clean scan missing task_id"
+[ -s "$clean_probe" ] || fail "codex-clean scan moved probe"
+clean_apply="$(codex-clean apply "$clean_scan_id" 2>&1)" || fail "codex-clean apply failed"
+clean_apply_id="$(printf '%s\n' "$clean_apply" | sed -n 's/^task_id=//p' | sed -n '1p')"
+[ -n "$clean_apply_id" ] || fail "codex-clean apply missing task_id"
+[ ! -e "$clean_probe" ] || fail "codex-clean apply did not move probe"
+codex-clean restore "$clean_apply_id" >/dev/null || fail "codex-clean restore failed"
+[ -s "$clean_probe" ] || fail "codex-clean restore did not restore probe"
+printf 'ops_clean_task=%s/%s\n' "$clean_scan_id" "$clean_apply_id"
 
 png="$tmp/tiny.png"
 write_tiny_png "$png"

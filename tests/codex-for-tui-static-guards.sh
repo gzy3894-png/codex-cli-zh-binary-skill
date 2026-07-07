@@ -20,8 +20,13 @@ PANEL_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-panel"
 SESSION_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-session"
 RTK_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-rtk"
 CONTEXT_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-context"
+DOCTOR_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-doctor"
+CLEAN_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-clean"
+OPS_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-ops"
+OPS_LIB_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-ops-lib"
 BROWSER_SMOKE="$ROOT_DIR/tests/codex-for-tui-browser-smoke.sh"
 INSTALLED_DEVICE_SMOKE="$ROOT_DIR/tests/codex-for-tui-installed-device-smoke.sh"
+OPS_SMOKE="$ROOT_DIR/tests/codex-for-tui-ops-smoke.sh"
 TERMINAL_TOP_BAR="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalTopBar.kt"
 TERMINAL_SCREEN="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalScreen.kt"
 MEDIA_PREVIEW_PANE="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MediaPreviewPane.kt"
@@ -56,6 +61,11 @@ assert_file_not_contains() {
   fi
 }
 
+assert_nonempty_file() {
+  file="$1"
+  [ -s "$file" ] || fail "expected non-empty file: $file"
+}
+
 run_step() {
   name="$1"
   printf 'RUN %s\n' "$name"
@@ -78,13 +88,13 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 43'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.0"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 44'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.1"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.0'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.1'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -204,6 +214,11 @@ test_terminal_performance_guards() {
   assert_file_contains "$MAIN_ACTIVITY" 'coalesced_requests='
   assert_file_contains "$MAIN_ACTIVITY" 'burst_mode='
   assert_file_contains "$MAIN_ACTIVITY" 'last_frame_ms='
+  assert_file_contains "$MAIN_ACTIVITY" 'avg_frame_ms='
+  assert_file_contains "$MAIN_ACTIVITY" 'max_frame_ms='
+  assert_file_contains "$MAIN_ACTIVITY" 'slow_frames_16ms='
+  assert_file_contains "$MAIN_ACTIVITY" 'slow_frames_32ms='
+  assert_file_contains "$MAIN_ACTIVITY" 'recent_render_requests='
   assert_file_contains "$MAIN_ACTIVITY" 'bridge_mode='
   assert_file_contains "$TERMINAL_VIEW_MODEL" 'if (browserSnapshotState.value != value)'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'if (snapshot == latestSnapshot) return'
@@ -396,6 +411,33 @@ test_image_preview_bridge_asset() {
     fail "codex-preview result should be safe without result file"
   fi
   rm -rf "$tmp"
+}
+
+test_codex_ops_tool_assets() {
+  for tool in "$DOCTOR_ASSET" "$CLEAN_ASSET" "$OPS_ASSET" "$OPS_LIB_ASSET"; do
+    assert_nonempty_file "$tool"
+    sh -n "$tool" || fail "$(basename "$tool") shell syntax failed"
+  done
+  sh -n "$OPS_SMOKE" || fail "ops smoke shell syntax failed"
+
+  assert_file_contains "$MKSESSION" '"codex-doctor" to "codex-doctor"'
+  assert_file_contains "$MKSESSION" '"codex-clean" to "codex-clean"'
+  assert_file_contains "$MKSESSION" '"codex-ops" to "codex-ops"'
+  assert_file_contains "$MKSESSION" '"codex-ops-lib" to "codex-ops-lib"'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-common.sh" 'codex-doctor'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-common.sh" 'codex-clean'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-common.sh" 'codex-ops'
+
+  assert_file_contains "$CLEAN_ASSET" 'scan'
+  assert_file_contains "$CLEAN_ASSET" 'apply'
+  assert_file_contains "$CLEAN_ASSET" 'restore'
+  assert_file_contains "$CLEAN_ASSET" 'trash'
+  assert_file_contains "$OPS_ASSET" 'status'
+  assert_file_contains "$OPS_ASSET" 'events'
+  assert_file_contains "$OPS_ASSET" 'resume_hint'
+  assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'codex-doctor'
+  assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'codex-clean'
+  assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'codex-ops'
 }
 
 test_browser_bridge_asset() {
@@ -1135,6 +1177,9 @@ test_update_apply_installs_self_test_script_and_aliases() {
   [ -x "$tmp/bin/codex-session" ] || fail "codex-session bridge wrapper was not installed by update"
   [ -x "$tmp/bin/codex-rtk" ] || fail "codex-rtk bridge wrapper was not installed by update"
   [ -x "$tmp/bin/codex-context" ] || fail "codex-context bridge wrapper was not installed by update"
+  [ -x "$tmp/bin/codex-doctor" ] || fail "codex-doctor bridge wrapper was not installed by update"
+  [ -x "$tmp/bin/codex-clean" ] || fail "codex-clean bridge wrapper was not installed by update"
+  [ -x "$tmp/bin/codex-ops" ] || fail "codex-ops bridge wrapper was not installed by update"
   assert_file_contains "$tmp/stdout" "已更新：codex-for-tui-self-test.sh"
   rm -rf "$tmp"
 }
@@ -1211,6 +1256,7 @@ run_step test_release_workflow_signature_gate
 run_step test_android_security_guards
 run_step test_terminal_performance_guards
 run_step test_image_preview_bridge_asset
+run_step test_codex_ops_tool_assets
 run_step test_browser_bridge_asset
 run_step test_browser_background_asset
 run_step test_agent_panel_bridge_asset

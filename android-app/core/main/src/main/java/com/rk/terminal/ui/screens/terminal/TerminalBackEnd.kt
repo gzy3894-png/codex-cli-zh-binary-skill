@@ -33,43 +33,178 @@ object TerminalRenderPerformanceMetrics {
         val renderFrames: Long,
         val coalescedRequests: Long,
         val burstMode: Boolean,
-        val lastFrameMs: Long
-    )
+        val lastFrameMs: Long,
+        val avgFrameMs: Long,
+        val maxFrameMs: Long,
+        val lastRequestMs: Long,
+        val lastRequestAgeMs: Long,
+        val lastRequestToFrameMs: Long,
+        val inputEvents: Long,
+        val lastInputMs: Long,
+        val lastInputAgeMs: Long,
+        val recentWindowMs: Long,
+        val recentWindowAgeMs: Long,
+        val recentInputEvents: Long,
+        val recentRenderRequests: Long,
+        val recentCoalescedRequests: Long,
+        val slowFrames16Ms: Long,
+        val slowFrames32Ms: Long
+    ) {
+        constructor(
+            renderRequests: Long,
+            renderFrames: Long,
+            coalescedRequests: Long,
+            burstMode: Boolean,
+            lastFrameMs: Long
+        ) : this(
+            renderRequests = renderRequests,
+            renderFrames = renderFrames,
+            coalescedRequests = coalescedRequests,
+            burstMode = burstMode,
+            lastFrameMs = lastFrameMs,
+            avgFrameMs = lastFrameMs,
+            maxFrameMs = lastFrameMs,
+            lastRequestMs = 0L,
+            lastRequestAgeMs = UNKNOWN_AGE_MS,
+            lastRequestToFrameMs = UNKNOWN_AGE_MS,
+            inputEvents = 0L,
+            lastInputMs = 0L,
+            lastInputAgeMs = UNKNOWN_AGE_MS,
+            recentWindowMs = RECENT_WINDOW_MS,
+            recentWindowAgeMs = 0L,
+            recentInputEvents = 0L,
+            recentRenderRequests = 0L,
+            recentCoalescedRequests = 0L,
+            slowFrames16Ms = 0L,
+            slowFrames32Ms = 0L
+        )
+    }
 
     private val lock = Any()
     private var renderRequests = 0L
     private var renderFrames = 0L
     private var coalescedRequests = 0L
+    private var inputEvents = 0L
     private var burstMode = false
     private var lastFrameMs = 0L
+    private var totalFrameMs = 0L
+    private var maxFrameMs = 0L
+    private var slowFrames16Ms = 0L
+    private var slowFrames32Ms = 0L
+    private var lastRequestMs = 0L
+    private var lastInputMs = 0L
+    private var lastRequestToFrameMs = UNKNOWN_AGE_MS
+    private var recentWindowStartedMs = 0L
+    private var recentInputEvents = 0L
+    private var recentRenderRequests = 0L
+    private var recentCoalescedRequests = 0L
 
     fun recordRequest(coalesced: Boolean) {
+        val now = SystemClock.uptimeMillis()
         synchronized(lock) {
+            rotateRecentWindowLocked(now)
             renderRequests += 1
+            recentRenderRequests += 1
+            lastRequestMs = now
             if (coalesced) {
                 coalescedRequests += 1
+                recentCoalescedRequests += 1
                 burstMode = true
             }
         }
     }
 
-    fun recordFrame(durationMs: Long, burst: Boolean) {
+    fun recordInput(uptimeMs: Long = SystemClock.uptimeMillis()) {
         synchronized(lock) {
+            rotateRecentWindowLocked(uptimeMs)
+            inputEvents += 1
+            recentInputEvents += 1
+            lastInputMs = uptimeMs
+        }
+    }
+
+    fun recordFrame(durationMs: Long, burst: Boolean) {
+        val now = SystemClock.uptimeMillis()
+        synchronized(lock) {
+            rotateRecentWindowLocked(now)
+            val normalizedDurationMs = durationMs.coerceAtLeast(0L)
             renderFrames += 1
-            lastFrameMs = durationMs.coerceAtLeast(0L)
+            lastFrameMs = normalizedDurationMs
+            totalFrameMs += normalizedDurationMs
+            maxFrameMs = maxOf(maxFrameMs, normalizedDurationMs)
+            if (normalizedDurationMs > FRAME_BUDGET_MS) slowFrames16Ms += 1
+            if (normalizedDurationMs > SLOW_FRAME_MS) slowFrames32Ms += 1
+            lastRequestToFrameMs = ageSinceLocked(now, lastRequestMs)
             burstMode = burst
         }
     }
 
-    fun snapshot(): Snapshot = synchronized(lock) {
-        Snapshot(
-            renderRequests = renderRequests,
-            renderFrames = renderFrames,
-            coalescedRequests = coalescedRequests,
-            burstMode = burstMode,
-            lastFrameMs = lastFrameMs
-        )
+    fun snapshot(): Snapshot {
+        val now = SystemClock.uptimeMillis()
+        return synchronized(lock) {
+            rotateRecentWindowLocked(now)
+            val avgFrameMs = if (renderFrames > 0) {
+                totalFrameMs / renderFrames
+            } else {
+                0L
+            }
+            val lastRequestAgeMs = ageSinceLocked(now, lastRequestMs)
+            val lastInputAgeMs = ageSinceLocked(now, lastInputMs)
+            val recentWindowAgeMs = if (recentWindowStartedMs > 0L) {
+                (now - recentWindowStartedMs).coerceAtLeast(0L)
+            } else {
+                0L
+            }
+            Snapshot(
+                renderRequests = renderRequests,
+                renderFrames = renderFrames,
+                coalescedRequests = coalescedRequests,
+                burstMode = burstMode,
+                lastFrameMs = lastFrameMs,
+                avgFrameMs = avgFrameMs,
+                maxFrameMs = maxFrameMs,
+                lastRequestMs = lastRequestMs,
+                lastRequestAgeMs = lastRequestAgeMs,
+                lastRequestToFrameMs = lastRequestToFrameMs,
+                inputEvents = inputEvents,
+                lastInputMs = lastInputMs,
+                lastInputAgeMs = lastInputAgeMs,
+                recentWindowMs = RECENT_WINDOW_MS,
+                recentWindowAgeMs = recentWindowAgeMs,
+                recentInputEvents = recentInputEvents,
+                recentRenderRequests = recentRenderRequests,
+                recentCoalescedRequests = recentCoalescedRequests,
+                slowFrames16Ms = slowFrames16Ms,
+                slowFrames32Ms = slowFrames32Ms
+            )
+        }
     }
+
+    private fun rotateRecentWindowLocked(now: Long) {
+        if (recentWindowStartedMs <= 0L) {
+            recentWindowStartedMs = now
+            return
+        }
+        if (now - recentWindowStartedMs > RECENT_WINDOW_MS) {
+            recentWindowStartedMs = now
+            recentInputEvents = 0L
+            recentRenderRequests = 0L
+            recentCoalescedRequests = 0L
+        }
+    }
+
+    private fun ageSinceLocked(now: Long, uptimeMs: Long): Long {
+        return if (uptimeMs > 0L) {
+            (now - uptimeMs).coerceAtLeast(0L)
+        } else {
+            UNKNOWN_AGE_MS
+        }
+    }
+
+    private const val RECENT_WINDOW_MS = 2_000L
+    private const val FRAME_BUDGET_MS = 16L
+    private const val SLOW_FRAME_MS = 32L
+    private const val UNKNOWN_AGE_MS = -1L
 }
 
 class TerminalBackEnd(
@@ -250,6 +385,7 @@ class TerminalBackEnd(
 
     private fun noteUserInput() {
         lastUserInputUptimeMs = SystemClock.uptimeMillis()
+        TerminalRenderPerformanceMetrics.recordInput(lastUserInputUptimeMs)
     }
 
     private fun isRecentUserInput(): Boolean =

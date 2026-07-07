@@ -1,0 +1,613 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd || printf '.')"
+# shellcheck disable=SC1090
+. "$SCRIPT_DIR/codex-ops-lib"
+
+usage() {
+  cat >&2 <<'EOF'
+用法:
+  codex-clean [--json] scan [--task-id TASK_ID] [--path PATH] [--older-than-days N] [--all-ages] [--include-ops-tasks]
+  codex-clean [--json] apply [SCAN_TASK_ID|--all] [--yes] [--task-id TASK_ID]
+  codex-clean [--json] restore [APPLY_TASK_ID|--latest] [--task-id TASK_ID]
+  codex-clean [--json] purge APPLY_TASK_ID --yes [--task-id TASK_ID]
+  codex-clean [--json] list-trash
+  codex-clean status|events|summary|resume-hint TASK_ID
+
+安全约定:
+  scan 只扫描并写 manifest，不移动/删除。
+  apply 只移动到 $PREFIX/local/ops/trash/<task_id>/，不永久删除。
+  restore 从 trash 恢复；若原路径已存在，会恢复到旁路文件名避免覆盖。
+  purge 才永久删除 trash/<task_id>/，且必须显式传 --yes。
+EOF
+}
+
+json=0
+task_id=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --json) json=1; shift ;;
+    --task-id)
+      [ "$#" -ge 2 ] || { usage; exit 2; }
+      task_id="$2"
+      shift 2
+      ;;
+    --help|-h|help) usage; exit 0 ;;
+    *) break ;;
+  esac
+done
+
+cmd="${1:-scan}"
+[ "$#" -eq 0 ] || shift
+
+case "$cmd" in
+  status|events|summary|resume-hint|resume_hint)
+    [ "$#" -eq 1 ] || { usage; exit 2; }
+    file_name="$cmd"
+    [ "$file_name" = "resume-hint" ] && file_name="resume_hint"
+    ops_cat_task_file "$1" "$file_name" || exit 1
+    exit 0
+    ;;
+esac
+
+json_bool() {
+  if [ "$1" -eq 0 ]; then printf 'false'; else printf 'true'; fi
+}
+
+clean_task_json_prefix() {
+  printf '"task_id":"%s","task_dir":"%s"' \
+    "$(printf '%s' "$OPS_TASK_ID" | ops_json_escape)" \
+    "$(ops_json_string "$OPS_TASK_DIR")"
+}
+
+clean_fail() {
+  clean_fail_message="$1"
+  clean_fail_hint="${2:-查看用法：codex-clean --help}"
+  if [ -n "${OPS_TASK_DIR:-}" ]; then
+    ops_task_finish failed "$clean_fail_message" "$clean_fail_hint"
+  fi
+  if [ "$json" -eq 1 ]; then
+    if [ -n "${OPS_TASK_ID:-}" ]; then
+      printf '{"ok":false,%s,"error":"%s","resume_hint":"%s"}\n' \
+        "$(clean_task_json_prefix)" \
+        "$(ops_json_string "$clean_fail_message")" \
+        "$(ops_json_string "$clean_fail_hint")"
+    else
+      printf '{"ok":false,"error":"%s","resume_hint":"%s"}\n' \
+        "$(ops_json_string "$clean_fail_message")" \
+        "$(ops_json_string "$clean_fail_hint")"
+    fi
+  else
+    printf '%s\n' "$(ops_redact_value "$clean_fail_message")" >&2
+    printf '%s\n' "$(ops_redact_value "$clean_fail_hint")" >&2
+  fi
+  exit 1
+}
+
+clean_is_under_trash() {
+  clean_under_path="$1"
+  clean_under_trash="$(ops_trash_dir)"
+  case "$clean_under_path" in
+    "$clean_under_trash"|"$clean_under_trash"/*) return 0 ;;
+  esac
+  return 1
+}
+
+clean_forbidden_path() {
+  clean_forbid_path="$1"
+  [ -n "$clean_forbid_path" ] || return 0
+  case "$clean_forbid_path" in
+    /|.|..|*/../*|*/..|../*) return 0 ;;
+  esac
+  clean_prefix="$(ops_prefix)"
+  clean_root="$(ops_root)"
+  case "$clean_forbid_path" in
+    "$clean_prefix"|"$clean_prefix/"|"$clean_root"|"$clean_root/"|"$OPS_TASK_DIR"|"$OPS_TASK_DIR"/*)
+      return 0
+      ;;
+  esac
+  clean_is_under_trash "$clean_forbid_path" && return 0
+  ops_is_sensitive_value "$clean_forbid_path" && return 0
+  return 1
+}
+
+clean_path_old_enough() {
+  clean_age_path="$1"
+  if [ "$clean_all_ages" -eq 1 ]; then
+    return 0
+  fi
+  find "$clean_age_path" -prune -mtime +"$clean_older_days" -print 2>/dev/null | grep . >/dev/null 2>&1
+}
+
+clean_add_candidate() {
+  clean_candidate_path="$1"
+  clean_candidate_reason="$2"
+  [ -e "$clean_candidate_path" ] || return 0
+  if clean_forbidden_path "$clean_candidate_path"; then
+    ops_event warn "跳过敏感或受保护路径"
+    return 0
+  fi
+  clean_path_old_enough "$clean_candidate_path" || return 0
+  if awk -v p="$clean_candidate_path" 'BEGIN { FS = "\t" } $2 == p { found = 1; exit } END { exit found ? 0 : 1 }' "$manifest_file" 2>/dev/null; then
+    return 0
+  fi
+  if [ -d "$clean_candidate_path" ]; then
+    clean_candidate_type="dir"
+  elif [ -f "$clean_candidate_path" ]; then
+    clean_candidate_type="file"
+  else
+    clean_candidate_type="other"
+  fi
+  clean_candidate_bytes="$(ops_file_size "$clean_candidate_path")"
+  printf '%s\t%s\t%s\t%s\n' "$clean_candidate_type" "$clean_candidate_path" "$clean_candidate_bytes" "$clean_candidate_reason" >> "$manifest_file"
+  scan_count=$((scan_count + 1))
+  scan_bytes=$((scan_bytes + clean_candidate_bytes))
+  ops_event info "scan candidate: $clean_candidate_reason"
+  if [ "$json" -eq 0 ]; then
+    printf '%s\t%s\t%s\n' "$clean_candidate_type" "$clean_candidate_bytes" "$(ops_redact_value "$clean_candidate_path")"
+  fi
+}
+
+clean_scan_patterns() {
+  clean_scan_dir="$1"
+  clean_scan_reason="$2"
+  [ -d "$clean_scan_dir" ] || return 0
+  for clean_pattern in 'codex-*' 'codex.*' '*.tmp' '*.tmp.*' 'tmp.*' '.tmp-*' '*.bak' '*.bak.*'; do
+    for clean_path in "$clean_scan_dir"/$clean_pattern; do
+      [ -e "$clean_path" ] || continue
+      clean_add_candidate "$clean_path" "$clean_scan_reason"
+    done
+  done
+}
+
+clean_print_scan_json() {
+  printf '{"ok":true,%s,"action":"scan","manifest":"%s","candidate_count":%s,"candidate_bytes":%s,"summary":"%s","resume_hint":"%s","candidates":[' \
+    "$(clean_task_json_prefix)" \
+    "$(ops_json_string "$manifest_file")" \
+    "$scan_count" \
+    "$scan_bytes" \
+    "$(printf '%s' "$summary" | ops_json_escape)" \
+    "$(printf '%s' "$resume_hint" | ops_json_escape)"
+  first=1
+  while IFS="$(printf '\t')" read -r item_type item_path item_bytes item_reason; do
+    [ -n "${item_path:-}" ] || continue
+    case "${item_bytes:-0}" in
+      ''|*[!0-9]*) item_bytes=0 ;;
+    esac
+    if [ "$first" -eq 1 ]; then first=0; else printf ','; fi
+    printf '{"type":"%s","path":"%s","bytes":%s,"reason":"%s"}' \
+      "$(printf '%s' "$item_type" | ops_json_escape)" \
+      "$(ops_json_string "$item_path")" \
+      "${item_bytes:-0}" \
+      "$(ops_json_string "$item_reason")"
+  done < "$manifest_file"
+  printf ']}\n'
+}
+
+clean_latest_task_by_action() {
+  clean_latest_action="$1"
+  clean_latest_tasks="$(ops_tasks_dir)"
+  [ -d "$clean_latest_tasks" ] || return 1
+  for clean_latest_entry in $(ls -1t "$clean_latest_tasks" 2>/dev/null || true); do
+    clean_latest_id="$(ops_safe_id "$clean_latest_entry")"
+    [ -n "$clean_latest_id" ] || continue
+    ops_is_sensitive_value "$clean_latest_id" && continue
+    clean_latest_status="$clean_latest_tasks/$clean_latest_id/status"
+    [ -r "$clean_latest_status" ] || continue
+    clean_latest_component="$(ops_status_value "$clean_latest_status" component 2>/dev/null || printf '')"
+    clean_latest_status_action="$(ops_status_value "$clean_latest_status" action 2>/dev/null || printf '')"
+    if [ "$clean_latest_component" = "codex-clean" ] && [ "$clean_latest_status_action" = "$clean_latest_action" ]; then
+      printf '%s\n' "$clean_latest_id"
+      return 0
+    fi
+  done
+  return 1
+}
+
+clean_latest_trash_id() {
+  clean_latest_trash_root="$(ops_trash_dir)"
+  [ -d "$clean_latest_trash_root" ] || return 1
+  for clean_latest_trash_entry in $(ls -1t "$clean_latest_trash_root" 2>/dev/null || true); do
+    clean_latest_trash_id="$(ops_safe_id "$clean_latest_trash_entry")"
+    [ -n "$clean_latest_trash_id" ] || continue
+    ops_is_sensitive_value "$clean_latest_trash_id" && continue
+    [ -d "$clean_latest_trash_root/$clean_latest_trash_id" ] || continue
+    printf '%s\n' "$clean_latest_trash_id"
+    return 0
+  done
+  return 1
+}
+
+clean_scan_all_files_in_dir() {
+  clean_scan_all_dir="$1"
+  clean_scan_all_reason="$2"
+  [ -d "$clean_scan_all_dir" ] || return 0
+  for clean_scan_all_path in "$clean_scan_all_dir"/*; do
+    [ -e "$clean_scan_all_path" ] || continue
+    clean_add_candidate "$clean_scan_all_path" "$clean_scan_all_reason"
+  done
+}
+
+case "$cmd" in
+  scan)
+    clean_older_days=7
+    clean_all_ages=0
+    include_ops_tasks=0
+    scan_paths_list=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --json) json=1; shift ;;
+        --task-id)
+          [ "$#" -ge 2 ] || { usage; exit 2; }
+          task_id="$2"
+          shift 2
+          ;;
+        --path)
+          [ "$#" -ge 2 ] || { usage; exit 2; }
+          if [ -z "$scan_paths_list" ]; then
+            scan_paths_list="$2"
+          else
+            scan_paths_list="$scan_paths_list
+$2"
+          fi
+          shift 2
+          ;;
+        --older-than-days)
+          [ "$#" -ge 2 ] || { usage; exit 2; }
+          clean_older_days="$2"
+          shift 2
+          ;;
+        --all-ages)
+          clean_all_ages=1
+          shift
+          ;;
+        --include-ops-tasks)
+          include_ops_tasks=1
+          shift
+          ;;
+        *) usage; exit 2 ;;
+      esac
+    done
+    ops_task_init "codex-clean" "scan" "$task_id"
+    paths_file="$OPS_TASK_DIR/scan-paths"
+    : > "$paths_file"
+    if [ -n "$scan_paths_list" ]; then
+      printf '%s\n' "$scan_paths_list" > "$paths_file"
+    fi
+    case "$clean_older_days" in
+      ''|*[!0-9]*) clean_fail "older-than-days 必须是非负整数" ;;
+    esac
+    manifest_file="$OPS_TASK_DIR/manifest.tsv"
+    : > "$manifest_file"
+    scan_count=0
+    scan_bytes=0
+    if [ "$json" -eq 0 ]; then
+      printf 'type\tbytes\tpath\n'
+    fi
+    if [ -s "$paths_file" ]; then
+      while IFS= read -r scan_root; do
+        [ -n "$scan_root" ] || continue
+        clean_scan_patterns "$scan_root" "explicit_path_temp"
+      done < "$paths_file"
+    else
+      clean_scan_patterns "$(ops_prefix)/tmp" "prefix_tmp"
+      clean_scan_patterns "$(ops_prefix)/local/tmp" "prefix_local_tmp"
+      clean_scan_all_files_in_dir "$(ops_prefix)/local/media-preview/files" "media_preview_cache"
+      clean_scan_all_files_in_dir "$(ops_prefix)/local/browser/results" "browser_request_results"
+      clean_scan_all_files_in_dir "$(ops_prefix)/local/browser/request-results" "browser_request_results"
+      clean_scan_all_files_in_dir "$(ops_prefix)/local/browser/logs" "browser_logs"
+    fi
+    if [ "$include_ops_tasks" -eq 1 ]; then
+      tasks_dir="$(ops_tasks_dir)"
+      if [ -d "$tasks_dir" ]; then
+        for old_task in "$tasks_dir"/*; do
+          [ -d "$old_task" ] || continue
+          [ "$old_task" = "$OPS_TASK_DIR" ] && continue
+          clean_add_candidate "$old_task" "old_ops_task"
+        done
+      fi
+    fi
+    summary="clean scan 完成：发现 $scan_count 个候选项，约 $scan_bytes bytes；未移动或删除任何文件。"
+    if [ "$scan_count" -gt 0 ]; then
+      resume_hint="确认 manifest 后执行：codex-clean apply $OPS_TASK_ID；移动后可用 codex-clean restore <apply_task_id> 恢复"
+    else
+      resume_hint="没有可清理候选项；可用 --path PATH 或 --include-ops-tasks 扩大扫描范围"
+    fi
+    ops_task_finish success "$summary" "$resume_hint"
+    if [ "$json" -eq 1 ]; then
+      clean_print_scan_json | tee "$OPS_TASK_DIR/result.json"
+    else
+      printf '%s\n' "$summary"
+      printf 'task_id=%s\n' "$OPS_TASK_ID"
+      printf 'resume_hint=%s\n' "$resume_hint"
+    fi
+    ;;
+  apply)
+    scan_task_id=""
+    apply_all=0
+    apply_yes=0
+    if [ "$#" -gt 0 ]; then
+      case "$1" in
+        --all)
+          apply_all=1
+          shift
+          ;;
+        --yes)
+          apply_yes=1
+          shift
+          ;;
+        --*)
+          ;;
+        *)
+          scan_task_id="$(ops_safe_id "$1")"
+          shift
+          ;;
+      esac
+    fi
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --json) json=1; shift ;;
+        --all) apply_all=1; shift ;;
+        --yes) apply_yes=1; shift ;;
+        --task-id)
+          [ "$#" -ge 2 ] || { usage; exit 2; }
+          task_id="$2"
+          shift 2
+          ;;
+        *) usage; exit 2 ;;
+      esac
+    done
+    if [ -z "$scan_task_id" ] && [ "$apply_all" -eq 1 ]; then
+      scan_task_id="$(clean_latest_task_by_action scan 2>/dev/null || true)"
+    fi
+    case "$scan_task_id" in
+      ''|.|..) clean_fail "无效 scan task_id" ;;
+    esac
+    ops_is_sensitive_value "$scan_task_id" && clean_fail "无效 scan task_id"
+    ops_task_init "codex-clean" "apply" "$task_id"
+    source_manifest="$(ops_tasks_dir)/$scan_task_id/manifest.tsv"
+    [ -r "$source_manifest" ] || clean_fail "找不到 scan manifest：$scan_task_id" "先运行 codex-clean scan --json"
+    trash_dir="$(ops_trash_dir)/$OPS_TASK_ID"
+    items_dir="$trash_dir/items"
+    mkdir -p "$items_dir"
+    cp "$source_manifest" "$OPS_TASK_DIR/manifest.tsv"
+    cp "$source_manifest" "$trash_dir/scan-manifest.tsv"
+    moves_file="$OPS_TASK_DIR/moves.tsv"
+    trash_moves="$trash_dir/moves.tsv"
+    : > "$moves_file"
+    moved_count=0
+    skipped_count=0
+    moved_bytes=0
+    index=0
+    while IFS="$(printf '\t')" read -r item_type item_path item_bytes item_reason; do
+      [ -n "${item_path:-}" ] || continue
+      case "${item_bytes:-0}" in
+        ''|*[!0-9]*) item_bytes=0 ;;
+      esac
+      index=$((index + 1))
+      if clean_forbidden_path "$item_path" || [ ! -e "$item_path" ]; then
+        skipped_count=$((skipped_count + 1))
+        ops_event warn "apply skipped protected/missing candidate"
+        continue
+      fi
+      item_name="$(printf '%06d' "$index" 2>/dev/null || printf '%s' "$index")"
+      item_base="$(basename -- "$item_path" 2>/dev/null || printf 'item')"
+      case "$item_base" in
+        ''|.|..) item_base="item" ;;
+      esac
+      trash_item="$items_dir/$item_name/$item_base"
+      mkdir -p "$(dirname -- "$trash_item" 2>/dev/null || printf "$items_dir/$item_name")"
+      if mv "$item_path" "$trash_item" 2>/dev/null; then
+        printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$index" "$item_path" "$trash_item" "$item_type" "${item_bytes:-0}" "$item_reason" >> "$moves_file"
+        moved_count=$((moved_count + 1))
+        moved_bytes=$((moved_bytes + ${item_bytes:-0}))
+        ops_event info "moved candidate to trash"
+      else
+        skipped_count=$((skipped_count + 1))
+        ops_event warn "apply failed to move candidate"
+      fi
+    done < "$source_manifest"
+    cp "$moves_file" "$trash_moves"
+    summary="clean apply 完成：移动 $moved_count 个候选项到 trash/$OPS_TASK_ID，跳过 $skipped_count 个，约 $moved_bytes bytes；未永久删除。"
+    resume_hint="恢复：codex-clean restore $OPS_TASK_ID；确认不需要后永久删除：codex-clean purge $OPS_TASK_ID --yes"
+    ops_task_finish success "$summary" "$resume_hint"
+    if [ "$json" -eq 1 ]; then
+      {
+        printf '{"ok":true,%s,"action":"apply","source_scan_task_id":"%s","trash_dir":"%s","moved_count":%s,"skipped_count":%s,"moved_bytes":%s,"summary":"%s","resume_hint":"%s"}\n' \
+          "$(clean_task_json_prefix)" \
+          "$(printf '%s' "$scan_task_id" | ops_json_escape)" \
+          "$(ops_json_string "$trash_dir")" \
+          "$moved_count" "$skipped_count" "$moved_bytes" \
+          "$(printf '%s' "$summary" | ops_json_escape)" \
+          "$(printf '%s' "$resume_hint" | ops_json_escape)"
+      } | tee "$OPS_TASK_DIR/result.json"
+    else
+      printf '%s\n' "$summary"
+      printf 'task_id=%s\n' "$OPS_TASK_ID"
+      printf 'resume_hint=%s\n' "$resume_hint"
+    fi
+    ;;
+  restore)
+    apply_task_id=""
+    if [ "$#" -gt 0 ]; then
+      case "$1" in
+        --latest|latest)
+          apply_task_id="$(clean_latest_trash_id 2>/dev/null || true)"
+          shift
+          ;;
+        --*)
+          ;;
+        *)
+          apply_task_id="$(ops_safe_id "$1")"
+          shift
+          ;;
+      esac
+    else
+      apply_task_id="$(clean_latest_trash_id 2>/dev/null || true)"
+    fi
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --json) json=1; shift ;;
+        --latest)
+          apply_task_id="$(clean_latest_trash_id 2>/dev/null || true)"
+          shift
+          ;;
+        --task-id)
+          [ "$#" -ge 2 ] || { usage; exit 2; }
+          task_id="$2"
+          shift 2
+          ;;
+        *) usage; exit 2 ;;
+      esac
+    done
+    case "$apply_task_id" in
+      ''|.|..) clean_fail "无效 apply task_id" ;;
+    esac
+    ops_is_sensitive_value "$apply_task_id" && clean_fail "无效 apply task_id"
+    ops_task_init "codex-clean" "restore" "$task_id"
+    trash_dir="$(ops_trash_dir)/$apply_task_id"
+    moves_file="$trash_dir/moves.tsv"
+    [ -r "$moves_file" ] || clean_fail "找不到 trash manifest：$apply_task_id" "确认 apply task_id，或运行 codex-clean list-trash"
+    restored_count=0
+    skipped_count=0
+    collision_count=0
+    stamp="$(date '+%Y%m%d%H%M%S' 2>/dev/null || date '+%s' 2>/dev/null || printf '0')"
+    while IFS="$(printf '\t')" read -r move_index original_path trash_item item_type item_bytes item_reason; do
+      [ -n "${trash_item:-}" ] || continue
+      if [ ! -e "$trash_item" ]; then
+        skipped_count=$((skipped_count + 1))
+        ops_event warn "restore skipped missing trash item"
+        continue
+      fi
+      restore_target="$original_path"
+      if clean_forbidden_path "$restore_target"; then
+        skipped_count=$((skipped_count + 1))
+        ops_event warn "restore skipped protected original path"
+        continue
+      fi
+      if [ -e "$restore_target" ]; then
+        collision_count=$((collision_count + 1))
+        restore_target="${restore_target}.codex-restore-$stamp-$move_index"
+      fi
+      restore_parent="$(dirname -- "$restore_target" 2>/dev/null || printf '.')"
+      mkdir -p "$restore_parent"
+      if mv "$trash_item" "$restore_target" 2>/dev/null; then
+        restored_count=$((restored_count + 1))
+        ops_event info "restored item"
+      else
+        skipped_count=$((skipped_count + 1))
+        ops_event warn "restore failed to move item"
+      fi
+    done < "$moves_file"
+    summary="clean restore 完成：恢复 $restored_count 个，跳过 $skipped_count 个，路径冲突改名 $collision_count 个。"
+    resume_hint="检查恢复结果；确认 trash/$apply_task_id 不再需要后可运行：codex-clean purge $apply_task_id --yes"
+    ops_task_finish success "$summary" "$resume_hint"
+    if [ "$json" -eq 1 ]; then
+      {
+        printf '{"ok":true,%s,"action":"restore","apply_task_id":"%s","restored_count":%s,"skipped_count":%s,"collision_count":%s,"summary":"%s","resume_hint":"%s"}\n' \
+          "$(clean_task_json_prefix)" \
+          "$(printf '%s' "$apply_task_id" | ops_json_escape)" \
+          "$restored_count" "$skipped_count" "$collision_count" \
+          "$(printf '%s' "$summary" | ops_json_escape)" \
+          "$(printf '%s' "$resume_hint" | ops_json_escape)"
+      } | tee "$OPS_TASK_DIR/result.json"
+    else
+      printf '%s\n' "$summary"
+      printf 'task_id=%s\n' "$OPS_TASK_ID"
+      printf 'resume_hint=%s\n' "$resume_hint"
+    fi
+    ;;
+  purge)
+    [ "$#" -ge 1 ] || { usage; exit 2; }
+    apply_task_id="$(ops_safe_id "$1")"
+    shift
+    yes=0
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --json) json=1; shift ;;
+        --task-id)
+          [ "$#" -ge 2 ] || { usage; exit 2; }
+          task_id="$2"
+          shift 2
+          ;;
+        --yes) yes=1; shift ;;
+        *) usage; exit 2 ;;
+      esac
+    done
+    ops_task_init "codex-clean" "purge" "$task_id"
+    case "$apply_task_id" in
+      ''|.|..) clean_fail "无效 apply task_id" ;;
+    esac
+    ops_is_sensitive_value "$apply_task_id" && clean_fail "无效 apply task_id"
+    if [ "$yes" -ne 1 ]; then
+      clean_fail "purge 是永久删除，必须显式传 --yes" "如要恢复先运行：codex-clean restore $apply_task_id"
+    fi
+    trash_root="$(ops_trash_dir)"
+    trash_dir="$trash_root/$apply_task_id"
+    case "$trash_dir" in
+      "$trash_root"/*) ;;
+      *) clean_fail "拒绝 purge 非 trash 路径" ;;
+    esac
+    purged=0
+    if [ -e "$trash_dir" ]; then
+      rm -rf "$trash_dir"
+      purged=1
+    fi
+    summary="clean purge 完成：trash/$apply_task_id 已永久删除状态=$purged。"
+    resume_hint="purge 已完成；如需查看任务记录：codex-ops summary $OPS_TASK_ID"
+    ops_task_finish success "$summary" "$resume_hint"
+    if [ "$json" -eq 1 ]; then
+      {
+        printf '{"ok":true,%s,"action":"purge","apply_task_id":"%s","purged":%s,"summary":"%s","resume_hint":"%s"}\n' \
+          "$(clean_task_json_prefix)" \
+          "$(printf '%s' "$apply_task_id" | ops_json_escape)" \
+          "$(json_bool "$purged")" \
+          "$(printf '%s' "$summary" | ops_json_escape)" \
+          "$(printf '%s' "$resume_hint" | ops_json_escape)"
+      } | tee "$OPS_TASK_DIR/result.json"
+    else
+      printf '%s\n' "$summary"
+      printf 'task_id=%s\n' "$OPS_TASK_ID"
+    fi
+    ;;
+  list-trash)
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --json) json=1; shift ;;
+        *) usage; exit 2 ;;
+      esac
+    done
+    trash_root="$(ops_trash_dir)"
+    mkdir -p "$trash_root"
+    if [ "$json" -eq 1 ]; then
+      printf '{"ok":true,"trash":['
+      first=1
+      count=0
+      for trash_entry in "$trash_root"/*; do
+        [ -d "$trash_entry" ] || continue
+        trash_id="$(basename -- "$trash_entry" 2>/dev/null || printf '')"
+        [ -n "$trash_id" ] || continue
+        ops_is_sensitive_value "$trash_id" && continue
+        if [ "$first" -eq 1 ]; then first=0; else printf ','; fi
+        printf '{"task_id":"%s","trash_dir":"%s"}' \
+          "$(printf '%s' "$trash_id" | ops_json_escape)" \
+          "$(ops_json_string "$trash_entry")"
+        count=$((count + 1))
+      done
+      printf '],"count":%s}\n' "$count"
+    else
+      for trash_entry in "$trash_root"/*; do
+        [ -d "$trash_entry" ] || continue
+        trash_id="$(basename -- "$trash_entry" 2>/dev/null || printf '')"
+        [ -n "$trash_id" ] || continue
+        ops_is_sensitive_value "$trash_id" && continue
+        printf '%s\n' "$trash_id"
+      done
+    fi
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac

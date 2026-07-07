@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.3.0-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.3.0)
+[![Release](https://img.shields.io/badge/release-v2.3.1-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.3.1)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.142.4-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,7 +9,23 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.3.0 更新
+## 重要：2.3.1 更新
+
+2.3.1 是 2.3.0 后的稳定底座版本：新增 `codex-doctor`、`codex-clean`、`codex-ops`，把环境诊断、可回滚清理、运维日志和断线续连提示做成 App 内置命令。新增命令的状态统一落盘到 `$PREFIX/local/ops/tasks/<task_id>/`，包含 `status`、`events`、`summary`、`resume_hint`；输出默认脱敏，不打印 token、cookie、API key 或 `auth.json` 内容。
+
+常用入口：
+
+```sh
+codex-doctor
+codex-clean scan
+codex-clean apply <scan_task_id>
+codex-clean restore <apply_task_id>
+codex-ops status
+codex-ops events
+codex-ops resume-hint
+```
+
+`codex-clean scan` 默认只扫描；`apply` 只移动到 `$PREFIX/local/ops/trash/<task_id>/`，不永久删除；误清理可用 `codex-clean restore <apply_task_id>` 恢复。详细说明见 `docs/codex-for-tui-2.3.1-ops.md`，发布说明见 `docs/codex-for-tui-2.3.1-release-notes.md`。
 
 2.3.0 是 2.2.9 后的稳定化回归版：补齐 `docs/codex-for-tui-2.3.0-regression.md` 和 `tests/codex-for-tui-installed-device-smoke.sh`，把安装/更新/首启、RTK/context、文件托盘、会话折叠、浏览器后台截图、JS、Auth 状态清理和终端性能状态纳入可重复门禁。真机回归时发现 `codex-browser open` 重复打开当前已加载 URL 可能卡到超时并误报 `Page load timed out before userscript completion`，2.3.0 已修复为直接返回当前页面快照；需要强制刷新时仍使用 `codex-browser reload`。
 
@@ -21,7 +37,7 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 内置 WebView 继续作为 Agent Browser，保留后台打开、DOM 读取、点击、输入、JS、截图、多标签、Cookie/WebStorage 持久化和 userscript；遇到验证码/风控/外部 scheme 时会进入明确的用户协作状态，而不是让 Agent 猜。
 
-已经安装 2.0.x/2.1.x/2.2.x 的用户需要从 Releases 下载并覆盖安装 2.3.0 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context` 等 APK 内置桥接命令。
+已经安装 2.0.x/2.1.x/2.2.x/2.3.0 的用户需要从 Releases 下载并覆盖安装 2.3.1 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context`、`codex-doctor`、`codex-clean`、`codex-ops` 等 APK 内置桥接命令。
 
 注意：普通启动按设计不会自动联网更新 `~/.local/share/codex-zh/scripts` 下的安装/配置脚本。已安装用户覆盖 APK 后，为确保 `codex 配置模式` 也切到最新配置管理器，请手动执行一次：
 
@@ -42,6 +58,9 @@ codex 配置模式
 
 ## 2.0 新功能
 
+- 2.3.1 新增：`codex-doctor`、`codex-clean`、`codex-ops`，支持只读诊断、可回滚清理、任务日志和断线续连提示。
+- 2.3.1 加固：files/browser/session/perf 状态补齐 `schema_version`、`timestamp_ms`、`needs_user`、`user_action` 等统一字段，浏览器日志只写脱敏摘要。
+- 2.3.1 优化：终端 perf 状态增加平均/最大帧耗时、慢帧、输入事件和近期合帧计数，便于定位卡顿。
 - 2.3.0 稳定化：新增 2.3 回归清单和已安装真机 smoke，覆盖安装状态、RTK/context、文件托盘、会话折叠、浏览器后台截图/JS/Auth 和终端 perf 状态。
 - 2.3.0 修复：重复 `codex-browser open <当前已加载 URL>` 不再等待新的页面回调直到超时，而是直接返回当前页面，避免稳定化门禁和日常脚本被误判失败。
 - 2.2.9 修复：2.2.8 真机复测仍失败的后台/折叠 WebView 截图空图，capture host 改为挂在 App 内容背后，并增加 `enableSlowWholeDocumentDraw`、等待帧和 WebView `onDraw` 与 DOM 文本兜底。
@@ -97,7 +116,7 @@ codex 配置模式
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.3.0` |
+| Android App | `2.3.1` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug/Test 包名 | `com.gzy3894.codexfortui.test` |
 | Codex CLI | `0.142.4` 中文版 |
