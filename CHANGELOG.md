@@ -1,5 +1,19 @@
 # Changelog
 
+## Codex for TUI 2.3.4
+
+Codex for TUI 2.3.4 是 2.3.3 的状态字段热修版。
+
+### 修复
+
+- `codex-browser open` 成功后，同一个 `request_id` 的 `status/result` 不再被后续 WebView snapshot 回调覆盖成 `action=snapshot`。
+- `codex-browser result <request_id>` 会保留显式动作，例如 `action=navigate`，便于 Agent 稳定判断请求结果。
+
+### 验证与回滚
+
+- 本地只运行 shell/static/smoke 门禁，不本地构建 APK/Gradle；APK、正式签名和 Release 资产只通过 GitHub Actions 构建。
+- Android 不能普通覆盖降级安装；从 2.3.4（`versionCode=47`）回到更低版本需要前滚回滚包，或卸载重装并承担数据迁移/丢失风险。
+
 ## Codex for TUI 2.3.3
 
 Codex for TUI 2.3.3 是 2.3.2 的安装后真机调试热修版，重点修复浏览器导航、事件过滤和开发迁移默认导出稳定性。

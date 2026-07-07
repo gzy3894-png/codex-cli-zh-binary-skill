@@ -1515,12 +1515,45 @@ class MainActivity : ComponentActivity() {
         runCatching {
             val browserDir = localDir().child("browser")
             val requestId = snapshot.requestId.ifBlank { "snapshot-${System.currentTimeMillis()}" }
+            if (shouldSkipTerminalBrowserSnapshotPersist(browserDir, snapshot, requestId)) {
+                return@runCatching
+            }
             val result = JSONObject()
                 .put("ok", true)
                 .put("requestId", requestId)
                 .put("action", "snapshot")
                 .put("snapshot", browserSnapshotJson(snapshot))
             writeBrowserResult(browserDir, result)
+        }
+    }
+
+    private fun shouldSkipTerminalBrowserSnapshotPersist(
+        browserDir: File,
+        snapshot: TerminalBrowserSnapshot,
+        requestId: String
+    ): Boolean {
+        if (requestId.isBlank() || requestId.startsWith("snapshot-")) return false
+        if (snapshot.status !in setOf("done", "ready", "closed", "cancelled", "collapsed", "user_done")) return false
+        return browserResultHasExplicitAction(browserDir, requestId)
+    }
+
+    private fun browserResultHasExplicitAction(browserDir: File, requestId: String): Boolean {
+        val safeId = safeBridgeRequestId(requestId)
+        val candidates = buildList {
+            if (safeId.isNotBlank()) add(browserDir.child("results").child("$safeId.status"))
+            add(browserDir.child("status"))
+        }
+        return candidates.any { file ->
+            runCatching {
+                if (!file.isFile) return@runCatching false
+                file.useLines { lines ->
+                    lines.take(80).mapNotNull { line ->
+                        line.removePrefix("action=").takeIf { it != line }
+                    }.any { action ->
+                        action.isNotBlank() && action != "snapshot"
+                    }
+                }
+            }.getOrDefault(false)
         }
     }
 

@@ -140,15 +140,15 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 46'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.3"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 47'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.4"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "46"'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.3'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "47"'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.4'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -800,6 +800,8 @@ EOF
   assert_file_contains "$MAIN_ACTIVITY" 'mediaPreviewProcessedRequestIds'
   assert_file_contains "$MAIN_ACTIVITY" 'sessionFoldProcessedRequestIds'
   assert_file_contains "$MAIN_ACTIVITY" 'persistBrowserSnapshot(snapshot)'
+  assert_file_contains "$MAIN_ACTIVITY" 'shouldSkipTerminalBrowserSnapshotPersist(browserDir, snapshot, requestId)'
+  assert_file_contains "$MAIN_ACTIVITY" 'browserResultHasExplicitAction(browserDir, requestId)'
   assert_file_contains "$MAIN_ACTIVITY" '.replace("\n", "\\n")'
   assert_file_contains "$MAIN_ACTIVITY" 'runCatching {'
   assert_file_contains "$MAIN_ACTIVITY" 'writeBrowserBridgeError'
