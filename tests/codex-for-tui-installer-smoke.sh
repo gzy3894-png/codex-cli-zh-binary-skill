@@ -330,6 +330,57 @@ EOF
   rm -rf "$tmp"
 }
 
+test_third_party_setup_can_back_out_before_writing() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-setup-back-out.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home"
+
+  set +e
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-config.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_FORCE_STDIN=1
+    codex_config_fetch_models() {
+      fail "backing out from API Base should not fetch models"
+    }
+    printf '%s\n' "b" |
+      codex_config_prompt_third_party >"$tmp/stdout" 2>"$tmp/stderr"
+  )
+  rc=$?
+  set -e
+
+  [ "$rc" -ne 0 ] || fail "third-party setup should return nonzero when user backs out"
+  [ ! -e "$tmp/home/.codex/config.toml" ] || fail "backing out should not write config.toml"
+  [ ! -e "$tmp/home/.codex/auth.json" ] || fail "backing out should not write auth.json"
+  rm -rf "$tmp"
+}
+
+test_model_choice_bad_input_loops_instead_of_defaulting() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-model-bad-input-loop.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home"
+  printf '%s\n' "gpt-5.4" "gpt-5.5" > "$tmp/models.txt"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-config.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_FORCE_STDIN=1
+    printf '%s\n%s\n' "not-a-number" "2" |
+      codex_config_choose_model "$tmp/models.txt" "gpt-5.4" >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || {
+    sed -n '1,200p' "$tmp/stderr" >&2 || true
+    fail "model chooser should accept a later valid choice after bad input"
+  }
+
+  assert_file_contains "$tmp/stdout" "gpt-5.5"
+  assert_file_contains "$tmp/stderr" "请输入有效模型编号"
+  rm -rf "$tmp"
+}
+
 test_edit_current_config_preserves_key_and_writes_full_permission() {
   tmp="${TMPDIR:-/tmp}/codex-tui-test-edit-current-config.$$"
   rm -rf "$tmp"
@@ -493,6 +544,32 @@ test_profile_save_and_use_preserves_official_login_marker() {
   assert_file_contains "$tmp/home/.codex/install-state/official-login-mode" "official-login"
   assert_file_contains "$tmp/home/.codex/config-profiles/official/install-state/official-login-mode" "official-login"
   assert_file_contains "$tmp/home/.codex/config-profiles/current" "official"
+  rm -rf "$tmp"
+}
+
+test_profile_use_without_catalog_removes_stale_home_catalog() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-profile-clear-stale-catalog.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home"
+  printf '%s\n' "gpt-5.5" > "$tmp/models.txt"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-config.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    codex_config_mark_official_mode
+    codex_config_profile_save official
+    codex_config_write_third_party_config "https://api.example.test/v1" "sk-a" "gpt-5.5" "$tmp/models.txt"
+    [ -s "$tmp/home/.codex/model_catalog.json" ] || fail "third-party config should create model catalog"
+    codex_config_profile_use official
+    if codex_config_profile_is_dirty; then
+      fail "official profile should not be dirty after switching back"
+    fi
+  )
+
+  [ ! -e "$tmp/home/.codex/model_catalog.json" ] || fail "switching to profile without catalog should clear stale home catalog"
+  assert_file_contains "$tmp/home/.codex/install-state/official-login-mode" "official-login"
   rm -rf "$tmp"
 }
 
@@ -789,6 +866,61 @@ test_update_check_does_not_modify_installed_scripts() {
   rm -rf "$tmp"
 }
 
+test_update_one_file_check_does_not_create_dest_dirs() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-update-one-dry-run.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home"
+
+  set +e
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-download.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-update.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    codex_download_first_script() {
+      stub_dest="$2"
+      mkdir -p "$(dirname "$stub_dest")"
+      printf 'new body\n' > "$stub_dest"
+      return 0
+    }
+    codex_update_one_file "lib/codex-zh-common.sh" "$tmp/missing-share" 1 >"$tmp/stdout" 2>"$tmp/stderr"
+  )
+  rc=$?
+  set -e
+
+  [ "$rc" -eq 2 ] || fail "single-file update dry-run should report changed with rc=2"
+  [ ! -e "$tmp/missing-share" ] || fail "single-file update dry-run should not create destination root"
+  assert_file_contains "$tmp/stdout" "有更新：lib/codex-zh-common.sh"
+  rm -rf "$tmp"
+}
+
+test_codex_local_status_accepts_official_marker() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-local-status-official.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.codex/install-state" "$tmp/bin"
+  printf '%s\n' "official-login" > "$tmp/home/.codex/install-state/official-login-mode"
+  printf '#!/usr/bin/env sh\nexit 0\n' > "$tmp/bin/codex-zh-bin"
+  printf '#!/usr/bin/env sh\nexit 0\n' > "$tmp/bin/codex"
+  chmod +x "$tmp/bin/codex-zh-bin" "$tmp/bin/codex"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-config.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-local.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_INSTALL_DIR="$tmp/bin"
+    codex_local_status >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || {
+    sed -n '1,120p' "$tmp/stderr" >&2 || true
+    fail "codex local status should accept official login marker"
+  }
+
+  assert_file_not_contains "$tmp/stdout" "missing_config_or_official_login"
+  rm -rf "$tmp"
+}
+
 test_partial_download_failure_is_not_accepted() {
   tmp="${TMPDIR:-/tmp}/codex-tui-test-partial-download.$$"
   rm -rf "$tmp"
@@ -914,11 +1046,14 @@ run_step test_install_scripts_do_not_create_default_agents_md
 run_step test_refresh_models_preserves_current_model_fields
 run_step test_refresh_models_uses_current_provider_base_url
 run_step test_interactive_model_choice_writes_only_model_id
+run_step test_third_party_setup_can_back_out_before_writing
+run_step test_model_choice_bad_input_loops_instead_of_defaulting
 run_step test_edit_current_config_preserves_key_and_writes_full_permission
 run_step test_repair_full_permission_adds_sandbox_mode
 run_step test_model_catalog_uses_current_codex_schema_shapes
 run_step test_profile_save_and_use_switches_only_runtime_config
 run_step test_profile_save_and_use_preserves_official_login_marker
+run_step test_profile_use_without_catalog_removes_stale_home_catalog
 run_step test_profile_use_restores_custom_model_catalog_path
 run_step test_config_menu_can_select_saved_profile
 run_step test_config_menu_new_profile_prompts_and_saves
@@ -928,6 +1063,8 @@ run_step test_config_menu_delete_profile_can_cancel
 run_step test_proot_launcher_preserves_codex_args
 run_step test_update_download_failure_is_error
 run_step test_update_check_does_not_modify_installed_scripts
+run_step test_update_one_file_check_does_not_create_dest_dirs
+run_step test_codex_local_status_accepts_official_marker
 run_step test_partial_download_failure_is_not_accepted
 run_step test_self_test_fails_on_polluted_model_config
 run_step test_no_startup_auto_refresh_symbols_remain

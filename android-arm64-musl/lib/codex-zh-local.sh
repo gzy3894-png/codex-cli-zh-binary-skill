@@ -639,7 +639,7 @@ codex_local_status() {
   missing=0
   [ -x "$(codex_real_bin_path)" ] || { printf '%s\n' "missing_binary"; missing=1; }
   [ -x "$(codex_launcher_path)" ] || { printf '%s\n' "missing_launcher"; missing=1; }
-  if [ -s "$(codex_config_file)" ]; then
+  if codex_config_has_runtime_config; then
     :
   else
     printf '%s\n' "missing_config_or_official_login"

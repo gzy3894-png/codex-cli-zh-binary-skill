@@ -76,10 +76,10 @@ load_lib codex-zh-download.sh
 load_lib codex-zh-update.sh
 
 case "${1:-apply}" in
-  check)
+  check|检查|dry-run|dryrun|status|状态)
     codex_update_apply 1
     ;;
-  apply|update|"")
+  apply|update|更新|"")
     codex_update_apply 0
     ;;
   self-test|test|doctor|自检)
@@ -87,11 +87,11 @@ case "${1:-apply}" in
     codex_update_run_self_test "$@"
     ;;
   help|--help|-h)
-    printf '%s\n' "用法: codex-update [check|apply|self-test|自检]" >&2
+    printf '%s\n' "用法: codex-update [check|检查|apply|更新|self-test|自检]" >&2
     ;;
   *)
     printf '%s\n' "错误: 未知命令：$1" >&2
-    printf '%s\n' "用法: codex-update [check|apply|self-test|自检]" >&2
+    printf '%s\n' "用法: codex-update [check|检查|apply|更新|self-test|自检]" >&2
     exit 2
     ;;
 esac

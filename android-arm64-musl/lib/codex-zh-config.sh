@@ -21,6 +21,7 @@ codex_config_mark_official_mode() {
   printf '%s\n' "official-login" > "$marker"
   chmod 600 "$marker" 2>/dev/null || true
   codex_config_ensure_default_hooks
+  codex_config_apply_full_permission "$(codex_config_file)"
 }
 
 codex_config_clear_official_mode() {
@@ -894,6 +895,25 @@ codex_config_tty_confirm() {
   esac
 }
 
+codex_config_is_back_choice() {
+  case "$1" in
+    b|B|back|BACK|Back|返回) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+codex_config_is_exit_choice() {
+  case "$1" in
+    0|q|Q|quit|QUIT|Quit|exit|EXIT|Exit|退出) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+codex_config_exit_config_mode() {
+  codex_info "已退出配置模式。"
+  exit 0
+}
+
 codex_config_choose_model() {
   models_file="$1"
   preferred_model="${2:-}"
@@ -904,13 +924,24 @@ codex_config_choose_model() {
     preferred_choice="$(awk -v model="$preferred_model" '$0 == model { print NR; exit }' "$models_file")"
     [ -n "$preferred_choice" ] && default_choice="$preferred_choice"
   fi
-  printf '%s\n' "可用模型：" >&2
-  awk '{ printf "%2d. %s\n", NR, $0 }' "$models_file" >&2
-  choice="$(codex_config_tty_read "请选择默认模型编号" "$default_choice")"
-  case "$choice" in *[!0-9]*|"") choice="$default_choice" ;; esac
-  [ "$choice" -ge 1 ] 2>/dev/null || choice="$default_choice"
-  [ "$choice" -le "$count" ] 2>/dev/null || choice="$default_choice"
-  sed -n "${choice}p" "$models_file"
+  while :; do
+    printf '%s\n' "可用模型：" >&2
+    awk '{ printf "%2d. %s\n", NR, $0 }' "$models_file" >&2
+    printf '%s\n' "b. 返回上一层" >&2
+    printf '%s\n' "0. 退出，不启动 Codex" >&2
+    choice="$(codex_config_tty_read "请选择默认模型编号" "$default_choice")"
+    codex_config_is_back_choice "$choice" && return 1
+    codex_config_is_exit_choice "$choice" && codex_config_exit_config_mode
+    [ -n "$choice" ] || choice="$default_choice"
+    case "$choice" in
+      *[!0-9]*) codex_warn "请输入有效模型编号，或输入 b 返回。"; continue ;;
+    esac
+    if [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$count" ] 2>/dev/null; then
+      sed -n "${choice}p" "$models_file"
+      return 0
+    fi
+    codex_warn "模型编号超出范围。"
+  done
 }
 
 codex_config_prompt_third_party() {
@@ -930,19 +961,29 @@ codex_config_prompt_third_party() {
   fi
   default_base="${CODEX_ZH_API_BASE:-$existing_base}"
   while :; do
-    raw_base="$(codex_config_tty_read "API Base URL，例如 https://api.example.com/v1" "$default_base")"
+    raw_base="$(codex_config_tty_read "API Base URL，例如 https://api.example.com/v1（b 返回，0 退出）" "$default_base")"
+    codex_config_is_back_choice "$raw_base" && return 1
+    codex_config_is_exit_choice "$raw_base" && codex_config_exit_config_mode
     codex_config_valid_api_base "$raw_base" && break
     codex_warn "API Base URL 无效，必须是 http(s) URL"
   done
   api_base="$(codex_config_normalize_api_base "$raw_base")"
   api_key="${CODEX_ZH_API_KEY:-}"
   if [ -z "$api_key" ]; then
-    if [ "$mode" = "edit" ] && [ -n "$existing_key" ]; then
-      api_key="$(codex_config_tty_read "API Key（留空保留当前）" "")"
-      [ -n "$api_key" ] || api_key="$existing_key"
-    else
-      api_key="$(codex_config_tty_read "API Key" "")"
-    fi
+    while :; do
+      if [ "$mode" = "edit" ] && [ -n "$existing_key" ]; then
+        api_key="$(codex_config_tty_read "API Key（留空保留当前，b 返回，0 退出）" "")"
+        codex_config_is_back_choice "$api_key" && return 1
+        codex_config_is_exit_choice "$api_key" && codex_config_exit_config_mode
+        [ -n "$api_key" ] || api_key="$existing_key"
+      else
+        api_key="$(codex_config_tty_read "API Key（b 返回，0 退出）" "")"
+        codex_config_is_back_choice "$api_key" && return 1
+        codex_config_is_exit_choice "$api_key" && codex_config_exit_config_mode
+      fi
+      [ -n "$api_key" ] && break
+      codex_warn "API Key 不能为空。"
+    done
   fi
   [ -n "$api_key" ] || codex_die "API Key 不能为空"
   models_json="$work/models.json"
@@ -956,7 +997,9 @@ codex_config_prompt_third_party() {
   codex_config_parse_models "$models_json" > "$models_file"
   [ -s "$models_file" ] || codex_die "未解析到模型，未写入 config.toml"
   default_model="${CODEX_ZH_DEFAULT_MODEL:-}"
-  [ -n "$default_model" ] || default_model="$(codex_config_choose_model "$models_file" "$existing_model")"
+  if [ -z "$default_model" ]; then
+    default_model="$(codex_config_choose_model "$models_file" "$existing_model")" || return 1
+  fi
   codex_config_backup_current
   codex_config_write_third_party_config "$api_base" "$api_key" "$default_model" "$models_file"
   codex_info "已写入第三方配置：$home_dir/config.toml"
@@ -1136,6 +1179,7 @@ codex_config_profile_use() {
   dir="$(codex_config_profile_dir "$name")"
   [ -s "$dir/config.toml" ] || codex_die "找不到配置：$name"
   home_dir="$(codex_home)"
+  old_catalog="$(codex_config_current_catalog_path "$home_dir/config.toml" 2>/dev/null || true)"
   codex_config_backup_current
   codex_ensure_private_dir "$home_dir"
   tmp_cfg="$home_dir/config.toml.tmp.$$"
@@ -1177,6 +1221,16 @@ codex_config_profile_use() {
       chmod 600 "$catalog_target" 2>/dev/null || true
       codex_config_set_catalog_path "$home_dir/config.toml" "$catalog_target"
     fi
+  else
+    catalog_target="$(codex_config_current_catalog_path "$home_dir/config.toml")"
+    case "$catalog_target" in
+      "$home_dir"/*) rm -f "$catalog_target" 2>/dev/null || true ;;
+    esac
+    if [ -n "$old_catalog" ] && [ "$old_catalog" != "$catalog_target" ]; then
+      case "$old_catalog" in
+        "$home_dir"/*) rm -f "$old_catalog" 2>/dev/null || true ;;
+      esac
+    fi
   fi
 
   profile_marker="$dir/install-state/official-login-mode"
@@ -1209,7 +1263,7 @@ codex_config_prompt_profile_name() {
     name="$(codex_config_tty_read "$prompt（b 返回，0 退出）" "$default")"
     case "$name" in
       b|B|back|BACK|返回) return 1 ;;
-      0|q|Q|quit|QUIT|退出) codex_info "已退出配置模式。"; exit 0 ;;
+      0|q|Q|quit|QUIT|退出) codex_config_exit_config_mode ;;
     esac
     if codex_config_profile_valid_name "$name"; then
       CODEX_CONFIG_PROFILE_NAME="$name"
@@ -1251,7 +1305,7 @@ codex_config_profile_choose_name() {
     choice="$(codex_config_tty_read "$prompt" "b")"
     case "$choice" in
       b|B|back|BACK|返回) return 1 ;;
-      0|q|Q|quit|QUIT|退出) codex_info "已退出配置模式。"; exit 0 ;;
+      0|q|Q|quit|QUIT|退出) codex_config_exit_config_mode ;;
       *[!0-9]*|"") codex_warn "请输入有效编号，或输入 b 返回。"; continue ;;
     esac
     if [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$count" ] 2>/dev/null; then
@@ -1296,8 +1350,7 @@ codex_config_confirm_save_dirty_before() {
         return 1
         ;;
       0|q|Q|quit|QUIT|退出)
-        codex_info "已退出配置模式。"
-        exit 0
+        codex_config_exit_config_mode
         ;;
       *)
         codex_warn "请输入 1、2、3、b 或 0。"
@@ -1334,8 +1387,7 @@ codex_config_prompt_save_after_write() {
         return 0
         ;;
       0|q|Q|quit|QUIT|退出)
-        codex_info "已退出配置模式。"
-        exit 0
+        codex_config_exit_config_mode
         ;;
       *)
         codex_warn "请输入 1、2、3、b 或 0。"
@@ -1542,8 +1594,7 @@ codex_config_menu() {
         ;;
       0|q|Q|quit|QUIT|退出)
         codex_config_confirm_save_dirty_before "退出配置模式" || continue
-        codex_info "已退出配置模式。"
-        exit 0
+        codex_config_exit_config_mode
         ;;
       b|B|back|BACK|返回)
         codex_config_confirm_save_dirty_before "返回启动 Codex" || continue

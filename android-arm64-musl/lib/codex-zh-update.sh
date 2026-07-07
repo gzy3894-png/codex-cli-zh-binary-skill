@@ -26,7 +26,10 @@ codex_update_one_file() {
   update_one_tmp_root="$(codex_state_root)/update-download"
   update_one_tmp="$update_one_tmp_root/$rel"
   update_one_dest="$dest_root/$rel"
-  mkdir -p "$(dirname "$update_one_tmp")" "$(dirname "$update_one_dest")"
+  mkdir -p "$(dirname "$update_one_tmp")"
+  if [ "$check_only" != "1" ]; then
+    mkdir -p "$(dirname "$update_one_dest")"
+  fi
   if ! codex_download_first_script "$rel" "$update_one_tmp" ""; then
     rm -f "$update_one_tmp" "$update_one_tmp.part"
     codex_warn "无法下载：$rel"
