@@ -24,9 +24,11 @@ DOCTOR_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-doctor"
 CLEAN_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-clean"
 OPS_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-ops"
 OPS_LIB_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-ops-lib"
+DEV_TRANSFER_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-dev-transfer"
 BROWSER_SMOKE="$ROOT_DIR/tests/codex-for-tui-browser-smoke.sh"
 INSTALLED_DEVICE_SMOKE="$ROOT_DIR/tests/codex-for-tui-installed-device-smoke.sh"
 OPS_SMOKE="$ROOT_DIR/tests/codex-for-tui-ops-smoke.sh"
+DEV_TRANSFER_SMOKE="$ROOT_DIR/tests/codex-for-tui-dev-transfer-smoke.sh"
 TERMINAL_TOP_BAR="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalTopBar.kt"
 TERMINAL_SCREEN="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalScreen.kt"
 MEDIA_PREVIEW_PANE="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MediaPreviewPane.kt"
@@ -424,9 +426,11 @@ test_codex_ops_tool_assets() {
   assert_file_contains "$MKSESSION" '"codex-clean" to "codex-clean"'
   assert_file_contains "$MKSESSION" '"codex-ops" to "codex-ops"'
   assert_file_contains "$MKSESSION" '"codex-ops-lib" to "codex-ops-lib"'
+  assert_file_contains "$MKSESSION" '"codex-dev-transfer" to "codex-dev-transfer"'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-common.sh" 'codex-doctor'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-common.sh" 'codex-clean'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-common.sh" 'codex-ops'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-common.sh" 'codex-dev-transfer'
 
   assert_file_contains "$CLEAN_ASSET" 'scan'
   assert_file_contains "$CLEAN_ASSET" 'apply'
@@ -435,9 +439,18 @@ test_codex_ops_tool_assets() {
   assert_file_contains "$OPS_ASSET" 'status'
   assert_file_contains "$OPS_ASSET" 'events'
   assert_file_contains "$OPS_ASSET" 'resume_hint'
+  assert_nonempty_file "$DEV_TRANSFER_ASSET"
+  sh -n "$DEV_TRANSFER_ASSET" || fail "codex-dev-transfer shell syntax failed"
+  sh -n "$DEV_TRANSFER_SMOKE" || fail "dev transfer smoke shell syntax failed"
+  assert_file_contains "$DEV_TRANSFER_ASSET" 'codex-dev-transfer export [LABEL]'
+  assert_file_contains "$DEV_TRANSFER_ASSET" 'codex-dev-transfer import [--yes] [--no-backup] FILE|latest'
+  assert_file_contains "$DEV_TRANSFER_ASSET" '/storage/emulated/0/Download/Codex/dev-transfer'
+  assert_file_contains "$DEV_TRANSFER_ASSET" 'rewrite_payload_paths'
+  assert_file_contains "$DEV_TRANSFER_ASSET" 'rollback'
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'codex-doctor'
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'codex-clean'
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'codex-ops'
+  assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'codex-dev-transfer'
 }
 
 test_browser_bridge_asset() {

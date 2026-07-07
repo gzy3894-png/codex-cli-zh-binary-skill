@@ -1,0 +1,470 @@
+#!/usr/bin/env sh
+set -eu
+
+TOOL_NAME="codex-dev-transfer"
+TRANSFER_VERSION="1"
+DEFAULT_SNAPSHOT_DIR="/storage/emulated/0/Download/Codex/dev-transfer"
+SNAPSHOT_DIR="${CODEX_DEV_TRANSFER_DIR:-$DEFAULT_SNAPSHOT_DIR}"
+WORK_ROOT="${TMPDIR:-/tmp}/codex-dev-transfer"
+INCLUDE_SYSTEM="${CODEX_DEV_TRANSFER_INCLUDE_SYSTEM:-1}"
+
+json_mode=0
+assume_yes=0
+no_backup=0
+
+usage() {
+  cat <<'USAGE'
+用法:
+  codex-dev-transfer doctor [--json]
+  codex-dev-transfer export [LABEL]
+  codex-dev-transfer import [--yes] [--no-backup] FILE|latest
+  codex-dev-transfer verify FILE|latest
+  codex-dev-transfer list
+  codex-dev-transfer rollback [--yes] [latest|FILE]
+
+说明:
+  开发者内部工具：在正式版和测试版之间搬运 Codex for TUI 状态。
+  默认中转目录：/storage/emulated/0/Download/Codex/dev-transfer
+  import 会先创建 rollback 包；不会打印 auth/token/cookie 内容。
+USAGE
+}
+
+info() { printf '%s\n' "$*"; }
+warn() { printf '警告: %s\n' "$*" >&2; }
+die() { printf '错误: %s\n' "$*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+json_kv() {
+  printf '"%s":"%s"' "$(json_escape "$1")" "$(json_escape "$2")"
+}
+
+json_bool_kv() {
+  printf '"%s":%s' "$(json_escape "$1")" "$2"
+}
+
+now_stamp() {
+  date '+%Y%m%d-%H%M%S' 2>/dev/null || date '+%s' 2>/dev/null || printf '%s' "$$"
+}
+
+safe_label() {
+  raw="${1:-snapshot}"
+  label="$(printf '%s' "$raw" | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//; s/-*$//')"
+  [ -n "$label" ] || label="snapshot"
+  printf '%s' "$label"
+}
+
+prefix_dir() {
+  if [ -n "${PREFIX:-}" ]; then
+    printf '%s\n' "${PREFIX%/}"
+  elif [ -n "${PKG:-}" ] && [ -d "/data/user/0/$PKG" ]; then
+    printf '%s\n' "/data/user/0/$PKG"
+  elif [ -d /data/user/0/com.gzy3894.codexfortui ]; then
+    printf '%s\n' /data/user/0/com.gzy3894.codexfortui
+  elif [ -d /data/user/0/com.gzy3894.codexfortui.test ]; then
+    printf '%s\n' /data/user/0/com.gzy3894.codexfortui.test
+  else
+    printf '%s\n' "${PREFIX:-/data/user/0/${PKG:-com.gzy3894.codexfortui}}"
+  fi
+}
+
+package_name() {
+  if [ -n "${PKG:-}" ]; then
+    printf '%s\n' "$PKG"
+    return 0
+  fi
+  base="$(basename "$(prefix_dir)")"
+  [ -n "$base" ] && { printf '%s\n' "$base"; return 0; }
+  printf '%s\n' "unknown"
+}
+
+codex_home_dir() {
+  printf '%s\n' "${CODEX_HOME:-${HOME:-/root}/.codex}"
+}
+
+ensure_tools() {
+  missing=""
+  for c in tar gzip find cp mv rm mkdir sed grep date wc ls basename dirname awk; do
+    have "$c" || missing="$missing $c"
+  done
+  [ -z "$missing" ] || die "缺少基础命令:$missing"
+}
+
+snapshot_path_for_label() {
+  label="$(safe_label "${1:-snapshot}")"
+  stamp="$(now_stamp)"
+  mkdir -p "$SNAPSHOT_DIR"
+  printf '%s/%s-%s-%s.tar.gz\n' "$SNAPSHOT_DIR" "$TOOL_NAME" "$label" "$stamp"
+}
+
+latest_snapshot() {
+  pattern="${1:-$SNAPSHOT_DIR/$TOOL_NAME-*.tar.gz}"
+  include_rollback="${2:-0}"
+  # shellcheck disable=SC2086
+  latest="$(ls -t $pattern 2>/dev/null | while IFS= read -r candidate; do
+    case "$(basename "$candidate")" in
+      "$TOOL_NAME-rollback-"*) [ "$include_rollback" = "1" ] || continue ;;
+    esac
+    printf '%s\n' "$candidate"
+    exit 0
+  done | sed -n '1p' || true)"
+  [ -n "$latest" ] || return 1
+  printf '%s\n' "$latest"
+}
+
+resolve_snapshot_arg() {
+  arg="${1:-latest}"
+  case "$arg" in
+    latest|"") latest_snapshot || die "找不到快照：$SNAPSHOT_DIR/$TOOL_NAME-*.tar.gz" ;;
+    rollback-latest) latest_snapshot "$SNAPSHOT_DIR/$TOOL_NAME-rollback-*.tar.gz" 1 || die "找不到 rollback 快照" ;;
+    *) [ -r "$arg" ] || die "快照不可读：$arg"; printf '%s\n' "$arg" ;;
+  esac
+}
+
+copy_path() {
+  src="$1"
+  dst="$2"
+  [ -e "$src" ] || return 0
+  mkdir -p "$(dirname "$dst")"
+  rm -rf "$dst"
+  cp -a "$src" "$dst"
+}
+
+copy_codex_bin_dir() {
+  src="$1"
+  dst="$2"
+  [ -d "$src" ] || return 0
+  mkdir -p "$dst"
+  found=0
+  for file in "$src"/[cC][oO][dD][eE][xX]*; do
+    [ -e "$file" ] || continue
+    cp -a "$file" "$dst/$(basename "$file")"
+    found=1
+  done
+  [ "$found" -eq 0 ] || return 0
+}
+
+write_manifest() {
+  manifest="$1"
+  source_prefix="$(prefix_dir)"
+  source_pkg="$(package_name)"
+  source_home="${HOME:-/root}"
+  source_codex_home="$(codex_home_dir)"
+  {
+    printf 'format=codex-dev-transfer-v%s\n' "$TRANSFER_VERSION"
+    printf 'created_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || now_stamp)"
+    printf 'source_pkg=%s\n' "$source_pkg"
+    printf 'source_prefix=%s\n' "$source_prefix"
+    printf 'source_home=%s\n' "$source_home"
+    printf 'source_codex_home=%s\n' "$source_codex_home"
+    printf 'tool=%s\n' "$TOOL_NAME"
+  } > "$manifest"
+}
+
+manifest_value() {
+  key="$1"
+  file="$2"
+  sed -n "s/^$key=//p" "$file" 2>/dev/null | sed -n '1p'
+}
+
+export_snapshot() {
+  label="${1:-$(package_name)-snapshot}"
+  ensure_tools
+  out="$(snapshot_path_for_label "$label")"
+  stage="$WORK_ROOT/export-$$"
+  rm -rf "$stage"
+  mkdir -p "$stage/payload/root/.local" "$stage/payload/root/.cache" "$stage/payload/usr/local" "$stage/payload/app" "$stage/payload/etc"
+
+  source_prefix="$(prefix_dir)"
+  source_home="${HOME:-/root}"
+  source_codex_home="$(codex_home_dir)"
+
+  write_manifest "$stage/manifest.txt"
+  copy_path "$source_codex_home" "$stage/payload/root/.codex"
+  copy_path "$source_home/.codex-for-tui" "$stage/payload/root/.codex-for-tui"
+  copy_codex_bin_dir "$source_home/.local/bin" "$stage/payload/root/.local/bin"
+  copy_path "$source_home/.local/share/codex-zh" "$stage/payload/root/.local/share/codex-zh"
+  copy_path "$source_home/.cache/codex-zh" "$stage/payload/root/.cache/codex-zh"
+  if [ "$INCLUDE_SYSTEM" != "0" ]; then
+    copy_codex_bin_dir "/usr/local/bin" "$stage/payload/usr/local/bin"
+    copy_path "/usr/local/share/codex-zh" "$stage/payload/usr/local/share/codex-zh"
+    copy_path "/etc/codex" "$stage/payload/etc/codex"
+  fi
+
+  for name in shared_prefs files databases app_webview no_backup; do
+    copy_path "$source_prefix/$name" "$stage/payload/app/$name"
+  done
+  for name in bin lib browser media-preview agent-panel session-fold perf ops; do
+    copy_path "$source_prefix/local/$name" "$stage/payload/app/local/$name"
+  done
+
+  du -sh "$stage/payload" 2>/dev/null | awk '{ print "payload_size=" $1 }' >> "$stage/manifest.txt" || true
+  tmp_out="$out.part"
+  rm -f "$tmp_out"
+  (cd "$stage" && tar -czf "$tmp_out" manifest.txt payload)
+  mv "$tmp_out" "$out"
+  rm -rf "$stage"
+  if have sha256sum; then
+    sha256sum "$out" > "$out.sha256" 2>/dev/null || true
+  fi
+  info "已导出开发者迁移包：$out"
+  du -sh "$out" 2>/dev/null | awk '{ print "archive_size=" $1 }' || true
+  info "导入测试版/正式版时运行：codex-dev-transfer import --yes $out"
+}
+
+verify_snapshot() {
+  file="$(resolve_snapshot_arg "${1:-latest}")"
+  ensure_tools
+  tar -tzf "$file" >/dev/null || die "tar 校验失败：$file"
+  tar -tzf "$file" | grep -F -x 'manifest.txt' >/dev/null || die "缺少 manifest.txt"
+  tar -tzf "$file" | grep -F -x 'payload/root/.codex/config.toml' >/dev/null 2>&1 || warn "包内没有 payload/root/.codex/config.toml"
+  if have sha256sum && [ -r "$file.sha256" ]; then
+    (cd "$(dirname "$file")" && sha256sum -c "$(basename "$file").sha256") >/dev/null || die "sha256 校验失败：$file.sha256"
+  fi
+  if [ "$json_mode" -eq 1 ]; then
+    printf '{%s,%s}\n' "$(json_bool_kv ok true)" "$(json_kv file "$file")"
+  else
+    info "校验通过：$file"
+  fi
+}
+
+sed_escape() {
+  printf '%s' "$1" | sed 's/[\\&|]/\\&/g'
+}
+
+rewrite_payload_paths() {
+  root="$1"
+  manifest="$root/manifest.txt"
+  source_pkg="$(manifest_value source_pkg "$manifest")"
+  source_prefix="$(manifest_value source_prefix "$manifest")"
+  target_pkg="$(package_name)"
+  target_prefix="$(prefix_dir)"
+  [ -n "$source_pkg" ] || source_pkg="unknown"
+  [ -n "$source_prefix" ] || source_prefix="/data/user/0/$source_pkg"
+
+  [ "$source_pkg" = "$target_pkg" ] && [ "$source_prefix" = "$target_prefix" ] && return 0
+
+  src_pkg_esc="$(sed_escape "$source_pkg")"
+  tgt_pkg_esc="$(sed_escape "$target_pkg")"
+  src_prefix_esc="$(sed_escape "$source_prefix")"
+  tgt_prefix_esc="$(sed_escape "$target_prefix")"
+  src_user_esc="$(sed_escape "/data/user/0/$source_pkg")"
+  tgt_user_esc="$(sed_escape "/data/user/0/$target_pkg")"
+  src_data_esc="$(sed_escape "/data/data/$source_pkg")"
+  tgt_data_esc="$(sed_escape "/data/data/$target_pkg")"
+  ph_prefix="__CODEX_DEV_TRANSFER_PREFIX_$$_"
+  ph_user="__CODEX_DEV_TRANSFER_USER_$$_"
+  ph_data="__CODEX_DEV_TRANSFER_DATA_$$_"
+  ph_pkg="__CODEX_DEV_TRANSFER_PKG_$$_"
+
+  find "$root/payload" -type f \( \
+    -name '*.toml' -o -name '*.json' -o -name '*.jsonl' -o -name '*.md' -o \
+    -name '*.sh' -o -name '*.txt' -o -name '*.xml' -o -name '*.properties' -o \
+    -name 'status' -o -name 'events' -o -name 'current' \
+  \) 2>/dev/null | while IFS= read -r f; do
+    tmp="$f.rewrite.$$"
+    if grep -qF "$source_pkg" "$f" 2>/dev/null || grep -qF "$source_prefix" "$f" 2>/dev/null; then
+      sed \
+        -e "s|$src_prefix_esc|$ph_prefix|g" \
+        -e "s|$src_user_esc|$ph_user|g" \
+        -e "s|$src_data_esc|$ph_data|g" \
+        -e "s|$src_pkg_esc|$ph_pkg|g" \
+        -e "s|$ph_prefix|$tgt_prefix_esc|g" \
+        -e "s|$ph_user|$tgt_user_esc|g" \
+        -e "s|$ph_data|$tgt_data_esc|g" \
+        -e "s|$ph_pkg|$tgt_pkg_esc|g" \
+        "$f" > "$tmp" && mv "$tmp" "$f" || rm -f "$tmp"
+    fi
+  done
+}
+
+confirm_import() {
+  [ "$assume_yes" -eq 1 ] && return 0
+  printf '即将覆盖当前开发状态。目标 PKG=%s PREFIX=%s\n' "$(package_name)" "$(prefix_dir)" >&2
+  printf '请输入 yes 继续导入：' >&2
+  IFS= read -r ans || ans=""
+  [ "$ans" = "yes" ] || die "已取消导入"
+}
+
+merge_bin_payload() {
+  src="$1"
+  dst="$2"
+  [ -d "$src" ] || return 0
+  mkdir -p "$dst"
+  for old in "$dst"/[cC][oO][dD][eE][xX]*; do
+    [ -e "$old" ] || continue
+    rm -rf "$old"
+  done
+  for item in "$src"/*; do
+    [ -e "$item" ] || continue
+    cp -a "$item" "$dst/$(basename "$item")"
+  done
+}
+
+replace_payload_path() {
+  src="$1"
+  dst="$2"
+  [ -e "$src" ] || return 0
+  mkdir -p "$(dirname "$dst")"
+  rm -rf "$dst"
+  cp -a "$src" "$dst"
+}
+
+apply_payload() {
+  extract="$1"
+  target_prefix="$(prefix_dir)"
+  target_home="${HOME:-/root}"
+  target_codex_home="$(codex_home_dir)"
+
+  rewrite_payload_paths "$extract"
+
+  replace_payload_path "$extract/payload/root/.codex" "$target_codex_home"
+  replace_payload_path "$extract/payload/root/.codex-for-tui" "$target_home/.codex-for-tui"
+  merge_bin_payload "$extract/payload/root/.local/bin" "$target_home/.local/bin"
+  replace_payload_path "$extract/payload/root/.local/share/codex-zh" "$target_home/.local/share/codex-zh"
+  replace_payload_path "$extract/payload/root/.cache/codex-zh" "$target_home/.cache/codex-zh"
+  merge_bin_payload "$extract/payload/usr/local/bin" "/usr/local/bin"
+  replace_payload_path "$extract/payload/usr/local/share/codex-zh" "/usr/local/share/codex-zh"
+  replace_payload_path "$extract/payload/etc/codex" "/etc/codex"
+
+  for name in shared_prefs files databases app_webview no_backup; do
+    replace_payload_path "$extract/payload/app/$name" "$target_prefix/$name"
+  done
+  for name in bin lib browser media-preview agent-panel session-fold perf ops; do
+    replace_payload_path "$extract/payload/app/local/$name" "$target_prefix/local/$name"
+  done
+
+  # 修复常用可执行权限；失败不阻断导入。
+  chmod 755 "$target_prefix/local/bin"/* 2>/dev/null || true
+  chmod 755 "$target_home/.local/bin"/[cC][oO][dD][eE][xX]* 2>/dev/null || true
+  chmod 755 /usr/local/bin/[cC][oO][dD][eE][xX]* 2>/dev/null || true
+}
+
+import_snapshot() {
+  file="$(resolve_snapshot_arg "${1:-latest}")"
+  ensure_tools
+  confirm_import
+  verify_snapshot "$file" >/dev/null
+  if [ "$no_backup" -ne 1 ]; then
+    backup_label="rollback-$(package_name)-$(now_stamp)"
+    info "导入前创建 rollback 包..."
+    export_snapshot "$backup_label" >/dev/null
+  fi
+  extract="$WORK_ROOT/import-$$"
+  rm -rf "$extract"
+  mkdir -p "$extract"
+  tar -xzf "$file" -C "$extract"
+  [ -r "$extract/manifest.txt" ] || die "缺少 manifest.txt"
+  apply_payload "$extract"
+  rm -rf "$extract"
+  info "导入完成：$file"
+  info "建议重启当前 App 终端后再测试。"
+}
+
+list_snapshots() {
+  mkdir -p "$SNAPSHOT_DIR"
+  if [ "$json_mode" -eq 1 ]; then
+    printf '{"snapshot_dir":"%s","files":[' "$(json_escape "$SNAPSHOT_DIR")"
+    first=1
+    ls -t "$SNAPSHOT_DIR"/$TOOL_NAME-*.tar.gz 2>/dev/null | while IFS= read -r f; do
+      [ "$first" = 1 ] || printf ','
+      first=0
+      size="$(du -h "$f" 2>/dev/null | awk '{print $1}')"
+      printf '{%s,%s}' "$(json_kv file "$f")" "$(json_kv size "$size")"
+    done
+    printf ']}\n'
+  else
+    info "snapshot_dir=$SNAPSHOT_DIR"
+    ls -lh -t "$SNAPSHOT_DIR"/$TOOL_NAME-*.tar.gz 2>/dev/null || info "没有快照"
+  fi
+}
+
+doctor() {
+  ensure_tools
+  pkg="$(package_name)"
+  prefix="$(prefix_dir)"
+  codex_home="$(codex_home_dir)"
+  mkdir -p "$SNAPSHOT_DIR" 2>/dev/null || true
+  ok=true
+  [ -w "$SNAPSHOT_DIR" ] || ok=false
+  [ -d "$prefix" ] || ok=false
+  if [ "$json_mode" -eq 1 ]; then
+    printf '{%s,%s,%s,%s,%s}\n' \
+      "$(json_bool_kv ok "$ok")" \
+      "$(json_kv package "$pkg")" \
+      "$(json_kv prefix "$prefix")" \
+      "$(json_kv codex_home "$codex_home")" \
+      "$(json_kv snapshot_dir "$SNAPSHOT_DIR")"
+  else
+    info "ok=$ok"
+    info "package=$pkg"
+    info "prefix=$prefix"
+    info "codex_home=$codex_home"
+    info "snapshot_dir=$SNAPSHOT_DIR"
+  fi
+}
+
+rollback_snapshot() {
+  arg="${1:-rollback-latest}"
+  if [ "$arg" = "latest" ]; then
+    arg="rollback-latest"
+  fi
+  file="$(resolve_snapshot_arg "$arg")"
+  import_snapshot "$file"
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --json) json_mode=1; shift ;;
+    --yes|-y) assume_yes=1; shift ;;
+    --no-backup) no_backup=1; shift ;;
+    --help|-h|help) usage; exit 0 ;;
+    *) break ;;
+  esac
+done
+
+cmd="${1:-doctor}"
+[ "$#" -eq 0 ] || shift
+case "$cmd" in
+  doctor|status|verify|list|ls)
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --json) json_mode=1; shift ;;
+        *) break ;;
+      esac
+    done
+    ;;
+esac
+case "$cmd" in
+  doctor|status) doctor ;;
+  export)
+    label="${1:-$(package_name)-snapshot}"
+    export_snapshot "$label"
+    ;;
+  import)
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --yes|-y) assume_yes=1; shift ;;
+        --no-backup) no_backup=1; shift ;;
+        *) break ;;
+      esac
+    done
+    import_snapshot "${1:-latest}"
+    ;;
+  verify) verify_snapshot "${1:-latest}" ;;
+  list|ls) list_snapshots ;;
+  rollback)
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --yes|-y) assume_yes=1; shift ;;
+        --no-backup) no_backup=1; shift ;;
+        *) break ;;
+      esac
+    done
+    rollback_snapshot "${1:-latest}"
+    ;;
+  *) usage >&2; die "未知命令：$cmd" ;;
+esac

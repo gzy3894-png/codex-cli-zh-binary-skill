@@ -32,6 +32,7 @@ object MkSession {
         "codex-clean" to "codex-clean",
         "codex-ops" to "codex-ops",
         "codex-ops-lib" to "codex-ops-lib",
+        "codex-dev-transfer" to "codex-dev-transfer",
         "rtk" to "rtk",
     )
     private val obsoleteScripts = listOf(

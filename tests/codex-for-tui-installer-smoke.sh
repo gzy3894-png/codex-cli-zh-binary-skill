@@ -58,6 +58,7 @@ test_syntax_and_asset_sync() {
     "$ROOT_DIR/android-app/core/main/src/main/assets/codex-clean" \
     "$ROOT_DIR/android-app/core/main/src/main/assets/codex-ops" \
     "$ROOT_DIR/android-app/core/main/src/main/assets/codex-ops-lib" \
+    "$ROOT_DIR/android-app/core/main/src/main/assets/codex-dev-transfer" \
     "$ROOT_DIR/android-app/core/main/src/main/assets/codex-for-tui-bootstrap.sh" \
     "$SCRIPT_DIR/lib/codex-zh-common.sh" \
     "$SCRIPT_DIR/lib/codex-zh-download.sh" \
@@ -68,6 +69,10 @@ test_syntax_and_asset_sync() {
     sh -n "$file"
   done
   cmp "$BOOTSTRAP" "$BOOTSTRAP_ASSET"
+}
+
+test_dev_transfer_smoke() {
+  sh "$ROOT_DIR/tests/codex-for-tui-dev-transfer-smoke.sh"
 }
 
 test_bootstrap_normal_start_does_not_fetch_when_codex_exists() {
@@ -1107,6 +1112,7 @@ run_step test_update_download_failure_is_error
 run_step test_update_check_does_not_modify_installed_scripts
 run_step test_update_one_file_check_does_not_create_dest_dirs
 run_step test_update_apply_refreshes_home_local_aliases
+run_step test_dev_transfer_smoke
 run_step test_codex_local_status_accepts_official_marker
 run_step test_partial_download_failure_is_not_accepted
 run_step test_self_test_fails_on_polluted_model_config

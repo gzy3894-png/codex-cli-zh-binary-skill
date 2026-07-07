@@ -104,7 +104,8 @@ printf 'prefix=%s\n' "$prefix"
 
 for cmd in \
   codex codex-update codex-local codex-browser codex-preview codex-panel \
-  codex-session codex-rtk codex-context codex-doctor codex-clean codex-ops
+  codex-session codex-rtk codex-context codex-doctor codex-clean codex-ops \
+  codex-dev-transfer
 do
   need_cmd "$cmd"
   printf 'cmd_%s=%s\n' "$cmd" "$(command -v "$cmd")"
@@ -155,6 +156,9 @@ trap cleanup EXIT INT TERM
 
 doctor_json="$(codex-doctor --json 2>&1)" || fail "codex-doctor --json failed"
 assert_contains "$doctor_json" '"ok":true' "codex-doctor json"
+dev_transfer_json="$(codex-dev-transfer doctor --json 2>&1)" || fail "codex-dev-transfer doctor --json failed"
+assert_contains "$dev_transfer_json" '"ok":true' "codex-dev-transfer json"
+assert_contains "$dev_transfer_json" '/storage/emulated/0/Download/Codex/dev-transfer' "codex-dev-transfer json"
 codex-ops status >/dev/null || fail "codex-ops status failed"
 codex-ops events >/dev/null || fail "codex-ops events failed"
 codex-ops resume-hint >/dev/null || fail "codex-ops resume-hint failed"
