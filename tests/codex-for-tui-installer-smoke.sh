@@ -895,6 +895,48 @@ test_update_one_file_check_does_not_create_dest_dirs() {
   rm -rf "$tmp"
 }
 
+test_update_apply_refreshes_home_local_aliases() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-update-home-aliases.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.local/bin" "$tmp/install-bin" "$tmp/share"
+  printf '#!/usr/bin/env sh\n# old codex-update\n' > "$tmp/home/.local/bin/codex-update"
+  chmod 755 "$tmp/home/.local/bin/codex-update"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-download.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-update.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_INSTALL_DIR="$tmp/install-bin"
+    export CODEX_ZH_SCRIPT_INSTALL_ROOT="$tmp/share"
+    codex_download_first_script() {
+      stub_rel="$1"
+      stub_dest="$2"
+      mkdir -p "$(dirname "$stub_dest")"
+      case "$stub_rel" in
+        codex-update.sh)
+          printf '#!/usr/bin/env sh\n# new codex-update supports 检查\n' > "$stub_dest"
+          ;;
+        *)
+          printf '#!/usr/bin/env sh\n# new body for %s\n' "$stub_rel" > "$stub_dest"
+          ;;
+      esac
+      chmod 755 "$stub_dest"
+      return 0
+    }
+    codex_update_apply 0 >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || {
+    sed -n '1,220p' "$tmp/stderr" >&2 || true
+    fail "codex update apply should refresh home-local aliases too"
+  }
+
+  assert_file_contains "$tmp/install-bin/codex-update" "supports 检查"
+  assert_file_contains "$tmp/home/.local/bin/codex-update" "supports 检查"
+  [ -x "$tmp/home/.local/bin/codex-preview" ] || fail "home-local bridge wrappers should be refreshed"
+  rm -rf "$tmp"
+}
+
 test_codex_local_status_accepts_official_marker() {
   tmp="${TMPDIR:-/tmp}/codex-tui-test-local-status-official.$$"
   rm -rf "$tmp"
@@ -1064,6 +1106,7 @@ run_step test_proot_launcher_preserves_codex_args
 run_step test_update_download_failure_is_error
 run_step test_update_check_does_not_modify_installed_scripts
 run_step test_update_one_file_check_does_not_create_dest_dirs
+run_step test_update_apply_refreshes_home_local_aliases
 run_step test_codex_local_status_accepts_official_marker
 run_step test_partial_download_failure_is_not_accepted
 run_step test_self_test_fails_on_polluted_model_config

@@ -59,17 +59,43 @@ codex_update_one_file() {
   return 1
 }
 
-codex_update_install_command_links() {
+codex_update_command_link_dirs() {
+  primary="$(codex_install_dir)"
+  {
+    [ -n "$primary" ] && printf '%s\n' "$primary"
+    [ -n "${HOME:-}" ] && printf '%s/.local/bin\n' "$HOME"
+    if [ "$(id -u 2>/dev/null || printf 1)" = "0" ]; then
+      printf '%s\n' "/usr/local/bin"
+    fi
+  } | awk 'NF && !seen[$0]++ { print }'
+}
+
+codex_update_install_command_links_to_dir() {
+  install_dir="$1"
   dest_root="$(codex_script_install_root)"
-  install_dir="$(codex_install_dir)"
-  mkdir -p "$install_dir"
+  mkdir -p "$install_dir" 2>/dev/null || return 1
   [ -s "$dest_root/codex-local-resume.sh" ] && cp "$dest_root/codex-local-resume.sh" "$install_dir/codex-local-resume" && chmod 755 "$install_dir/codex-local-resume"
   [ -s "$dest_root/codex-local-resume.sh" ] && cp "$dest_root/codex-local-resume.sh" "$install_dir/codex-local" && chmod 755 "$install_dir/codex-local"
   [ -s "$dest_root/codex-update.sh" ] && cp "$dest_root/codex-update.sh" "$install_dir/codex-update" && chmod 755 "$install_dir/codex-update"
   [ -s "$dest_root/codex-for-tui-bootstrap.sh" ] && cp "$dest_root/codex-for-tui-bootstrap.sh" "$install_dir/codex-for-tui-bootstrap" && chmod 755 "$install_dir/codex-for-tui-bootstrap"
   [ -s "$dest_root/codex-for-tui-self-test.sh" ] && cp "$dest_root/codex-for-tui-self-test.sh" "$install_dir/codex-self-test" && chmod 755 "$install_dir/codex-self-test"
   [ -s "$dest_root/codex-for-tui-self-test.sh" ] && cp "$dest_root/codex-for-tui-self-test.sh" "$install_dir/codex-test" && chmod 755 "$install_dir/codex-test"
-  codex_install_app_bridge_wrappers
+  CODEX_ZH_INSTALL_DIR="$install_dir" codex_install_app_bridge_wrappers
+}
+
+codex_update_install_command_links() {
+  installed=0
+  while IFS= read -r install_dir; do
+    [ -n "$install_dir" ] || continue
+    if codex_update_install_command_links_to_dir "$install_dir"; then
+      installed=1
+    else
+      codex_warn "无法写入命令目录：$install_dir"
+    fi
+  done <<EOF
+$(codex_update_command_link_dirs)
+EOF
+  [ "$installed" -eq 1 ] || codex_die "无法安装 codex-update/codex-local 命令链接"
 }
 
 codex_update_find_support_script() {
