@@ -228,27 +228,131 @@ EOF
   rm -f "$catalog_dedup"
 }
 
+codex_config_root_string_value() {
+  key="$1"
+  cfg="${2:-$(codex_config_file)}"
+  [ -r "$cfg" ] || return 0
+  awk -v key="$key" '
+function is_section(line) {
+  return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*($|#)/
+}
+function emit_if_match(line, trimmed, rest) {
+  trimmed = line
+  sub(/^[[:space:]]*/, "", trimmed)
+  if (index(trimmed, key) != 1) {
+    return
+  }
+  rest = substr(trimmed, length(key) + 1)
+  if (rest !~ /^[[:space:]]*=/) {
+    return
+  }
+  sub(/^[^=]*=[[:space:]]*/, "", trimmed)
+  if (trimmed ~ /^"/) {
+    sub(/^"/, "", trimmed)
+    sub(/".*$/, "", trimmed)
+    print trimmed
+    exit
+  }
+}
+is_section($0) { exit }
+{ emit_if_match($0) }
+' "$cfg" 2>/dev/null | sed -n '1p'
+}
+
+codex_config_section_string_value() {
+  cfg="$1"
+  section_wanted="$2"
+  key="$3"
+  [ -r "$cfg" ] || return 0
+  awk -v section_wanted="$section_wanted" -v key="$key" '
+function is_section(line) {
+  return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*($|#)/
+}
+function section_name(line, s) {
+  s = line
+  sub(/^[[:space:]]*\[/, "", s)
+  sub(/\][[:space:]]*($|#.*$)/, "", s)
+  return s
+}
+function emit_if_match(line, trimmed, rest) {
+  trimmed = line
+  sub(/^[[:space:]]*/, "", trimmed)
+  if (index(trimmed, key) != 1) {
+    return
+  }
+  rest = substr(trimmed, length(key) + 1)
+  if (rest !~ /^[[:space:]]*=/) {
+    return
+  }
+  sub(/^[^=]*=[[:space:]]*/, "", trimmed)
+  if (trimmed ~ /^"/) {
+    sub(/^"/, "", trimmed)
+    sub(/".*$/, "", trimmed)
+    print trimmed
+    exit
+  }
+}
+is_section($0) {
+  section = section_name($0)
+  in_section = (section == section_wanted)
+  next
+}
+in_section { emit_if_match($0) }
+' "$cfg" 2>/dev/null | sed -n '1p'
+}
+
+codex_config_any_string_value() {
+  key="$1"
+  cfg="${2:-$(codex_config_file)}"
+  [ -r "$cfg" ] || return 0
+  awk -v key="$key" '
+function emit_if_match(line, trimmed, rest) {
+  trimmed = line
+  sub(/^[[:space:]]*/, "", trimmed)
+  if (index(trimmed, key) != 1) {
+    return
+  }
+  rest = substr(trimmed, length(key) + 1)
+  if (rest !~ /^[[:space:]]*=/) {
+    return
+  }
+  sub(/^[^=]*=[[:space:]]*/, "", trimmed)
+  if (trimmed ~ /^"/) {
+    sub(/^"/, "", trimmed)
+    sub(/".*$/, "", trimmed)
+    print trimmed
+    exit
+  }
+}
+{ emit_if_match($0) }
+' "$cfg" 2>/dev/null | sed -n '1p'
+}
+
+codex_config_current_provider() {
+  cfg="${1:-$(codex_config_file)}"
+  codex_config_root_string_value model_provider "$cfg"
+}
+
 codex_config_current_model() {
   cfg="${1:-$(codex_config_file)}"
-  sed -n 's/^[[:space:]]*model[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$cfg" 2>/dev/null | sed -n '1p'
+  codex_config_root_string_value model "$cfg"
 }
 
 codex_config_current_base_url() {
   cfg="${1:-$(codex_config_file)}"
-  sed -n 's/^[[:space:]]*base_url[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$cfg" 2>/dev/null | sed -n '1p'
+  provider="$(codex_config_current_provider "$cfg")"
+  if [ -n "$provider" ]; then
+    base="$(codex_config_section_string_value "$cfg" "model_providers.$provider" base_url)"
+    [ -n "$base" ] && { printf '%s\n' "$base"; return 0; }
+  fi
+  codex_config_any_string_value base_url "$cfg"
 }
 
 codex_config_current_catalog_path() {
   cfg="${1:-$(codex_config_file)}"
-  path="$(sed -n 's/^[[:space:]]*model_catalog_json[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$cfg" 2>/dev/null | sed -n '1p')"
+  path="$(codex_config_root_string_value model_catalog_json "$cfg")"
   [ -n "$path" ] || path="$(codex_config_model_catalog_file)"
   printf '%s\n' "$path"
-}
-
-codex_config_root_string_value() {
-  key="$1"
-  cfg="${2:-$(codex_config_file)}"
-  sed -n "s/^[[:space:]]*$key[[:space:]]*=[[:space:]]*\"\(.*\)\".*/\1/p" "$cfg" 2>/dev/null | sed -n '1p'
 }
 
 codex_config_is_full_permission() {
@@ -956,7 +1060,9 @@ codex_config_profile_matches_current() {
   home_dir="$(codex_home)"
   codex_config_files_same "$home_dir/config.toml" "$dir/config.toml" || return 1
   codex_config_files_same "$home_dir/auth.json" "$dir/auth.json" || return 1
-  codex_config_files_same "$home_dir/model_catalog.json" "$dir/model_catalog.json" || return 1
+  current_catalog="$(codex_config_current_catalog_path "$home_dir/config.toml")"
+  codex_config_files_same "$current_catalog" "$dir/model_catalog.json" || return 1
+  codex_config_files_same "$(codex_config_official_marker_file)" "$dir/install-state/official-login-mode" || return 1
   return 0
 }
 
@@ -1008,7 +1114,16 @@ codex_config_profile_save() {
   [ ! -s "$auth" ] || cp "$auth" "$profile_tmp/auth.json"
   catalog="$(codex_config_current_catalog_path "$cfg")"
   [ ! -s "$catalog" ] || cp "$catalog" "$profile_tmp/model_catalog.json"
-  chmod 600 "$profile_tmp"/* 2>/dev/null || true
+  marker="$(codex_config_official_marker_file)"
+  if [ -s "$marker" ]; then
+    mkdir -p "$profile_tmp/install-state"
+    cp "$marker" "$profile_tmp/install-state/official-login-mode"
+    chmod 700 "$profile_tmp/install-state" 2>/dev/null || true
+    chmod 600 "$profile_tmp/install-state/official-login-mode" 2>/dev/null || true
+  fi
+  for profile_file in config.toml auth.json model_catalog.json; do
+    [ ! -e "$profile_tmp/$profile_file" ] || chmod 600 "$profile_tmp/$profile_file" 2>/dev/null || true
+  done
   rm -rf "$dest"
   mv "$profile_tmp" "$dest"
   chmod 700 "$dest" 2>/dev/null || true
@@ -1038,13 +1153,41 @@ codex_config_profile_use() {
   fi
 
   if [ -s "$dir/model_catalog.json" ]; then
-    tmp_catalog="$home_dir/model_catalog.json.tmp.$$"
-    cp "$dir/model_catalog.json" "$tmp_catalog"
-    mv "$tmp_catalog" "$home_dir/model_catalog.json"
-    chmod 600 "$home_dir/model_catalog.json" 2>/dev/null || true
+    catalog_target="$(codex_config_current_catalog_path "$home_dir/config.toml")"
+    [ -n "$catalog_target" ] || catalog_target="$home_dir/model_catalog.json"
+    catalog_dir="$(dirname "$catalog_target")"
+    if mkdir -p "$catalog_dir" 2>/dev/null; then
+      tmp_catalog="$catalog_target.tmp.$$"
+      if cp "$dir/model_catalog.json" "$tmp_catalog" 2>/dev/null && mv "$tmp_catalog" "$catalog_target" 2>/dev/null; then
+        chmod 600 "$catalog_target" 2>/dev/null || true
+      else
+        rm -f "$tmp_catalog" 2>/dev/null || true
+        catalog_target="$home_dir/model_catalog.json"
+        tmp_catalog="$catalog_target.tmp.$$"
+        cp "$dir/model_catalog.json" "$tmp_catalog"
+        mv "$tmp_catalog" "$catalog_target"
+        chmod 600 "$catalog_target" 2>/dev/null || true
+        codex_config_set_catalog_path "$home_dir/config.toml" "$catalog_target"
+      fi
+    else
+      catalog_target="$home_dir/model_catalog.json"
+      tmp_catalog="$catalog_target.tmp.$$"
+      cp "$dir/model_catalog.json" "$tmp_catalog"
+      mv "$tmp_catalog" "$catalog_target"
+      chmod 600 "$catalog_target" 2>/dev/null || true
+      codex_config_set_catalog_path "$home_dir/config.toml" "$catalog_target"
+    fi
   fi
 
-  codex_config_clear_official_mode
+  profile_marker="$dir/install-state/official-login-mode"
+  runtime_marker="$(codex_config_official_marker_file)"
+  if [ -s "$profile_marker" ]; then
+    mkdir -p "$(dirname "$runtime_marker")"
+    cp "$profile_marker" "$runtime_marker"
+    chmod 600 "$runtime_marker" 2>/dev/null || true
+  else
+    codex_config_clear_official_mode
+  fi
   codex_config_apply_full_permission "$home_dir/config.toml"
   codex_config_ensure_default_hooks
   codex_config_profile_mark_current "$name"
@@ -1241,6 +1384,7 @@ codex_config_profile_summary_from_dir() {
   else
     printf '%s\n' "  full_permission: no" >&2
   fi
+  [ -s "$dir/install-state/official-login-mode" ] && printf '%s\n' "  official_login_mode: yes" >&2 || printf '%s\n' "  official_login_mode: no" >&2
   [ -s "$auth" ] && printf '%s\n' "  auth.json: 已保存（key 不显示）" >&2 || printf '%s\n' "  auth.json: 缺失" >&2
   [ -s "$catalog" ] && printf '%s\n' "  model_catalog.json: 已保存" >&2 || printf '%s\n' "  model_catalog.json: 缺失" >&2
 }

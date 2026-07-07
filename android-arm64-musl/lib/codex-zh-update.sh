@@ -112,7 +112,10 @@ codex_update_apply() {
   update_changed_list="$update_tmp_root/changed.txt"
   update_applied_list="$update_tmp_root/applied.txt"
   rm -rf "$update_tmp_root"
-  mkdir -p "$dest_root" "$update_files_root" "$update_backup_root" "$update_missing_root"
+  if [ "$check_only" != "1" ]; then
+    mkdir -p "$dest_root"
+  fi
+  mkdir -p "$update_files_root" "$update_backup_root" "$update_missing_root"
   : > "$update_changed_list"
   : > "$update_applied_list"
 
@@ -134,7 +137,9 @@ EOF
     codex_die "部分脚本更新失败，请检查网络或仓库地址后重试。"
   }
 
-  mkdir -p "$dest_root"
+  if [ "$check_only" != "1" ]; then
+    mkdir -p "$dest_root"
+  fi
   changed=0
   while IFS= read -r rel; do
     [ -n "$rel" ] || continue

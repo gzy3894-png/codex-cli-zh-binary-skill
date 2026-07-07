@@ -242,6 +242,56 @@ EOF
   rm -rf "$tmp"
 }
 
+test_refresh_models_uses_current_provider_base_url() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-refresh-current-provider.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.codex"
+  cat > "$tmp/home/.codex/config.toml" <<EOF
+model_provider = "custom"
+model = "manual-selected"
+model_catalog_json = "$tmp/catalog.json"
+
+[model_providers.other]
+base_url = "https://wrong.example.test/v1"
+wire_api = "responses"
+
+[model_providers.custom]
+base_url = "https://right.example.test/v1"
+wire_api = "responses"
+EOF
+  printf '%s\n' '{"OPENAI_API_KEY":"sk-test"}' > "$tmp/home/.codex/auth.json"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-config.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    codex_config_fetch_models() {
+      [ "$1" = "https://right.example.test/v1" ] || {
+        printf 'wrong api_base: %s\n' "$1" > "$4"
+        return 1
+      }
+      cat > "$3" <<'EOF'
+{
+  "data": [
+    {"id":"manual-selected"},
+    {"id":"new-remote-model"}
+  ]
+}
+EOF
+      : > "$4"
+      return 0
+    }
+    codex_config_refresh_models >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || {
+    sed -n '1,200p' "$tmp/stderr" >&2 || true
+    fail "refresh-models should use the selected provider base_url"
+  }
+
+  assert_file_contains "$tmp/catalog.json" '"slug": "new-remote-model"'
+  rm -rf "$tmp"
+}
+
 test_interactive_model_choice_writes_only_model_id() {
   tmp="${TMPDIR:-/tmp}/codex-tui-test-interactive-model-choice.$$"
   rm -rf "$tmp"
@@ -418,6 +468,63 @@ test_profile_save_and_use_switches_only_runtime_config() {
   assert_file_contains "$tmp/home/.codex/AGENTS.md" "user agents must remain"
   assert_file_contains "$tmp/profiles.txt" "primary"
   assert_file_contains "$tmp/profiles.txt" "secondary"
+  rm -rf "$tmp"
+}
+
+test_profile_save_and_use_preserves_official_login_marker() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-profile-official-marker.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home"
+  printf '%s\n' "gpt-5.5" > "$tmp/models.txt"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-config.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    codex_config_mark_official_mode
+    codex_config_profile_save official
+    codex_config_write_third_party_config "https://api.example.test/v1" "sk-a" "gpt-5.5" "$tmp/models.txt"
+    codex_config_profile_save thirdparty
+    [ ! -e "$tmp/home/.codex/install-state/official-login-mode" ] || fail "third-party config should clear official marker"
+    codex_config_profile_use official
+  )
+
+  assert_file_contains "$tmp/home/.codex/install-state/official-login-mode" "official-login"
+  assert_file_contains "$tmp/home/.codex/config-profiles/official/install-state/official-login-mode" "official-login"
+  assert_file_contains "$tmp/home/.codex/config-profiles/current" "official"
+  rm -rf "$tmp"
+}
+
+test_profile_use_restores_custom_model_catalog_path() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-profile-custom-catalog.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.codex" "$tmp/catalogs"
+  cat > "$tmp/home/.codex/config.toml" <<EOF
+model_provider = "custom"
+model = "saved-model"
+model_catalog_json = "$tmp/catalogs/active.json"
+
+[model_providers.custom]
+base_url = "https://api.example.test/v1"
+wire_api = "responses"
+EOF
+  printf '%s\n' '{"OPENAI_API_KEY":"sk-saved"}' > "$tmp/home/.codex/auth.json"
+  printf '%s\n' '{"models":[{"slug":"saved-model"}]}' > "$tmp/catalogs/active.json"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-config.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    codex_config_profile_save customcat
+    printf '%s\n' '{"models":[{"slug":"mutated-model"}]}' > "$tmp/catalogs/active.json"
+    codex_config_profile_use customcat
+  )
+
+  assert_file_contains "$tmp/home/.codex/config.toml" "model_catalog_json = \"$tmp/catalogs/active.json\""
+  assert_file_contains "$tmp/catalogs/active.json" '"slug":"saved-model"'
+  assert_file_not_contains "$tmp/catalogs/active.json" "mutated-model"
   rm -rf "$tmp"
 }
 
@@ -621,6 +728,67 @@ test_update_download_failure_is_error() {
   rm -rf "$tmp"
 }
 
+test_update_check_does_not_modify_installed_scripts() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-update-check-dry-run.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home" "$tmp/share" "$tmp/bin"
+  printf '%s\n' "old common" > "$tmp/share/lib-old-common"
+  mkdir -p "$tmp/share/lib"
+  printf '%s\n' "old common" > "$tmp/share/lib/codex-zh-common.sh"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-download.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-update.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_INSTALL_DIR="$tmp/bin"
+    export CODEX_ZH_SCRIPT_INSTALL_ROOT="$tmp/share"
+    codex_download_first_script() {
+      stub_rel="$1"
+      stub_dest="$2"
+      mkdir -p "$(dirname "$stub_dest")"
+      printf 'new body for %s\n' "$stub_rel" > "$stub_dest"
+      chmod 755 "$stub_dest"
+      return 0
+    }
+    codex_update_apply 1 >"$tmp/stdout" 2>"$tmp/stderr"
+  ) || {
+    sed -n '1,200p' "$tmp/stderr" >&2 || true
+    fail "codex update check should complete as dry-run"
+  }
+
+  assert_file_contains "$tmp/share/lib/codex-zh-common.sh" "old common"
+  assert_file_not_contains "$tmp/share/lib/codex-zh-common.sh" "new body"
+  [ ! -e "$tmp/bin/codex-update" ] || fail "codex update check should not install command aliases"
+  assert_file_contains "$tmp/stdout" "检测到脚本更新；运行 codex-update apply 执行更新。"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-download.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-update.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_INSTALL_DIR="$tmp/bin"
+    export CODEX_ZH_SCRIPT_INSTALL_ROOT="$tmp/missing-share"
+    codex_download_first_script() {
+      stub_rel="$1"
+      stub_dest="$2"
+      mkdir -p "$(dirname "$stub_dest")"
+      printf 'new body for %s\n' "$stub_rel" > "$stub_dest"
+      chmod 755 "$stub_dest"
+      return 0
+    }
+    codex_update_apply 1 >"$tmp/stdout-missing" 2>"$tmp/stderr-missing"
+  ) || {
+    sed -n '1,200p' "$tmp/stderr-missing" >&2 || true
+    fail "codex update check should complete when install root is missing"
+  }
+
+  [ ! -e "$tmp/missing-share" ] || fail "codex update check should not create script install root"
+  rm -rf "$tmp"
+}
+
 test_partial_download_failure_is_not_accepted() {
   tmp="${TMPDIR:-/tmp}/codex-tui-test-partial-download.$$"
   rm -rf "$tmp"
@@ -744,11 +912,14 @@ run_step test_bootstrap_explicit_update_fetches_scripts
 run_step test_generated_launcher_has_no_preflight_or_profile_refresh
 run_step test_install_scripts_do_not_create_default_agents_md
 run_step test_refresh_models_preserves_current_model_fields
+run_step test_refresh_models_uses_current_provider_base_url
 run_step test_interactive_model_choice_writes_only_model_id
 run_step test_edit_current_config_preserves_key_and_writes_full_permission
 run_step test_repair_full_permission_adds_sandbox_mode
 run_step test_model_catalog_uses_current_codex_schema_shapes
 run_step test_profile_save_and_use_switches_only_runtime_config
+run_step test_profile_save_and_use_preserves_official_login_marker
+run_step test_profile_use_restores_custom_model_catalog_path
 run_step test_config_menu_can_select_saved_profile
 run_step test_config_menu_new_profile_prompts_and_saves
 run_step test_config_menu_unsaved_switch_can_save_first
@@ -756,6 +927,7 @@ run_step test_config_menu_empty_profile_and_bad_input_do_not_exit
 run_step test_config_menu_delete_profile_can_cancel
 run_step test_proot_launcher_preserves_codex_args
 run_step test_update_download_failure_is_error
+run_step test_update_check_does_not_modify_installed_scripts
 run_step test_partial_download_failure_is_not_accepted
 run_step test_self_test_fails_on_polluted_model_config
 run_step test_no_startup_auto_refresh_symbols_remain
