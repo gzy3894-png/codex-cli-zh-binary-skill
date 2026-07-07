@@ -52,7 +52,10 @@ sh -n "$TRANSFER_ASSET" || fail "codex-dev-transfer shell syntax failed"
 
 tmp="${TMPDIR:-/tmp}/codex-tui-dev-transfer-smoke.$$"
 rm -rf "$tmp"
-mkdir -p "$tmp/bin" "$tmp/export-home/.codex/sessions" "$tmp/export-home/.codex-for-tui" \
+mkdir -p "$tmp/bin" "$tmp/export-home/.codex/sessions" \
+  "$tmp/export-home/.codex/.tmp/plugins/.git/objects/pack" \
+  "$tmp/export-home/.codex/.tmp/plugins-clone-fixture/.git/objects/pack" \
+  "$tmp/export-home/.codex-for-tui" \
   "$tmp/export-home/.local/bin" "$tmp/export-home/.local/share/codex-zh" \
   "$tmp/export-home/.cache/codex-zh/scripts/lib" "$tmp/export-prefix/shared_prefs" \
   "$tmp/export-prefix/files" "$tmp/export-prefix/databases" "$tmp/export-prefix/app_webview" \
@@ -86,6 +89,9 @@ EOF
 cat > "$tmp/export-home/.codex/auth.json" <<'EOF'
 {"OPENAI_API_KEY":"sk-dev-transfer-smoke-secret"}
 EOF
+printf 'transient plugin pack cache\n' > "$tmp/export-home/.codex/.tmp/plugins-clone-fixture/.git/objects/pack/.l2s.tmp_pack_fixture.0001"
+ln -s "$tmp/export-home/.codex/.tmp/plugins-clone-fixture/.git/objects/pack/.l2s.tmp_pack_fixture.0001" \
+  "$tmp/export-home/.codex/.tmp/plugins/.git/objects/pack/pack-fixture.pack" 2>/dev/null || true
 
 cat > "$tmp/export-home/.local/bin/codex" <<'EOF'
 #!/usr/bin/env sh
@@ -124,6 +130,7 @@ tar -tzf "$snapshot" > "$tmp/default-snapshot.list"
 assert_file_contains "$tmp/default-snapshot.list" 'manifest.txt'
 assert_file_contains "$tmp/default-snapshot.list" 'payload/root/.codex/config.toml'
 assert_file_not_contains "$tmp/default-snapshot.list" 'payload/root/.codex/auth.json'
+assert_file_not_contains "$tmp/default-snapshot.list" 'payload/root/.codex/.tmp/'
 assert_file_not_contains "$tmp/default-snapshot.list" 'payload/root/.codex/sessions/'
 assert_file_not_contains "$tmp/default-snapshot.list" 'payload/app/app_webview/'
 assert_file_not_contains "$tmp/default-snapshot.list" 'payload/app/databases/'
@@ -179,6 +186,7 @@ secret_snapshot="$(ls -t "$tmp/snapshots"/codex-dev-transfer-smoke-secret-*.tar.
 [ -s "$secret_snapshot" ] || fail "include-secrets snapshot was not created"
 tar -tzf "$secret_snapshot" > "$tmp/secret-snapshot.list"
 assert_file_contains "$tmp/secret-snapshot.list" 'payload/root/.codex/auth.json'
+assert_file_not_contains "$tmp/secret-snapshot.list" 'payload/root/.codex/.tmp/'
 assert_file_contains "$tmp/secret-snapshot.list" 'payload/root/.codex/sessions/'
 assert_file_contains "$tmp/secret-snapshot.list" 'payload/app/app_webview/'
 assert_file_contains "$tmp/secret-snapshot.list" 'payload/app/databases/'

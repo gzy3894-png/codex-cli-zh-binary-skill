@@ -414,12 +414,12 @@ class TerminalBrowserSessionManager(
                 tab.loadStartedToken = 0L
                 tab.loadingMainFrameUrl = ""
                 tab.isLoading = false
-                tab.lastError = "Page load timed out before userscript completion"
+                tab.lastError = "Page load timed out"
                 publish("error", tab.lastError.orEmpty())
             }
             throw IllegalStateException(tab.lastError ?: "Page load timed out or was superseded by another navigation")
         }
-        tab.lastError?.takeIf { it.startsWith("userscript", ignoreCase = true) }?.let {
+        tab.lastError?.takeIf { !it.startsWith("userscript", ignoreCase = true) }?.let {
             publish("error", it)
             throw IllegalStateException(it)
         }
@@ -1151,20 +1151,13 @@ class TerminalBrowserSessionManager(
                 val shouldCompleteWaiter = tab.loadWaiter != null &&
                     tab.loadStartedToken == finishedToken &&
                     urlsSameForLoad(finishedUrl, tab.loadingMainFrameUrl)
+                if (shouldCompleteWaiter) {
+                    completeLoadWaiterIfCurrent(tab, finishedToken)
+                }
+                publish("done", "网页已加载")
                 applyUserScripts(tab) { error ->
                     if (!error.isNullOrBlank()) {
                         tab.lastError = error
-                    }
-                    if (shouldCompleteWaiter && tab.loadWaiterToken == finishedToken) {
-                        tab.loadWaiter?.complete(Unit)
-                        tab.loadWaiter = null
-                        tab.loadStartedToken = 0L
-                        tab.loadingMainFrameUrl = ""
-                    }
-                    if (error.isNullOrBlank()) {
-                        publish("done", "网页已加载")
-                    } else {
-                        publish("error", error)
                     }
                 }
             }
@@ -1485,6 +1478,16 @@ class TerminalBrowserSessionManager(
         if (snapshot == latestSnapshot) return
         latestSnapshot = snapshot
         onSnapshot(snapshot)
+    }
+
+    private fun completeLoadWaiterIfCurrent(tab: BrowserTab, token: Long): Boolean {
+        val waiter = tab.loadWaiter ?: return false
+        if (tab.loadWaiterToken != token) return false
+        waiter.complete(Unit)
+        tab.loadWaiter = null
+        tab.loadStartedToken = 0L
+        tab.loadingMainFrameUrl = ""
+        return true
     }
 
     private fun appendHistory(tab: BrowserTab) {

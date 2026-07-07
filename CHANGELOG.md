@@ -1,5 +1,20 @@
 # Changelog
 
+## Codex for TUI 2.3.3
+
+Codex for TUI 2.3.3 是 2.3.2 的安装后真机调试热修版，重点修复浏览器导航、事件过滤和开发迁移默认导出稳定性。
+
+### 修复
+
+- `codex-browser open` 不再把 userscript 回调完成作为导航成功前置条件；页面主框架加载完成即可返回 `state=done`，userscript 继续异步记录，避免真机误报 `Page load timed out before userscript completion`。
+- `codex-panel events files/browser`、`codex-preview events`、`codex-browser events` 按 `source/mode` 过滤，避免文件托盘和浏览器事件互串。
+- `codex-dev-transfer export` 默认安全导出和 `--include-secrets` 均排除 `.codex/.tmp`，避免临时插件缓存、symlink 或 pack 文件权限导致导出失败；默认导出仍排除 auth、Cookie、WebView/db/no_backup/browser 等敏感状态。
+
+### 验证与回滚
+
+- 本地只运行 shell/static/smoke 门禁，不本地构建 APK/Gradle；APK、正式签名和 Release 资产只通过 GitHub Actions 构建。
+- Android 不能普通覆盖降级安装；从 2.3.3（`versionCode=46`）回到更低版本需要前滚回滚包，或卸载重装并承担数据迁移/丢失风险。
+
 ## Codex for TUI 2.3.2
 
 Codex for TUI 2.3.2 是 2.3.1 后的安全与稳定补丁，重点收紧正式发布签名、开发迁移包和配置/启动语义，并补齐 rootfs/session 生命周期门禁。

@@ -72,6 +72,22 @@ assert_file_not_contains() {
   fi
 }
 
+assert_contains() {
+  haystack="$1"
+  needle="$2"
+  label="$3"
+  printf '%s\n' "$haystack" | grep -F -- "$needle" >/dev/null 2>&1 || fail "$label missing: $needle"
+}
+
+assert_not_contains() {
+  haystack="$1"
+  needle="$2"
+  label="$3"
+  if printf '%s\n' "$haystack" | grep -F -- "$needle" >/dev/null 2>&1; then
+    fail "$label should not contain: $needle"
+  fi
+}
+
 assert_nonempty_file() {
   file="$1"
   [ -s "$file" ] || fail "expected non-empty file: $file"
@@ -124,15 +140,15 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 45'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.2"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 46'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.3"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "45"'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.2'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "46"'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.3'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -346,6 +362,7 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$PREVIEW_ASSET" 'codex-preview [--present|--background] text --stdin'
   assert_file_contains "$PREVIEW_ASSET" 'codex-preview present|collapse|toggle|done|cancel|clear|close [REASON]'
   assert_file_contains "$PREVIEW_ASSET" 'codex-preview status|events|wait|result'
+  assert_file_contains "$PREVIEW_ASSET" 'print_events_for_target files'
   assert_file_contains "$PREVIEW_ASSET" 'present=%s'
   assert_file_contains "$INIT_ASSET" 'codex-preview path FILE_ID'
   assert_file_contains "$INIT_ASSET" '[ -x "$bin_dir/codex-preview" ]'
@@ -363,6 +380,7 @@ test_image_preview_bridge_asset() {
   sh -n "$PUSH_IMAGE_ASSET" || fail "codex-push-image shell syntax failed"
   sh -n "$PUSH_MEDIA_ASSET" || fail "codex-push-media shell syntax failed"
   sh -n "$BROWSER_ASSET" || fail "codex-browser shell syntax failed"
+assert_file_contains "$BROWSER_ASSET" 'print_events_for_target browser'
   sh -n "$PANEL_ASSET" || fail "codex-panel shell syntax failed"
   sh -n "$SESSION_ASSET" || fail "codex-session shell syntax failed"
   sh -n "$RTK_ASSET" || fail "codex-rtk shell syntax failed"
@@ -460,6 +478,21 @@ test_image_preview_bridge_asset() {
   [ "$stdin_resolved_path" = "$stdin_text_path" ] || fail "stdin text ref resolved wrong path: $stdin_resolved_path"
   printf '%s\n' "$output" | grep -F 'stdin long text line' >/dev/null 2>&1 && fail "codex-preview stdin dumped text content"
 
+  mkdir -p "$tmp/prefix/local/agent-panel"
+  cat > "$tmp/prefix/local/agent-panel/events" <<'EOF'
+source=files
+mode=files
+reason=file_event
+---
+source=browser
+mode=browser
+reason=browser_event
+---
+EOF
+  preview_events="$(PREFIX="$tmp/prefix" sh "$PREVIEW_ASSET" events)" || fail "codex-preview events failed"
+  assert_contains "$preview_events" "file_event" "codex-preview events"
+  assert_not_contains "$preview_events" "browser_event" "codex-preview events"
+
   if ! output="$(PREFIX="$tmp/prefix" sh "$PREVIEW_ASSET" close)"; then
     fail "codex-preview close should write a clear request"
   fi
@@ -517,12 +550,16 @@ test_codex_ops_tool_assets() {
   assert_file_contains "$DEV_TRANSFER_ASSET" 'member_has_dotdot'
   assert_file_contains "$DEV_TRANSFER_ASSET" 'symlink/hardlink'
   assert_file_contains "$DEV_TRANSFER_ASSET" 'prune_default_secrets'
+  assert_file_contains "$DEV_TRANSFER_ASSET" 'copy_codex_home_safe'
+  assert_file_contains "$DEV_TRANSFER_ASSET" 'copy_codex_home_full'
+  assert_file_contains "$DEV_TRANSFER_ASSET" '"$root/root/.codex/.tmp"'
   assert_file_contains "$DEV_TRANSFER_ASSET" 'include_secrets=0'
   assert_file_contains "$DEV_TRANSFER_ASSET" 'rewrite_payload_paths'
   assert_file_contains "$DEV_TRANSFER_ASSET" 'rollback'
   assert_file_contains "$DEV_TRANSFER_SMOKE" 'evil-unknown.tar.gz'
   assert_file_contains "$DEV_TRANSFER_SMOKE" 'evil-link.tar.gz'
   assert_file_contains "$DEV_TRANSFER_SMOKE" 'default import should not restore auth.json'
+  assert_file_contains "$DEV_TRANSFER_SMOKE" 'payload/root/.codex/.tmp/'
   assert_file_contains "$DEV_TRANSFER_SMOKE" 'include-secrets import should restore auth.json'
   assert_file_contains "$DEV_TRANSFER_SECURITY_SMOKE" 'verify should reject'
   assert_file_contains "$DEV_TRANSFER_SECURITY_SMOKE" 'target parent is a file'
@@ -696,6 +733,20 @@ test_browser_bridge_asset() {
 
   PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" status >/dev/null || fail "codex-browser status should be safe without status file"
   PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" events >/dev/null || fail "codex-browser events should be safe without events file"
+  mkdir -p "$tmp/prefix/local/agent-panel"
+  cat > "$tmp/prefix/local/agent-panel/events" <<'EOF'
+source=files
+mode=files
+reason=file_event
+---
+source=browser
+mode=browser
+reason=browser_event
+---
+EOF
+  browser_events="$(PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" events)" || fail "codex-browser events failed"
+  assert_contains "$browser_events" "browser_event" "codex-browser events"
+  assert_not_contains "$browser_events" "file_event" "codex-browser events"
   PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" result >/dev/null || fail "codex-browser result should be safe without result file"
   PREFIX="$tmp/prefix" sh "$BROWSER_ASSET" result missing-id >/dev/null || fail "codex-browser result REQUEST_ID should be safe without result file"
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'CustomTabsIntent.Builder'
@@ -724,6 +775,9 @@ test_browser_bridge_asset() {
   assert_file_contains "$TERMINAL_BROWSER_SESSION" '"userscript_add" -> userScriptAdd'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'appendHistory(tab)'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'applyUserScripts(tab) {'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'completeLoadWaiterIfCurrent(tab, finishedToken)'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'tab.lastError?.takeIf { !it.startsWith("userscript", ignoreCase = true) }'
+  assert_file_not_contains "$TERMINAL_BROWSER_SESSION" 'Page load timed out before userscript completion'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'function codexRunUserScript()'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'DOMContentLoaded'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'buildUserScriptJavascript'
@@ -788,6 +842,9 @@ test_agent_panel_bridge_asset() {
   assert_file_contains "$PANEL_ASSET" 'codex-panel clear files [REASON]'
   assert_file_contains "$PANEL_ASSET" 'codex-panel close browser [REASON]'
   assert_file_contains "$PANEL_ASSET" 'codex-panel select|remove files FILE_ID'
+  assert_file_contains "$PANEL_ASSET" 'print_events_for_target'
+  assert_file_contains "$PANEL_ASSET" 'source=files'
+  assert_file_contains "$PANEL_ASSET" 'source=browser'
 
   if ! output="$(PREFIX="$tmp/prefix" sh "$PANEL_ASSET" present files agent_review)"; then
     fail "codex-panel should write files present request"
@@ -834,6 +891,22 @@ test_agent_panel_bridge_asset() {
 
   PREFIX="$tmp/prefix" sh "$PANEL_ASSET" status >/dev/null || fail "codex-panel status should be safe without status file"
   PREFIX="$tmp/prefix" sh "$PANEL_ASSET" events >/dev/null || fail "codex-panel events should be safe without events file"
+  cat > "$tmp/prefix/local/agent-panel/events" <<'EOF'
+source=files
+mode=files
+reason=file_event
+---
+source=browser
+mode=browser
+reason=browser_event
+---
+EOF
+  panel_file_events="$(PREFIX="$tmp/prefix" sh "$PANEL_ASSET" events files)" || fail "codex-panel events files failed"
+  assert_contains "$panel_file_events" "file_event" "codex-panel events files"
+  assert_not_contains "$panel_file_events" "browser_event" "codex-panel events files"
+  panel_browser_events="$(PREFIX="$tmp/prefix" sh "$PANEL_ASSET" events browser)" || fail "codex-panel events browser failed"
+  assert_contains "$panel_browser_events" "browser_event" "codex-panel events browser"
+  assert_not_contains "$panel_browser_events" "file_event" "codex-panel events browser"
   PREFIX="$tmp/prefix" sh "$PANEL_ASSET" result files >/dev/null || fail "codex-panel files result should be safe without result file"
   PREFIX="$tmp/prefix" sh "$PANEL_ASSET" result browser >/dev/null || fail "codex-panel browser result should be safe without result file"
 

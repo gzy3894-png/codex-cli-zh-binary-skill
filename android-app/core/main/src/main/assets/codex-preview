@@ -126,6 +126,49 @@ print_file_if_readable() {
   return 1
 }
 
+print_events_for_target() {
+  target="$1"
+  events_file="$2"
+  [ -r "$events_file" ] || return 1
+  case "$target" in
+    panel|agent|all|"")
+      cat "$events_file"
+      return 0
+      ;;
+    files|file|preview)
+      wanted="files"
+      ;;
+    browser)
+      wanted="browser"
+      ;;
+    *)
+      return 2
+      ;;
+  esac
+  awk -v wanted="$wanted" '
+    function record_matches(record) {
+      if (wanted == "files") {
+        return record ~ /(^|\n)source=files(\n|$)/ || record ~ /(^|\n)mode=files(\n|$)/ || record ~ /(^|\n)source=media-preview(\n|$)/
+      }
+      if (wanted == "browser") {
+        return record ~ /(^|\n)source=browser(\n|$)/ || record ~ /(^|\n)mode=browser(\n|$)/
+      }
+      return 1
+    }
+    function emit() {
+      if (buf == "") return
+      if (record_matches(buf)) {
+        printf "%s", buf
+        print "---"
+      }
+      buf = ""
+    }
+    /^---$/ { emit(); next }
+    { buf = buf $0 "\n" }
+    END { emit() }
+  ' "$events_file"
+}
+
 wait_events() {
   panel_dir="$1/local/agent-panel"
   events_file="$panel_dir/events"
@@ -219,7 +262,7 @@ if [ "$1" = "status" ]; then
 fi
 
 if [ "$1" = "events" ]; then
-  print_file_if_readable "$prefix/local/agent-panel/events" || true
+  print_events_for_target files "$prefix/local/agent-panel/events" || true
   exit 0
 fi
 

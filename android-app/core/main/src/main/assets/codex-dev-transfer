@@ -266,6 +266,30 @@ copy_path() {
   cp -a "$src" "$dst"
 }
 
+copy_codex_home_full() {
+  src="$1"
+  dst="$2"
+  [ -d "$src" ] || return 0
+  mkdir -p "$(dirname "$dst")"
+  rm -rf "$dst"
+  mkdir -p "$dst"
+  # .tmp contains transient plugin clone/cache symlinks that are not durable
+  # state and may fail to copy on Android/proot filesystems. Never migrate it,
+  # even in --include-secrets mode.
+  for item in "$src"/.[!.]* "$src"/..?* "$src"/*; do
+    [ -e "$item" ] || continue
+    base="$(basename "$item")"
+    case "$base" in
+      .|..|.tmp) continue ;;
+    esac
+    tmp_copy="$dst/.copy-${base}-$$"
+    rm -rf "$tmp_copy"
+    cp -a "$item" "$tmp_copy"
+    rm -rf "$dst/$base"
+    mv "$tmp_copy" "$dst/$base"
+  done
+}
+
 copy_safe_file() {
   src="$1"
   dst="$2"
@@ -361,6 +385,7 @@ prune_default_secrets() {
 
   # Android WebView、数据库、no_backup 与内置浏览器目录经常携带登录态/cookie。
   rm -rf \
+    "$root/root/.codex/.tmp" \
     "$root/root/.codex/sessions" \
     "$root/app/app_webview" \
     "$root/app/databases" \
@@ -436,7 +461,11 @@ export_snapshot() {
   source_codex_home="$(codex_home_dir)"
 
   write_manifest "$stage/manifest.txt"
-  copy_path "$source_codex_home" "$stage/payload/root/.codex"
+  if [ "$include_secrets" -eq 1 ]; then
+    copy_codex_home_full "$source_codex_home" "$stage/payload/root/.codex"
+  else
+    copy_codex_home_safe "$source_codex_home" "$stage/payload/root/.codex"
+  fi
   copy_path "$source_home/.codex-for-tui" "$stage/payload/root/.codex-for-tui"
   copy_codex_bin_dir "$source_home/.local/bin" "$stage/payload/root/.local/bin"
   copy_path "$source_home/.local/share/codex-zh" "$stage/payload/root/.local/share/codex-zh"
@@ -447,12 +476,16 @@ export_snapshot() {
     copy_path "/etc/codex" "$stage/payload/etc/codex"
   fi
 
-  for name in shared_prefs files databases app_webview no_backup; do
-    copy_path "$source_prefix/$name" "$stage/payload/app/$name"
-  done
-  for name in bin lib browser media-preview agent-panel session-fold perf ops; do
-    copy_path "$source_prefix/local/$name" "$stage/payload/app/local/$name"
-  done
+  if [ "$include_secrets" -eq 1 ]; then
+    for name in shared_prefs files databases app_webview no_backup; do
+      copy_path "$source_prefix/$name" "$stage/payload/app/$name"
+    done
+    for name in bin lib browser media-preview agent-panel session-fold perf ops; do
+      copy_path "$source_prefix/local/$name" "$stage/payload/app/local/$name"
+    done
+  else
+    copy_app_state_safe "$source_prefix" "$stage/payload/app"
+  fi
 
   if [ "$include_secrets" -eq 1 ]; then
     info "敏感导出已启用：快照会包含 auth/WebView/db/no_backup/browser/cookie/login 等状态。"
