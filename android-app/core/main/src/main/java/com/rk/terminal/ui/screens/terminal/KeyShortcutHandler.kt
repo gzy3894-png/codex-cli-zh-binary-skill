@@ -46,7 +46,7 @@ object KeyShortcutHandler {
 
         val sessionId = generateUniqueSessionId(service.sessionList.keys.toList())
         viewModel.terminalView?.let {
-            val client = TerminalBackEnd(it, activity)
+            val client = TerminalBackEnd(it, activity, sessionId)
             binder.createSession(sessionId, client, Settings.working_Mode)
         }
         viewModel.changeSession(activity, binder, sessionId)

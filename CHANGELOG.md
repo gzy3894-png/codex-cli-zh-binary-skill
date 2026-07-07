@@ -1,5 +1,49 @@
 # Changelog
 
+## Codex for TUI 2.3.2
+
+Codex for TUI 2.3.2 是 2.3.1 后的安全与稳定补丁，重点收紧正式发布签名、开发迁移包和配置/启动语义，并补齐 rootfs/session 生命周期门禁。
+
+### 加固
+
+- Release 构建继续强制使用 `ANDROID_RELEASE_*` GitHub Secrets/离线签名输入；仓库 keystore/testkey fallback 被禁用，CI 会校验 packageName、versionCode、versionName、`debuggable=false` 和正式签名 SHA-256。
+- `codex-dev-transfer` 默认不导出 `auth.json`、API key、Codex sessions、Cookie、WebView/db/no_backup/browser 等登录态；敏感迁移必须显式 `--include-secrets --yes`。
+- `codex-dev-transfer import` 校验 tar 白名单，拒绝绝对路径、`..`、symlink、hardlink 和 device 节点，降低迁移包覆盖风险。
+
+### 修复与稳定性
+
+- 普通启动保持不自动联网更新脚本、不刷新模型目录、不覆盖用户手写配置；首次无配置仍保留初始化流程。
+- 快捷授权默认回车跳过，只有明确输入 `1` 才写入 requirements/hooks；配置写入采用临时文件、原子替换和可恢复备份。
+- App 生命周期补齐弱引用、每 session 独立 `PROOT_TMP_DIR` 与清理；rootfs 安装增加 lock、ready marker 和临时目录原子切换。
+
+### 验证与回滚
+
+- 本地只运行 shell/static/smoke 门禁，不本地构建 APK/Gradle。APK、正式签名和 Release 资产只通过 GitHub Actions 构建。
+- Android 不能普通覆盖降级安装；从 2.3.2（`versionCode=45`）回到更低版本需要前滚回滚包，或卸载重装并承担数据迁移/丢失风险。
+
+## Codex for TUI 2.3.1
+
+Codex for TUI 2.3.1 是 2.3.0 后的稳定底座版本，新增 App 内置诊断/清理/运维命令，并进一步收紧发布与迁移安全门禁。
+
+### 新增
+
+- 新增 `codex-doctor`、`codex-clean`、`codex-ops`，用于只读诊断、可回滚清理、任务日志、断线续连提示。
+- 新增 `$PREFIX/local/ops/tasks/<task_id>/` 状态目录，统一保存 `status`、`events`、`summary`、`resume_hint`。
+
+### 加固
+
+- files/browser/session/perf 状态补齐 `schema_version`、`timestamp_ms`、`needs_user`、`user_action` 等统一字段。
+- 浏览器 session log 只写 timestamp/request/state/action/ok 摘要，避免记录 URL、token 或 cookie。
+- GitHub Actions 正式 release 不再允许仓库 keystore/testkey fallback；release 签名必须来自 `ANDROID_RELEASE_*` GitHub Secrets，缺失任一 secret 必须失败。
+- Release APK 上传前校验 packageName、versionCode、versionName、`debuggable=false` 和正式签名证书 SHA-256。
+- `codex-dev-transfer` 后续安全迁移默认不应包含 auth、Cookie、WebView/db/no_backup/browser 等敏感登录态；需要敏感迁移时必须显式确认。
+
+### 验证与回滚
+
+- 本地仍只运行非 APK 门禁：`git diff --check`、各 bridge asset `sh -n`、`sh tests/codex-for-tui-static-guards.sh`、`sh tests/codex-for-tui-installer-smoke.sh`、`sh tests/codex-for-tui-ops-smoke.sh`、`sh tests/codex-for-tui-dev-transfer-smoke.sh`。
+- APK、正式签名和 release 资产只通过 GitHub Actions 构建；release 缺少 GitHub Secrets、包名/版本/debuggable/签名任一不匹配都会失败。
+- Android 不能普通覆盖降级安装；从 2.3.1 回到 2.3.0 需要前滚回滚包，或卸载重装并承担数据迁移/丢失风险。
+
 ## Codex for TUI 2.3.0
 
 Codex for TUI 2.3.0 是 2.2.9 后的稳定化回归版，重点不是新增大功能，而是把现有移动端协作能力纳入可重复门禁，并修复回归中发现的浏览器重复导航超时问题。

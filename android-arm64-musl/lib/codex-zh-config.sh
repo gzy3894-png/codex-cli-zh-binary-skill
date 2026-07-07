@@ -17,15 +17,18 @@ codex_config_official_marker_file() {
 codex_config_mark_official_mode() {
   codex_config_backup_current
   marker="$(codex_config_official_marker_file)"
+  marker_tmp="$(codex_config_tmp_path "$marker")"
   mkdir -p "$(dirname "$marker")"
-  printf '%s\n' "official-login" > "$marker"
-  chmod 600 "$marker" 2>/dev/null || true
+  printf '%s\n' "official-login" > "$marker_tmp" || codex_die "无法写入官方登录标记临时文件"
+  codex_config_atomic_install_file "$marker_tmp" "$marker" 600 ||
+    codex_die "无法写入官方登录标记"
   codex_config_ensure_default_hooks
   codex_config_apply_full_permission "$(codex_config_file)"
 }
 
 codex_config_clear_official_mode() {
-  rm -f "$(codex_config_official_marker_file)" 2>/dev/null || true
+  codex_config_atomic_remove_file "$(codex_config_official_marker_file)" ||
+    codex_die "无法清除官方登录标记"
 }
 
 codex_config_has_runtime_config() {
@@ -41,6 +44,84 @@ codex_config_auth_file() {
 
 codex_config_model_catalog_file() {
   printf '%s/model_catalog.json\n' "$(codex_home)"
+}
+
+codex_config_backup_stamp() {
+  codex_backup_stamp="$(date '+%Y%m%d-%H%M%S' 2>/dev/null || printf '%s' "$$")"
+  CODEX_ZH_CONFIG_BACKUP_SEQ=$(( ${CODEX_ZH_CONFIG_BACKUP_SEQ:-0} + 1 ))
+  printf '%s-%s-%s\n' "$codex_backup_stamp" "$$" "$CODEX_ZH_CONFIG_BACKUP_SEQ"
+}
+
+codex_config_safe_backup_name() {
+  codex_backup_name="${1:-backup}"
+  codex_backup_base="$(basename "$codex_backup_name" 2>/dev/null || printf '%s' "$codex_backup_name")"
+  codex_backup_safe="$(printf '%s' "$codex_backup_base" | sed 's/[^A-Za-z0-9._-]/_/g')"
+  [ -n "$codex_backup_safe" ] || codex_backup_safe="backup"
+  printf '%s\n' "$codex_backup_safe"
+}
+
+codex_config_backup_file() {
+  codex_backup_path="$1"
+  codex_backup_label="${2:-$codex_backup_path}"
+  [ -e "$codex_backup_path" ] || return 0
+  codex_backup_dir="$(codex_state_root)/backups/$(codex_config_backup_stamp)"
+  codex_backup_safe="$(codex_config_safe_backup_name "$codex_backup_label")"
+  mkdir -p "$codex_backup_dir" || return 1
+  if [ -d "$codex_backup_path" ]; then
+    cp -pR "$codex_backup_path" "$codex_backup_dir/$codex_backup_safe"
+  else
+    cp -p "$codex_backup_path" "$codex_backup_dir/$codex_backup_safe"
+  fi
+}
+
+codex_config_tmp_path() {
+  codex_tmp_dest="$1"
+  codex_tmp_dir="$(dirname "$codex_tmp_dest")"
+  codex_tmp_base="$(basename "$codex_tmp_dest")"
+  printf '%s/.%s.tmp.%s\n' "$codex_tmp_dir" "$codex_tmp_base" "$$"
+}
+
+codex_config_atomic_install_file() {
+  codex_atomic_tmp="$1"
+  codex_atomic_dest="$2"
+  codex_atomic_mode="${3:-}"
+  codex_atomic_dir="$(dirname "$codex_atomic_dest")"
+  mkdir -p "$codex_atomic_dir" || { rm -f "$codex_atomic_tmp" 2>/dev/null || true; return 1; }
+  if [ -e "$codex_atomic_dest" ]; then
+    codex_config_backup_file "$codex_atomic_dest" "$codex_atomic_dest" || { rm -f "$codex_atomic_tmp" 2>/dev/null || true; return 1; }
+  fi
+  mv "$codex_atomic_tmp" "$codex_atomic_dest" || { rm -f "$codex_atomic_tmp" 2>/dev/null || true; return 1; }
+  [ -z "$codex_atomic_mode" ] || chmod "$codex_atomic_mode" "$codex_atomic_dest" 2>/dev/null || true
+}
+
+codex_config_atomic_remove_file() {
+  codex_atomic_remove_dest="$1"
+  [ -e "$codex_atomic_remove_dest" ] || return 0
+  codex_config_backup_file "$codex_atomic_remove_dest" "$codex_atomic_remove_dest" || return 1
+  rm -f "$codex_atomic_remove_dest"
+}
+
+codex_config_atomic_replace_dir() {
+  codex_atomic_tmp_dir="$1"
+  codex_atomic_dest_dir="$2"
+  codex_atomic_label="${3:-$codex_atomic_dest_dir}"
+  codex_atomic_parent="$(dirname "$codex_atomic_dest_dir")"
+  codex_atomic_old_dir="$codex_atomic_parent/.old-$(basename "$codex_atomic_dest_dir").$$"
+  mkdir -p "$codex_atomic_parent" || { rm -rf "$codex_atomic_tmp_dir" 2>/dev/null || true; return 1; }
+  if [ -e "$codex_atomic_dest_dir" ]; then
+    codex_config_backup_file "$codex_atomic_dest_dir" "$codex_atomic_label" || { rm -rf "$codex_atomic_tmp_dir" 2>/dev/null || true; return 1; }
+    rm -rf "$codex_atomic_old_dir" 2>/dev/null || true
+    mv "$codex_atomic_dest_dir" "$codex_atomic_old_dir" || { rm -rf "$codex_atomic_tmp_dir" 2>/dev/null || true; return 1; }
+    if mv "$codex_atomic_tmp_dir" "$codex_atomic_dest_dir"; then
+      rm -rf "$codex_atomic_old_dir" 2>/dev/null || true
+    else
+      mv "$codex_atomic_old_dir" "$codex_atomic_dest_dir" 2>/dev/null || true
+      rm -rf "$codex_atomic_tmp_dir" 2>/dev/null || true
+      return 1
+    fi
+  else
+    mv "$codex_atomic_tmp_dir" "$codex_atomic_dest_dir" || { rm -rf "$codex_atomic_tmp_dir" 2>/dev/null || true; return 1; }
+  fi
 }
 
 codex_config_normalize_api_base() {
@@ -72,14 +153,14 @@ codex_config_write_auth_json() {
   home_dir="$(codex_home)"
   codex_ensure_private_dir "$home_dir"
   auth_file="$home_dir/auth.json"
-  auth_tmp="$auth_file.tmp"
+  auth_tmp="$(codex_config_tmp_path "$auth_file")"
   {
     printf '{\n'
     printf '  "OPENAI_API_KEY": "%s"\n' "$(codex_json_escape "$api_key")"
     printf '}\n'
   } > "$auth_tmp"
-  mv "$auth_tmp" "$auth_file"
-  chmod 600 "$auth_file" 2>/dev/null || true
+  codex_config_atomic_install_file "$auth_tmp" "$auth_file" 600 ||
+    codex_die "无法写入 auth.json"
 }
 
 codex_config_write_auth_helper() {
@@ -88,12 +169,14 @@ codex_config_write_auth_helper() {
   helper="$helper_dir/provider-api-key"
   codex_ensure_private_dir "$home_dir"
   mkdir -p "$helper_dir"
-  cat > "$helper" <<'EOF'
+  helper_tmp="$(codex_config_tmp_path "$helper")"
+  cat > "$helper_tmp" <<'EOF'
 #!/usr/bin/env sh
 auth_file="${CODEX_HOME:-$HOME/.codex}/auth.json"
 sed -n 's/.*"OPENAI_API_KEY"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$auth_file" | sed -n '1p'
 EOF
-  chmod 700 "$helper"
+  codex_config_atomic_install_file "$helper_tmp" "$helper" 700 ||
+    codex_die "无法写入 API Key helper"
   printf '%s\n' "$helper"
 }
 
@@ -151,8 +234,8 @@ codex_config_write_model_catalog() {
   default_model="${2:-}"
   out_json="$3"
   auto_limit="${CODEX_ZH_AUTO_COMPACT_TOKEN_LIMIT:-220000}"
-  catalog_tmp="$out_json.tmp"
-  catalog_dedup="$out_json.models.tmp"
+  catalog_tmp="$(codex_config_tmp_path "$out_json")"
+  catalog_dedup="$out_json.models.tmp.$$"
   mkdir -p "$(dirname "$out_json")"
   if [ -s "$models_file" ]; then
     awk 'NF && !seen[$0]++ { print }' "$models_file" > "$catalog_dedup"
@@ -224,8 +307,8 @@ EOF
     printf '  ]\n'
     printf '}\n'
   } > "$catalog_tmp"
-  mv "$catalog_tmp" "$out_json"
-  chmod 600 "$out_json" 2>/dev/null || true
+  codex_config_atomic_install_file "$catalog_tmp" "$out_json" 600 ||
+    codex_die "无法写入 model_catalog_json：$out_json"
   rm -f "$catalog_dedup"
 }
 
@@ -365,7 +448,7 @@ codex_config_is_full_permission() {
 codex_config_apply_full_permission() {
   cfg="${1:-$(codex_config_file)}"
   [ -s "$cfg" ] || codex_die "缺少 $cfg，无法修复授权"
-  cfg_tmp="$cfg.tmp.$$"
+  cfg_tmp="$(codex_config_tmp_path "$cfg")"
   awk '
 function is_section(line) {
   return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*($|#)/
@@ -401,8 +484,8 @@ END {
   }
 }
 ' "$cfg" > "$cfg_tmp"
-  mv "$cfg_tmp" "$cfg"
-  chmod 600 "$cfg" 2>/dev/null || true
+  codex_config_atomic_install_file "$cfg_tmp" "$cfg" 600 ||
+    codex_die "无法写入授权配置：$cfg"
 }
 
 codex_config_strip_managed_block() {
@@ -422,8 +505,10 @@ codex_config_set_hooks_feature() {
   codex_hooks_desired="${2:-true}"
   codex_hooks_home="$(codex_home)"
   mkdir -p "$codex_hooks_home"
-  [ -f "$codex_hooks_cfg" ] || : > "$codex_hooks_cfg"
-  codex_hooks_tmp="$codex_hooks_cfg.hooks.tmp.$$"
+  mkdir -p "$(dirname "$codex_hooks_cfg")" || codex_die "无法创建 hooks 配置目录：$(dirname "$codex_hooks_cfg")"
+  codex_hooks_input="$codex_hooks_cfg"
+  [ -f "$codex_hooks_input" ] || codex_hooks_input="/dev/null"
+  codex_hooks_tmp="$(codex_config_tmp_path "$codex_hooks_cfg")"
   awk -v desired="$codex_hooks_desired" '
 function is_section(line) {
   return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*($|#)/
@@ -466,15 +551,17 @@ END {
     print "hooks = " desired
   }
 }
-' "$codex_hooks_cfg" > "$codex_hooks_tmp"
-  mv "$codex_hooks_tmp" "$codex_hooks_cfg"
-  chmod 600 "$codex_hooks_cfg" 2>/dev/null || true
+' "$codex_hooks_input" > "$codex_hooks_tmp"
+  codex_config_atomic_install_file "$codex_hooks_tmp" "$codex_hooks_cfg" 600 ||
+    codex_die "无法写入 hooks 配置：$codex_hooks_cfg"
 }
 
 codex_config_append_default_hook_blocks() {
   codex_hooks_cfg="$1"
+  mkdir -p "$(dirname "$codex_hooks_cfg")" || codex_die "无法创建 hooks 配置目录：$(dirname "$codex_hooks_cfg")"
   codex_hooks_strip_rtk="$codex_hooks_cfg.strip-rtk.$$"
   codex_hooks_strip_context="$codex_hooks_cfg.strip-context.$$"
+  codex_hooks_out="$(codex_config_tmp_path "$codex_hooks_cfg")"
   codex_config_strip_managed_block \
     "# codex-for-tui-rtk-hook begin" \
     "# codex-for-tui-rtk-hook end" \
@@ -521,9 +608,10 @@ codex_config_append_default_hook_blocks() {
       printf 'statusMessage = "Recording Codex session start"\n'
       printf '# codex-for-tui-context-hook end\n'
     fi
-  } > "$codex_hooks_cfg"
+  } > "$codex_hooks_out"
   rm -f "$codex_hooks_strip_rtk" "$codex_hooks_strip_context"
-  chmod 600 "$codex_hooks_cfg" 2>/dev/null || true
+  codex_config_atomic_install_file "$codex_hooks_out" "$codex_hooks_cfg" 600 ||
+    codex_die "无法写入默认 hooks 配置：$codex_hooks_cfg"
 }
 
 codex_config_strip_default_hook_blocks() {
@@ -539,14 +627,16 @@ codex_config_strip_default_hook_blocks() {
     "# codex-for-tui-context-hook begin" \
     "# codex-for-tui-context-hook end" \
     "$codex_hooks_strip_rtk" "$codex_hooks_strip_context"
-  mv "$codex_hooks_strip_context" "$codex_hooks_cfg"
+  codex_config_atomic_install_file "$codex_hooks_strip_context" "$codex_hooks_cfg" 600 ||
+    codex_die "无法清理默认 hooks 配置：$codex_hooks_cfg"
   rm -f "$codex_hooks_strip_rtk"
-  chmod 600 "$codex_hooks_cfg" 2>/dev/null || true
 }
 
 codex_config_append_managed_hook_blocks() {
   codex_hooks_req="$1"
+  mkdir -p "$(dirname "$codex_hooks_req")" || return 1
   codex_hooks_strip="$codex_hooks_req.strip-managed.$$"
+  codex_hooks_out="$(codex_config_tmp_path "$codex_hooks_req")"
   codex_config_strip_managed_block \
     "# codex-for-tui-managed-hooks begin" \
     "# codex-for-tui-managed-hooks end" \
@@ -587,9 +677,10 @@ codex_config_append_managed_hook_blocks() {
       printf 'statusMessage = "Recording Codex session start"\n'
     fi
     printf '# codex-for-tui-managed-hooks end\n'
-  } > "$codex_hooks_req"
+  } > "$codex_hooks_out"
   rm -f "$codex_hooks_strip"
-  chmod 644 "$codex_hooks_req" 2>/dev/null || true
+  codex_config_atomic_install_file "$codex_hooks_out" "$codex_hooks_req" 644 ||
+    return 1
 }
 
 codex_config_managed_hooks_available() {
@@ -608,7 +699,6 @@ codex_config_ensure_managed_hooks() {
   codex_hooks_req="$(codex_config_requirements_file)"
   codex_hooks_dir="$(dirname "$codex_hooks_req")"
   mkdir -p "$codex_hooks_dir" || return 1
-  [ -f "$codex_hooks_req" ] || : > "$codex_hooks_req" || return 1
   codex_config_set_hooks_feature "$codex_hooks_req" true
   codex_config_append_managed_hook_blocks "$codex_hooks_req"
   codex_config_strip_default_hook_blocks "$(codex_config_file)"
@@ -618,7 +708,6 @@ codex_config_ensure_default_hooks() {
   codex_hooks_cfg="$(codex_config_file)"
   codex_hooks_home="$(codex_home)"
   mkdir -p "$codex_hooks_home"
-  [ -f "$codex_hooks_cfg" ] || : > "$codex_hooks_cfg"
   codex_config_set_hooks_feature "$codex_hooks_cfg" true
   if codex_config_managed_hooks_enabled; then
     codex_config_strip_default_hook_blocks "$codex_hooks_cfg"
@@ -651,16 +740,17 @@ codex_config_backup_current() {
 codex_config_set_catalog_path() {
   cfg="$1"
   catalog="$2"
-  cfg_tmp="$cfg.tmp"
+  cfg_tmp="$(codex_config_tmp_path "$cfg")"
   catalog_esc="$(codex_toml_escape "$catalog")"
+  mkdir -p "$(dirname "$cfg")"
   if [ -s "$cfg" ] && grep -q '^[[:space:]]*model_catalog_json[[:space:]]*=' "$cfg"; then
     sed "s#^[[:space:]]*model_catalog_json[[:space:]]*=.*#model_catalog_json = \"$catalog_esc\"#" "$cfg" > "$cfg_tmp"
   else
     [ -s "$cfg" ] && cat "$cfg" > "$cfg_tmp" || : > "$cfg_tmp"
     printf '\nmodel_catalog_json = "%s"\n' "$catalog_esc" >> "$cfg_tmp"
   fi
-  mv "$cfg_tmp" "$cfg"
-  chmod 600 "$cfg" 2>/dev/null || true
+  codex_config_atomic_install_file "$cfg_tmp" "$cfg" 600 ||
+    codex_die "无法写入 model_catalog_json 路径：$cfg"
 }
 
 codex_config_merge_common_and_runtime() {
@@ -841,7 +931,7 @@ codex_config_write_third_party_config() {
   helper_esc="$(codex_toml_escape "$helper")"
   home_esc="$(codex_toml_escape "$home_dir")"
   catalog_esc="$(codex_toml_escape "$catalog")"
-  config_tmp="$cfg.tmp"
+  config_tmp="$(codex_config_tmp_path "$cfg")"
   codex_config_clear_official_mode
   codex_config_merge_common_and_runtime \
     "$cfg" \
@@ -865,8 +955,8 @@ timeout_ms = 5000
 refresh_interval_ms = 300000
 cwd = "$home_esc"
 EOF
-  mv "$config_tmp" "$cfg"
-  chmod 600 "$cfg" 2>/dev/null || true
+  codex_config_atomic_install_file "$config_tmp" "$cfg" 600 ||
+    codex_die "无法写入 config.toml"
   codex_config_apply_full_permission "$cfg"
   codex_config_ensure_default_hooks
 }
@@ -1067,13 +1157,17 @@ codex_config_profile_mark_current() {
   name="$1"
   codex_config_profile_valid_name "$name" || codex_die "配置名称无效，只能使用字母、数字、点、下划线和短横线：$name"
   root="$(codex_config_profiles_root)"
+  current_file="$(codex_config_profile_current_file)"
+  current_tmp="$(codex_config_tmp_path "$current_file")"
   mkdir -p "$root"
-  printf '%s\n' "$name" > "$(codex_config_profile_current_file)"
-  chmod 600 "$(codex_config_profile_current_file)" 2>/dev/null || true
+  printf '%s\n' "$name" > "$current_tmp" || codex_die "无法写入当前配置标记临时文件"
+  codex_config_atomic_install_file "$current_tmp" "$current_file" 600 ||
+    codex_die "无法写入当前配置标记"
 }
 
 codex_config_profile_clear_current() {
-  rm -f "$(codex_config_profile_current_file)" 2>/dev/null || true
+  codex_config_atomic_remove_file "$(codex_config_profile_current_file)" ||
+    codex_die "无法清除当前配置标记"
 }
 
 codex_config_profile_list() {
@@ -1167,8 +1261,8 @@ codex_config_profile_save() {
   for profile_file in config.toml auth.json model_catalog.json; do
     [ ! -e "$profile_tmp/$profile_file" ] || chmod 600 "$profile_tmp/$profile_file" 2>/dev/null || true
   done
-  rm -rf "$dest"
-  mv "$profile_tmp" "$dest"
+  codex_config_atomic_replace_dir "$profile_tmp" "$dest" "profile-$name" ||
+    codex_die "无法保存配置：$name"
   chmod 700 "$dest" 2>/dev/null || true
   codex_config_profile_mark_current "$name"
   codex_info "已保存配置：$name"
@@ -1182,18 +1276,19 @@ codex_config_profile_use() {
   old_catalog="$(codex_config_current_catalog_path "$home_dir/config.toml" 2>/dev/null || true)"
   codex_config_backup_current
   codex_ensure_private_dir "$home_dir"
-  tmp_cfg="$home_dir/config.toml.tmp.$$"
+  tmp_cfg="$(codex_config_tmp_path "$home_dir/config.toml")"
   cp "$dir/config.toml" "$tmp_cfg"
-  mv "$tmp_cfg" "$home_dir/config.toml"
-  chmod 600 "$home_dir/config.toml" 2>/dev/null || true
+  codex_config_atomic_install_file "$tmp_cfg" "$home_dir/config.toml" 600 ||
+    codex_die "无法切换 config.toml"
 
   if [ -s "$dir/auth.json" ]; then
-    tmp_auth="$home_dir/auth.json.tmp.$$"
+    tmp_auth="$(codex_config_tmp_path "$home_dir/auth.json")"
     cp "$dir/auth.json" "$tmp_auth"
-    mv "$tmp_auth" "$home_dir/auth.json"
-    chmod 600 "$home_dir/auth.json" 2>/dev/null || true
+    codex_config_atomic_install_file "$tmp_auth" "$home_dir/auth.json" 600 ||
+      codex_die "无法切换 auth.json"
   else
-    rm -f "$home_dir/auth.json" 2>/dev/null || true
+    codex_config_atomic_remove_file "$home_dir/auth.json" ||
+      codex_die "无法移除旧 auth.json"
   fi
 
   if [ -s "$dir/model_catalog.json" ]; then
@@ -1201,34 +1296,35 @@ codex_config_profile_use() {
     [ -n "$catalog_target" ] || catalog_target="$home_dir/model_catalog.json"
     catalog_dir="$(dirname "$catalog_target")"
     if mkdir -p "$catalog_dir" 2>/dev/null; then
-      tmp_catalog="$catalog_target.tmp.$$"
-      if cp "$dir/model_catalog.json" "$tmp_catalog" 2>/dev/null && mv "$tmp_catalog" "$catalog_target" 2>/dev/null; then
-        chmod 600 "$catalog_target" 2>/dev/null || true
+      tmp_catalog="$(codex_config_tmp_path "$catalog_target")"
+      if cp "$dir/model_catalog.json" "$tmp_catalog" 2>/dev/null &&
+        codex_config_atomic_install_file "$tmp_catalog" "$catalog_target" 600 2>/dev/null; then
+        :
       else
         rm -f "$tmp_catalog" 2>/dev/null || true
         catalog_target="$home_dir/model_catalog.json"
-        tmp_catalog="$catalog_target.tmp.$$"
+        tmp_catalog="$(codex_config_tmp_path "$catalog_target")"
         cp "$dir/model_catalog.json" "$tmp_catalog"
-        mv "$tmp_catalog" "$catalog_target"
-        chmod 600 "$catalog_target" 2>/dev/null || true
+        codex_config_atomic_install_file "$tmp_catalog" "$catalog_target" 600 ||
+          codex_die "无法切换 model_catalog.json"
         codex_config_set_catalog_path "$home_dir/config.toml" "$catalog_target"
       fi
     else
       catalog_target="$home_dir/model_catalog.json"
-      tmp_catalog="$catalog_target.tmp.$$"
+      tmp_catalog="$(codex_config_tmp_path "$catalog_target")"
       cp "$dir/model_catalog.json" "$tmp_catalog"
-      mv "$tmp_catalog" "$catalog_target"
-      chmod 600 "$catalog_target" 2>/dev/null || true
+      codex_config_atomic_install_file "$tmp_catalog" "$catalog_target" 600 ||
+        codex_die "无法切换 model_catalog.json"
       codex_config_set_catalog_path "$home_dir/config.toml" "$catalog_target"
     fi
   else
     catalog_target="$(codex_config_current_catalog_path "$home_dir/config.toml")"
     case "$catalog_target" in
-      "$home_dir"/*) rm -f "$catalog_target" 2>/dev/null || true ;;
+      "$home_dir"/*) codex_config_atomic_remove_file "$catalog_target" || codex_die "无法移除旧 model_catalog.json" ;;
     esac
     if [ -n "$old_catalog" ] && [ "$old_catalog" != "$catalog_target" ]; then
       case "$old_catalog" in
-        "$home_dir"/*) rm -f "$old_catalog" 2>/dev/null || true ;;
+        "$home_dir"/*) codex_config_atomic_remove_file "$old_catalog" || codex_die "无法移除旧 model_catalog.json" ;;
       esac
     fi
   fi
@@ -1237,8 +1333,10 @@ codex_config_profile_use() {
   runtime_marker="$(codex_config_official_marker_file)"
   if [ -s "$profile_marker" ]; then
     mkdir -p "$(dirname "$runtime_marker")"
-    cp "$profile_marker" "$runtime_marker"
-    chmod 600 "$runtime_marker" 2>/dev/null || true
+    tmp_marker="$(codex_config_tmp_path "$runtime_marker")"
+    cp "$profile_marker" "$tmp_marker"
+    codex_config_atomic_install_file "$tmp_marker" "$runtime_marker" 600 ||
+      codex_die "无法切换官方登录标记"
   else
     codex_config_clear_official_mode
   fi
@@ -1412,6 +1510,8 @@ codex_config_profile_delete_interactive() {
     codex_warn "已取消删除。"
     return 1
   fi
+  codex_config_backup_file "$dir" "profile-$CODEX_CONFIG_PROFILE_TO_DELETE" ||
+    codex_die "无法备份待删除配置：$CODEX_CONFIG_PROFILE_TO_DELETE"
   rm -rf "$dir"
   current="$(codex_config_profile_current_name)"
   [ "$current" = "$CODEX_CONFIG_PROFILE_TO_DELETE" ] && codex_config_profile_clear_current

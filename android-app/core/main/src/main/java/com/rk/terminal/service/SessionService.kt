@@ -30,10 +30,7 @@ class SessionService : Service() {
         fun getService(): SessionService = this@SessionService
         
         fun terminateAllSessions() {
-            sessions.values.forEach { it.finishIfRunning() }
-            sessions.clear()
-            sessionList.clear()
-            updateNotification()
+            this@SessionService.terminateAllSessions()
         }
 
         fun createSession(
@@ -41,6 +38,8 @@ class SessionService : Service() {
             client: TerminalSessionClient,
             workingMode: Int
         ): TerminalSession {
+            sessions[id]?.finishIfRunning()
+            cleanupSessionTempDir(id)
             return MkSession.createSession(
                 context = this@SessionService,
                 sessionClient = client,
@@ -56,18 +55,7 @@ class SessionService : Service() {
         fun getSession(id: String): TerminalSession? = sessions[id]
 
         fun terminateSession(id: String) {
-            sessions[id]?.apply {
-                if (emulator != null) {
-                    finishIfRunning()
-                }
-            }
-            sessions.remove(id)
-            sessionList.remove(id)
-            if (sessions.isEmpty()) {
-                stopSelf()
-            } else {
-                updateNotification()
-            }
+            this@SessionService.terminateSession(id)
         }
     }
 
@@ -79,7 +67,7 @@ class SessionService : Service() {
     override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onDestroy() {
-        sessions.values.forEach { it.finishIfRunning() }
+        terminateAllSessions(updateNotification = false)
         super.onDestroy()
     }
 
@@ -99,10 +87,41 @@ class SessionService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "ACTION_EXIT") {
-            sessions.values.forEach { it.finishIfRunning() }
+            terminateAllSessions(updateNotification = false)
             stopSelf()
+            return START_NOT_STICKY
         }
-        return super.onStartCommand(intent, flags, startId)
+        return START_STICKY
+    }
+
+    private fun terminateAllSessions(updateNotification: Boolean = true) {
+        sessions.keys.toList().forEach { id ->
+            sessions[id]?.finishIfRunning()
+            cleanupSessionTempDir(id)
+        }
+        sessions.clear()
+        sessionList.clear()
+        if (updateNotification) {
+            updateNotification()
+        }
+    }
+
+    private fun terminateSession(id: String) {
+        sessions[id]?.finishIfRunning()
+        sessions.remove(id)
+        sessionList.remove(id)
+        cleanupSessionTempDir(id)
+        if (sessions.isEmpty()) {
+            stopSelf()
+        } else {
+            updateNotification()
+        }
+    }
+
+    private fun cleanupSessionTempDir(id: String) {
+        runCatching {
+            MkSession.sessionTempDir(this, id).takeIf { it.exists() }?.deleteRecursively()
+        }
     }
 
     private fun createNotification(): Notification {

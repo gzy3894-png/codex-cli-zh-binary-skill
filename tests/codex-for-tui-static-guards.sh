@@ -6,6 +6,7 @@ SCRIPT_DIR="$ROOT_DIR/android-arm64-musl"
 BUILD_WORKFLOW="$ROOT_DIR/.github/workflows/build-codex-for-tui.yml"
 MKSESSION="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MkSession.kt"
 INIT_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/init.sh"
+INIT_HOST_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/init-host.sh"
 APP_BUILD_GRADLE="$ROOT_DIR/android-app/app/build.gradle.kts"
 APP_MANIFEST="$ROOT_DIR/android-app/app/src/main/AndroidManifest.xml"
 RELEASE_KEYSTORE="$ROOT_DIR/android-app/app/codex-for-tui-2x-release.keystore"
@@ -26,9 +27,12 @@ OPS_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-ops"
 OPS_LIB_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-ops-lib"
 DEV_TRANSFER_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-dev-transfer"
 BROWSER_SMOKE="$ROOT_DIR/tests/codex-for-tui-browser-smoke.sh"
+DEVICE_SMOKE="$ROOT_DIR/tests/codex-for-tui-device-smoke.sh"
 INSTALLED_DEVICE_SMOKE="$ROOT_DIR/tests/codex-for-tui-installed-device-smoke.sh"
 OPS_SMOKE="$ROOT_DIR/tests/codex-for-tui-ops-smoke.sh"
 DEV_TRANSFER_SMOKE="$ROOT_DIR/tests/codex-for-tui-dev-transfer-smoke.sh"
+DEV_TRANSFER_SECURITY_SMOKE="$ROOT_DIR/tests/codex-for-tui-dev-transfer-security-smoke.sh"
+CONFIG_SMOKE="$ROOT_DIR/tests/codex-for-tui-config-smoke.sh"
 TERMINAL_TOP_BAR="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalTopBar.kt"
 TERMINAL_SCREEN="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalScreen.kt"
 MEDIA_PREVIEW_PANE="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MediaPreviewPane.kt"
@@ -38,6 +42,11 @@ TERMINAL_BROWSER_SESSION="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/t
 TERMINAL_VIEW_MODEL="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt"
 TERMINAL_BACK_END="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalBackEnd.kt"
 TERMINAL_VIEW_LAYOUT="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewLayout.kt"
+SESSION_SERVICE="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/service/SessionService.kt"
+ROOTFS_KT="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/Rootfs.kt"
+SETUP_SCREEN="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/downloader/SetupScreen.kt"
+RUN_COMMAND_SERVICE="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/service/RunCommandService.kt"
+CRASH_HANDLER="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/crashhandler/CrashHandler.kt"
 ALPINE_DOCUMENT_PROVIDER="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/AlpineDocumentProvider.kt"
 BACKUP_RULES="$ROOT_DIR/android-app/core/main/src/main/res/xml/backup_rules.xml"
 DATA_EXTRACTION_RULES="$ROOT_DIR/android-app/core/main/src/main/res/xml/data_extraction_rules.xml"
@@ -78,8 +87,33 @@ test_android_session_uses_root_codex_home() {
   assert_file_not_contains "$MKSESSION" 'HOME=/sdcard'
   assert_file_contains "$MKSESSION" 'HOME=/root'
   assert_file_contains "$MKSESSION" 'CODEX_HOME=/root/.codex'
+  assert_file_contains "$MKSESSION" 'fun sanitizeSessionId'
+  assert_file_contains "$MKSESSION" 'PROOT_TMP_DIR=${sessionTempDir(this, sessionId)'
+  assert_file_contains "$SESSION_SERVICE" 'cleanupSessionTempDir(id)'
+  assert_file_contains "$SESSION_SERVICE" 'terminateAllSessions(updateNotification = false)'
   assert_file_contains "$INIT_ASSET" 'export HOME="${HOME:-/root}"'
   assert_file_contains "$INIT_ASSET" 'export CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"'
+}
+
+test_android_lifecycle_rootfs_guards() {
+  sh -n "$INIT_HOST_ASSET" || fail "init-host.sh shell syntax failed"
+  assert_file_contains "$INIT_HOST_ASSET" 'ROOTFS_LOCK='
+  assert_file_contains "$INIT_HOST_ASSET" 'ROOTFS_READY_MARKER=".codex-rootfs-ready"'
+  assert_file_contains "$INIT_HOST_ASSET" 'ROOTFS_EXTRACT_DIR="$PREFIX/local/alpine.extracting.$$"'
+  assert_file_contains "$INIT_HOST_ASSET" 'Unable to activate new Alpine rootfs'
+  assert_file_contains "$ROOTFS_KT" 'ARCHIVE_READY_MARKER'
+  assert_file_contains "$ROOTFS_KT" 'withInstallLock'
+  assert_file_contains "$ROOTFS_KT" 'output.fd.sync()'
+  assert_file_contains "$SETUP_SCREEN" 'Rootfs.prepareArchiveFromAsset(context, assetName)'
+  assert_file_contains "$RUN_COMMAND_SERVICE" 'return START_NOT_STICKY'
+  assert_file_not_contains "$RUN_COMMAND_SERVICE" 'TODO()'
+  assert_file_contains "$CRASH_HANDLER" 'fun install()'
+  assert_file_contains "$CRASH_HANDLER" 'previousHandler'
+  assert_file_not_contains "$CRASH_HANDLER" 'Looper.loop()'
+  assert_file_contains "$TERMINAL_BACK_END" 'WeakReference(terminal)'
+  assert_file_contains "$TERMINAL_BACK_END" 'WeakReference(activity)'
+  assert_file_not_contains "$TERMINAL_BACK_END" 'private val terminal: TerminalView'
+  assert_file_not_contains "$TERMINAL_BACK_END" 'private val activity: MainActivity'
 }
 
 test_bootstrap_asset_is_synced() {
@@ -90,19 +124,33 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 44'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.1"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 45'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.2"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.1'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "45"'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.2'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
+  assert_file_contains "$BUILD_WORKFLOW" 'Gradle versionCode mismatch'
+  assert_file_contains "$BUILD_WORKFLOW" 'Gradle applicationId mismatch'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Prepare release signing key'
-  assert_file_contains "$BUILD_WORKFLOW" 'test -s app/codex-for-tui-2x-release.keystore'
-  assert_file_contains "$BUILD_WORKFLOW" 'Using repository 2.x release keystore from app/codex-for-tui-2x-release.keystore.'
+  assert_file_contains "$BUILD_WORKFLOW" 'name: Config manager smoke tests'
+  assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-config-smoke.sh'
+  assert_file_contains "$BUILD_WORKFLOW" 'name: Dev transfer smoke tests'
+  assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-dev-transfer-smoke.sh'
+  assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-dev-transfer-security-smoke.sh'
+  assert_file_contains "$BUILD_WORKFLOW" 'Missing required GitHub secret'
+  assert_file_contains "$BUILD_WORKFLOW" 'Release signing secrets are required; repository/test keystore fallback is forbidden.'
+  assert_file_contains "$BUILD_WORKFLOW" 'base64 --decode > /tmp/xed.keystore'
+  assert_file_contains "$BUILD_WORKFLOW" 'printf '\''storeFile=%s\n'\'' "/tmp/xed.keystore"'
+  assert_file_contains "$BUILD_WORKFLOW" 'Using configured GitHub Secrets release signing key.'
+  assert_file_not_contains "$BUILD_WORKFLOW" 'test -s app/codex-for-tui-2x-release.keystore'
+  assert_file_not_contains "$BUILD_WORKFLOW" 'Using repository 2.x release keystore'
   assert_file_not_contains "$BUILD_WORKFLOW" 'cp app/testkey.keystore /tmp/xed.keystore'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release APKs'
   assert_file_contains "$BUILD_WORKFLOW" 'mapfile -t apks'
@@ -111,7 +159,12 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" '"$aapt" dump badging "$apk"'
   assert_file_contains "$BUILD_WORKFLOW" 'Signer #1 certificate SHA-256 digest:'
   assert_file_contains "$BUILD_WORKFLOW" 'Release APK signing certificate mismatch'
+  assert_file_contains "$BUILD_WORKFLOW" 'Release APK packageName mismatch'
+  assert_file_contains "$BUILD_WORKFLOW" 'Release APK versionCode mismatch'
   assert_file_contains "$BUILD_WORKFLOW" 'Release APK versionName mismatch'
+  assert_file_contains "$BUILD_WORKFLOW" "grep -qx 'application-debuggable'"
+  assert_file_contains "$BUILD_WORKFLOW" 'Release APK must not be debuggable'
+  assert_file_contains "$BUILD_WORKFLOW" 'debuggable=false'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Generate release SHA256SUMS'
   assert_file_contains "$BUILD_WORKFLOW" 'sha256sum *.apk > SHA256SUMS'
   assert_file_contains "$BUILD_WORKFLOW" 'android-app/app/build/outputs/apk/release/SHA256SUMS'
@@ -124,14 +177,23 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'qemu-aarch64 /tmp/rtk --version'
   assert_file_contains "$BUILD_WORKFLOW" 'cp /tmp/codex-for-tui-rtk/rtk core/main/src/main/assets/rtk'
   assert_file_not_contains "$BUILD_WORKFLOW" 'codex-for-tui-unsigned-or-test-signed-release-apk'
-  [ -s "$RELEASE_KEYSTORE" ] || fail "repository 2.x release keystore missing: $RELEASE_KEYSTORE"
+  [ ! -e "$RELEASE_KEYSTORE" ] || fail "repository release keystore must not be committed: $RELEASE_KEYSTORE"
   [ ! -e "$LEGACY_DEBUG_KEYSTORE" ] || fail "legacy debug-named release key should be moved: $LEGACY_DEBUG_KEYSTORE"
-  assert_file_contains "$APP_BUILD_GRADLE" 'val repositoryReleaseKeystore = file("codex-for-tui-2x-release.keystore")'
-  assert_file_contains "$APP_BUILD_GRADLE" 'storeFile = repositoryReleaseKeystore'
-  assert_file_contains "$APP_BUILD_GRADLE" 'keyAlias = "testkey"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'fun requireSigningProperty(properties: Properties, name: String): String'
+  assert_file_contains "$APP_BUILD_GRADLE" 'ANDROID_RELEASE_SIGNING_PROPERTIES'
+  assert_file_contains "$APP_BUILD_GRADLE" '"/tmp/signing.properties"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'storeFile = File(requireSigningProperty(properties, "storeFile"))'
+  assert_file_contains "$APP_BUILD_GRADLE" 'keyAlias = requireSigningProperty(properties, "keyAlias")'
+  assert_file_contains "$APP_BUILD_GRADLE" 'Release signing is required; refusing to build an unsigned, debug-signed, or repository-signed APK.'
+  assert_file_contains "$APP_BUILD_GRADLE" 'Release signing keystore must be supplied outside the repository; repository keystore/testkey fallback is disabled.'
+  assert_file_not_contains "$APP_BUILD_GRADLE" 'repositoryReleaseKeystore'
+  assert_file_not_contains "$APP_BUILD_GRADLE" 'codex-for-tui-2x-release.keystore'
+  assert_file_not_contains "$APP_BUILD_GRADLE" 'storeFile = repositoryReleaseKeystore'
+  assert_file_not_contains "$APP_BUILD_GRADLE" 'keyAlias = "testkey"'
+  assert_file_not_contains "$APP_BUILD_GRADLE" 'keyPassword = "testkey"'
+  assert_file_not_contains "$APP_BUILD_GRADLE" 'storePassword = "testkey"'
   assert_file_contains "$APP_BUILD_GRADLE" 'signingConfig = signingConfigs.getByName("release")'
   assert_file_contains "$APP_BUILD_GRADLE" 'tasks.matching { it.name == "validateSigningRelease" }'
-  assert_file_contains "$APP_BUILD_GRADLE" 'Release signing is required; refusing to fall back to debug/test signing.'
   assert_file_not_contains "$APP_BUILD_GRADLE" 'signingConfig = signingConfigs.getByName("debug")'
   assert_file_not_contains "$APP_BUILD_GRADLE" 'signingConfig = if (signingConfigs.getByName("release").storeFile?.exists() == true)'
   assert_file_not_contains "$APP_BUILD_GRADLE" 'getByName("debug") {'
@@ -305,6 +367,7 @@ test_image_preview_bridge_asset() {
   sh -n "$SESSION_ASSET" || fail "codex-session shell syntax failed"
   sh -n "$RTK_ASSET" || fail "codex-rtk shell syntax failed"
   sh -n "$BROWSER_SMOKE" || fail "browser smoke shell syntax failed"
+  sh -n "$DEVICE_SMOKE" || fail "device smoke shell syntax failed"
   sh -n "$INSTALLED_DEVICE_SMOKE" || fail "installed device smoke shell syntax failed"
   sh -n "$INIT_ASSET" || fail "init.sh shell syntax failed"
   assert_file_contains "$PREVIEW_ASSET" 'queue_dir="$bridge_dir/queue"'
@@ -442,15 +505,34 @@ test_codex_ops_tool_assets() {
   assert_nonempty_file "$DEV_TRANSFER_ASSET"
   sh -n "$DEV_TRANSFER_ASSET" || fail "codex-dev-transfer shell syntax failed"
   sh -n "$DEV_TRANSFER_SMOKE" || fail "dev transfer smoke shell syntax failed"
+  sh -n "$DEV_TRANSFER_SECURITY_SMOKE" || fail "dev transfer security smoke shell syntax failed"
+  sh -n "$CONFIG_SMOKE" || fail "config smoke shell syntax failed"
   assert_file_contains "$DEV_TRANSFER_ASSET" 'codex-dev-transfer export [LABEL]'
+  assert_file_contains "$DEV_TRANSFER_ASSET" 'codex-dev-transfer export --include-secrets [--yes] [LABEL]'
   assert_file_contains "$DEV_TRANSFER_ASSET" 'codex-dev-transfer import [--yes] [--no-backup] FILE|latest'
   assert_file_contains "$DEV_TRANSFER_ASSET" '/storage/emulated/0/Download/Codex/dev-transfer'
+  assert_file_contains "$DEV_TRANSFER_ASSET" '默认导出会排除 auth.json'
+  assert_file_contains "$DEV_TRANSFER_ASSET" 'validate_archive'
+  assert_file_contains "$DEV_TRANSFER_ASSET" 'member_is_whitelisted'
+  assert_file_contains "$DEV_TRANSFER_ASSET" 'member_has_dotdot'
+  assert_file_contains "$DEV_TRANSFER_ASSET" 'symlink/hardlink'
+  assert_file_contains "$DEV_TRANSFER_ASSET" 'prune_default_secrets'
+  assert_file_contains "$DEV_TRANSFER_ASSET" 'include_secrets=0'
   assert_file_contains "$DEV_TRANSFER_ASSET" 'rewrite_payload_paths'
   assert_file_contains "$DEV_TRANSFER_ASSET" 'rollback'
+  assert_file_contains "$DEV_TRANSFER_SMOKE" 'evil-unknown.tar.gz'
+  assert_file_contains "$DEV_TRANSFER_SMOKE" 'evil-link.tar.gz'
+  assert_file_contains "$DEV_TRANSFER_SMOKE" 'default import should not restore auth.json'
+  assert_file_contains "$DEV_TRANSFER_SMOKE" 'include-secrets import should restore auth.json'
+  assert_file_contains "$DEV_TRANSFER_SECURITY_SMOKE" 'verify should reject'
+  assert_file_contains "$DEV_TRANSFER_SECURITY_SMOKE" 'target parent is a file'
+  assert_file_contains "$CONFIG_SMOKE" 'test_hook_quick_auth_writes_only_after_explicit_choice_and_backs_up'
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'codex-doctor'
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'codex-clean'
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'codex-ops'
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'codex-dev-transfer'
+  assert_file_contains "$DEVICE_SMOKE" 'PACKAGE="${CODEX_TUI_PACKAGE:-com.gzy3894.codexfortui.test}"'
+  assert_file_not_contains "$DEVICE_SMOKE" 'com.gzy3894.codexfortui.debug'
 }
 
 test_browser_bridge_asset() {
@@ -1263,6 +1345,7 @@ test_installer_does_not_manage_agents_md() {
 }
 
 run_step test_android_session_uses_root_codex_home
+run_step test_android_lifecycle_rootfs_guards
 run_step test_bootstrap_asset_is_synced
 run_step test_debug_build_uses_test_package_name
 run_step test_release_workflow_signature_gate

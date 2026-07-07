@@ -1,5 +1,6 @@
 package com.rk.terminal.ui.screens.terminal
 
+import android.content.Context
 import android.content.res.Configuration
 import android.content.res.Resources
 import android.media.MediaPlayer
@@ -9,7 +10,6 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.lifecycleScope
 import com.blankj.utilcode.util.ClipboardUtils
 import com.blankj.utilcode.util.KeyboardUtils
 import com.rk.libcommons.child
@@ -23,9 +23,11 @@ import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.FileOutputStream
+import java.lang.ref.WeakReference
 
 object TerminalRenderPerformanceMetrics {
     data class Snapshot(
@@ -208,12 +210,16 @@ object TerminalRenderPerformanceMetrics {
 }
 
 class TerminalBackEnd(
-    private val terminal: TerminalView,
-    private val activity: MainActivity,
-    private val coroutineScope: CoroutineScope = activity.lifecycleScope
+    terminal: TerminalView,
+    activity: MainActivity,
+    private val sessionId: String? = null
 ) : TerminalViewClient, TerminalSessionClient {
 
-    private val terminalViewModel by lazy { ViewModelProvider(activity)[TerminalViewModel::class.java] }
+    private val terminalRef = WeakReference(terminal)
+    private val activityRef = WeakReference(activity)
+    private val appContext: Context = activity.applicationContext
+    private val backendJob = SupervisorJob()
+    private val coroutineScope = CoroutineScope(backendJob + Dispatchers.Main.immediate)
     private val screenUpdateLock = Any()
     private var screenUpdateScheduled = false
     private var pendingScreenUpdateDelayMs = TEXT_UPDATE_COALESCE_DELAY_MS
@@ -232,11 +238,13 @@ class TerminalBackEnd(
         val delayMs = synchronized(screenUpdateLock) {
             if (screenUpdateScheduled) pendingScreenUpdateDelayMs else null
         } ?: return@Runnable
+        val terminal = terminalRef.get() ?: return@Runnable
         terminal.removeCallbacks(screenUpdateRunnable)
         terminal.postOnAnimationDelayed(screenUpdateRunnable, delayMs)
     }
 
     override fun onTextChanged(changedSession: TerminalSession) {
+        val terminal = terminalRef.get() ?: return
         if (changedSession != terminal.currentSession) return
         val coalesced = scheduleScreenUpdate(
             delayMs = if (isRecentUserInput()) {
@@ -249,13 +257,18 @@ class TerminalBackEnd(
     }
 
     override fun onTitleChanged(changedSession: TerminalSession) {}
-    override fun onSessionFinished(finishedSession: TerminalSession) {}
+    override fun onSessionFinished(finishedSession: TerminalSession) {
+        cancelPendingScreenUpdate()
+        cleanupSessionTempDir()
+        backendJob.cancel()
+    }
 
     override fun onCopyTextToClipboard(session: TerminalSession, text: String) {
         ClipboardUtils.copyText("Terminal", text)
     }
 
     override fun onPasteTextFromClipboard(session: TerminalSession?) {
+        val terminal = terminalRef.get() ?: return
         val clip = ClipboardUtils.getText().toString()
         if (clip.trim().isNotEmpty() && terminal.mEmulator != null) {
             noteUserInput()
@@ -267,10 +280,10 @@ class TerminalBackEnd(
         if (!Settings.bell) return
         
         coroutineScope.launch {
-            val bellFile = activity.cacheDir.child("bell.oga")
+            val bellFile = appContext.cacheDir.child("bell.oga")
             if (!bellFile.exists()) {
                 withContext(Dispatchers.IO) {
-                    activity.assets.open("bell.oga").use { input ->
+                    appContext.assets.open("bell.oga").use { input ->
                         FileOutputStream(bellFile).use { output ->
                             input.copyTo(output)
                         }
@@ -307,8 +320,10 @@ class TerminalBackEnd(
 
     override fun onScale(scale: Float): Float {
         val fontScale = scale.coerceIn(10f, 45f)
-        terminal.setTextSize(fontScale.toInt())
-        requestImmediateScreenRefresh()
+        terminalRef.get()?.let {
+            it.setTextSize(fontScale.toInt())
+            requestImmediateScreenRefresh()
+        }
         return fontScale
     }
 
@@ -329,6 +344,7 @@ class TerminalBackEnd(
 
     override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean {
         noteUserInput()
+        val activity = activityRef.get() ?: return false
         if (KeyShortcutHandler.handle(keyCode, e, activity)) return true
         
         if (keyCode == KeyEvent.KEYCODE_ENTER && !session.isRunning) {
@@ -341,7 +357,7 @@ class TerminalBackEnd(
             if (service.sessionList.isEmpty()) {
                 activity.finish()
             } else {
-                terminalViewModel.changeSession(activity, binder, service.sessionList.keys.first())
+                terminalViewModel()?.changeSession(activity, binder, service.sessionList.keys.first())
             }
             return true
         }
@@ -355,16 +371,16 @@ class TerminalBackEnd(
     override fun onLongPress(event: MotionEvent): Boolean = false
 
     override fun readControlKey(): Boolean =
-        terminalViewModel.virtualKeysView?.readSpecialButton(SpecialButton.CTRL, true) == true
+        terminalViewModel()?.virtualKeysView?.readSpecialButton(SpecialButton.CTRL, true) == true
 
     override fun readAltKey(): Boolean =
-        terminalViewModel.virtualKeysView?.readSpecialButton(SpecialButton.ALT, true) == true
+        terminalViewModel()?.virtualKeysView?.readSpecialButton(SpecialButton.ALT, true) == true
 
     override fun readShiftKey(): Boolean =
-        terminalViewModel.virtualKeysView?.readSpecialButton(SpecialButton.SHIFT, true) == true
+        terminalViewModel()?.virtualKeysView?.readSpecialButton(SpecialButton.SHIFT, true) == true
 
     override fun readFnKey(): Boolean =
-        terminalViewModel.virtualKeysView?.readSpecialButton(SpecialButton.FN, true) == true
+        terminalViewModel()?.virtualKeysView?.readSpecialButton(SpecialButton.FN, true) == true
 
     override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean {
         noteUserInput()
@@ -372,6 +388,7 @@ class TerminalBackEnd(
     }
 
     override fun onEmulatorSet() {
+        val terminal = terminalRef.get() ?: return
         if (terminal.mEmulator != null) {
             terminal.setTerminalCursorBlinkerState(true, true)
             requestImmediateScreenRefresh()
@@ -379,6 +396,7 @@ class TerminalBackEnd(
     }
 
     private fun showSoftInput() {
+        val terminal = terminalRef.get() ?: return
         terminal.requestFocus()
         KeyboardUtils.showSoftInput(terminal)
     }
@@ -392,6 +410,7 @@ class TerminalBackEnd(
         SystemClock.uptimeMillis() - lastUserInputUptimeMs <= USER_INPUT_IMMEDIATE_WINDOW_MS
 
     private fun scheduleScreenUpdate(delayMs: Long): Boolean {
+        val terminal = terminalRef.get() ?: return false
         val normalizedDelayMs = delayMs.coerceAtLeast(0L)
         var coalesced = false
         val shouldPostScheduler = synchronized(screenUpdateLock) {
@@ -413,6 +432,7 @@ class TerminalBackEnd(
     }
 
     private fun requestImmediateScreenRefresh() {
+        val terminal = terminalRef.get() ?: return
         if (Looper.myLooper() == Looper.getMainLooper()) {
             cancelPendingScreenUpdate()
             renderScreenUpdate(burstMode = false)
@@ -425,6 +445,7 @@ class TerminalBackEnd(
     }
 
     private fun renderScreenUpdate(burstMode: Boolean) {
+        val terminal = terminalRef.get() ?: return
         val started = SystemClock.uptimeMillis()
         terminal.onScreenUpdated()
         TerminalRenderPerformanceMetrics.recordFrame(
@@ -438,8 +459,20 @@ class TerminalBackEnd(
             screenUpdateScheduled = false
             pendingScreenUpdateDelayMs = TEXT_UPDATE_COALESCE_DELAY_MS
         }
-        terminal.removeCallbacks(scheduleScreenUpdateRunnable)
-        terminal.removeCallbacks(screenUpdateRunnable)
+        terminalRef.get()?.let { terminal ->
+            terminal.removeCallbacks(scheduleScreenUpdateRunnable)
+            terminal.removeCallbacks(screenUpdateRunnable)
+        }
+    }
+
+    private fun terminalViewModel(): TerminalViewModel? =
+        activityRef.get()?.let { ViewModelProvider(it)[TerminalViewModel::class.java] }
+
+    private fun cleanupSessionTempDir() {
+        val id = sessionId ?: return
+        runCatching {
+            MkSession.sessionTempDir(appContext, id).takeIf { it.exists() }?.deleteRecursively()
+        }
     }
 
     companion object {

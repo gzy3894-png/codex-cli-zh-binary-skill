@@ -11,12 +11,14 @@ INCLUDE_SYSTEM="${CODEX_DEV_TRANSFER_INCLUDE_SYSTEM:-1}"
 json_mode=0
 assume_yes=0
 no_backup=0
+include_secrets=0
 
 usage() {
   cat <<'USAGE'
 用法:
   codex-dev-transfer doctor [--json]
   codex-dev-transfer export [LABEL]
+  codex-dev-transfer export --include-secrets [--yes] [LABEL]
   codex-dev-transfer import [--yes] [--no-backup] FILE|latest
   codex-dev-transfer verify FILE|latest
   codex-dev-transfer list
@@ -24,6 +26,8 @@ usage() {
 
 说明:
   开发者内部工具：在正式版和测试版之间搬运 Codex for TUI 状态。
+  默认导出会排除 auth.json、API key、Codex 会话、WebView/db/no_backup/browser/cookie/login 等敏感状态。
+  如确需搬运敏感状态，必须显式传入 --include-secrets，并用 --yes 或交互输入确认。
   默认中转目录：/storage/emulated/0/Download/Codex/dev-transfer
   import 会先创建 rollback 包；不会打印 auth/token/cookie 内容。
 USAGE
@@ -87,7 +91,7 @@ codex_home_dir() {
 
 ensure_tools() {
   missing=""
-  for c in tar gzip find cp mv rm mkdir sed grep date wc ls basename dirname awk; do
+  for c in tar gzip find cp mv rm mkdir sed grep date wc ls basename dirname awk tr chmod; do
     have "$c" || missing="$missing $c"
   done
   [ -z "$missing" ] || die "缺少基础命令:$missing"
@@ -124,6 +128,135 @@ resolve_snapshot_arg() {
   esac
 }
 
+member_has_dotdot() {
+  case "$1" in
+    ..|../*|*/..|*/../*) return 0 ;;
+  esac
+  return 1
+}
+
+member_is_whitelisted() {
+  member="$1"
+  case "$member" in
+    manifest.txt|payload|payload/|payload/root|payload/root/|payload/app|payload/app/|payload/usr|payload/usr/|payload/usr/local|payload/usr/local/|payload/etc|payload/etc/)
+      return 0
+      ;;
+    payload/root/.codex|payload/root/.codex/*|payload/root/.codex-for-tui|payload/root/.codex-for-tui/*)
+      return 0
+      ;;
+    payload/root/.local|payload/root/.local/|payload/root/.local/bin|payload/root/.local/bin/*|payload/root/.local/share|payload/root/.local/share/|payload/root/.local/share/codex-zh|payload/root/.local/share/codex-zh/*)
+      return 0
+      ;;
+    payload/root/.cache|payload/root/.cache/|payload/root/.cache/codex-zh|payload/root/.cache/codex-zh/*)
+      return 0
+      ;;
+    payload/usr/local/bin|payload/usr/local/bin/*|payload/usr/local/share|payload/usr/local/share/|payload/usr/local/share/codex-zh|payload/usr/local/share/codex-zh/*)
+      return 0
+      ;;
+    payload/etc/codex|payload/etc/codex/*)
+      return 0
+      ;;
+    payload/app/shared_prefs|payload/app/shared_prefs/*|payload/app/files|payload/app/files/*|payload/app/databases|payload/app/databases/*|payload/app/app_webview|payload/app/app_webview/*|payload/app/no_backup|payload/app/no_backup/*)
+      return 0
+      ;;
+    payload/app/local|payload/app/local/|payload/app/local/bin|payload/app/local/bin/*|payload/app/local/lib|payload/app/local/lib/*|payload/app/local/browser|payload/app/local/browser/*|payload/app/local/media-preview|payload/app/local/media-preview/*|payload/app/local/agent-panel|payload/app/local/agent-panel/*|payload/app/local/session-fold|payload/app/local/session-fold/*|payload/app/local/perf|payload/app/local/perf/*|payload/app/local/ops|payload/app/local/ops/*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+member_is_sensitive_path() {
+  member="$1"
+  case "$member" in
+    */auth.json|payload/app/databases|payload/app/databases/*|payload/app/app_webview|payload/app/app_webview/*|payload/app/no_backup|payload/app/no_backup/*|payload/app/local/browser|payload/app/local/browser/*)
+      return 0
+      ;;
+  esac
+  sensitive_basename "$member"
+}
+
+tar_manifest_value() {
+  file="$1"
+  key="$2"
+  tar -xOzf "$file" manifest.txt 2>/dev/null | sed -n "s/^$key=//p" | sed -n '1p'
+}
+
+validate_archive() {
+  file="$1"
+  validate_dir="$WORK_ROOT/validate-$$"
+  names="$validate_dir/names.txt"
+  verbose="$validate_dir/verbose.txt"
+  rm -rf "$validate_dir"
+  mkdir -p "$validate_dir"
+
+  if ! tar -tzf "$file" > "$names"; then
+    rm -rf "$validate_dir"
+    die "tar 校验失败：$file"
+  fi
+
+  has_manifest=0
+  while IFS= read -r member; do
+    [ -n "$member" ] || {
+      rm -rf "$validate_dir"
+      die "快照包含空路径成员"
+    }
+    case "$member" in
+      /*)
+        rm -rf "$validate_dir"
+        die "快照包含绝对路径成员：$member"
+        ;;
+    esac
+    if member_has_dotdot "$member"; then
+      rm -rf "$validate_dir"
+      die "快照包含 .. 路径成员：$member"
+    fi
+    if ! member_is_whitelisted "$member"; then
+      rm -rf "$validate_dir"
+      die "快照包含非白名单成员：$member"
+    fi
+    [ "$member" = "manifest.txt" ] && has_manifest=1
+  done < "$names"
+  [ "$has_manifest" -eq 1 ] || {
+    rm -rf "$validate_dir"
+    die "缺少 manifest.txt"
+  }
+
+  if ! tar -tvzf "$file" > "$verbose"; then
+    rm -rf "$validate_dir"
+    die "tar 类型校验失败：$file"
+  fi
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    kind="$(printf '%.1s' "$line")"
+    case "$kind" in
+      -|d) ;;
+      *)
+        rm -rf "$validate_dir"
+        die "快照包含不允许的 tar 成员类型：$kind"
+        ;;
+    esac
+    case "$line" in
+      *" -> "*|*" link to "*)
+        rm -rf "$validate_dir"
+        die "快照包含 symlink/hardlink 成员"
+        ;;
+    esac
+  done < "$verbose"
+
+  archive_include_secrets="$(tar_manifest_value "$file" include_secrets)"
+  if [ "$archive_include_secrets" = "0" ]; then
+    while IFS= read -r member; do
+      if member_is_sensitive_path "$member"; then
+        rm -rf "$validate_dir"
+        die "安全快照包含敏感成员：$member"
+      fi
+    done < "$names"
+  fi
+
+  rm -rf "$validate_dir"
+}
+
 copy_path() {
   src="$1"
   dst="$2"
@@ -131,6 +264,56 @@ copy_path() {
   mkdir -p "$(dirname "$dst")"
   rm -rf "$dst"
   cp -a "$src" "$dst"
+}
+
+copy_safe_file() {
+  src="$1"
+  dst="$2"
+  [ -f "$src" ] || return 0
+  mkdir -p "$(dirname "$dst")"
+  cp -a "$src" "$dst"
+}
+
+copy_codex_home_safe() {
+  src="$1"
+  dst="$2"
+  [ -d "$src" ] || return 0
+  mkdir -p "$dst"
+  copy_safe_file "$src/config.toml" "$dst/config.toml"
+  copy_safe_file "$src/model_catalog.json" "$dst/model_catalog.json"
+  copy_safe_file "$src/settings.json" "$dst/settings.json"
+  [ ! -d "$src/bin" ] || copy_path "$src/bin" "$dst/bin"
+  [ ! -d "$src/install-state" ] || copy_path "$src/install-state" "$dst/install-state"
+  if [ -d "$src/config-profiles" ]; then
+    copy_path "$src/config-profiles" "$dst/config-profiles"
+    find "$dst/config-profiles" -type f \( \
+      -name 'auth.json' -o -name '*cookie*' -o -name '*Cookie*' -o \
+      -name '*token*' -o -name '*Token*' -o -name '*secret*' -o -name '*Secret*' \
+    \) -exec rm -f {} \; 2>/dev/null || true
+  fi
+}
+
+copy_app_state_safe() {
+  source_prefix="$1"
+  app_payload="$2"
+  for name in shared_prefs files; do
+    copy_path "$source_prefix/$name" "$app_payload/$name"
+  done
+  for name in bin lib media-preview agent-panel session-fold perf ops; do
+    copy_path "$source_prefix/local/$name" "$app_payload/local/$name"
+  done
+}
+
+confirm_secret_export() {
+  [ "$include_secrets" -eq 1 ] || return 0
+  [ "$assume_yes" -eq 1 ] && return 0
+  cat >&2 <<'EOM'
+即将导出完整开发状态到公共 Download 目录。
+该包可能包含 API key、auth.json、Cookie、WebView 登录态、数据库和会话记录。
+请输入 yes 继续导出敏感迁移包：
+EOM
+  IFS= read -r ans || ans=""
+  [ "$ans" = "yes" ] || die "已取消敏感导出"
 }
 
 copy_codex_bin_dir() {
@@ -147,6 +330,74 @@ copy_codex_bin_dir() {
   [ "$found" -eq 0 ] || return 0
 }
 
+confirm_sensitive_export() {
+  [ "$include_secrets" -eq 1 ] || return 0
+  warn "将导出敏感状态：auth.json/API key/WebView/db/no_backup/browser/cookie/login 等内容。"
+  [ "$assume_yes" -eq 1 ] && return 0
+  printf '请输入 include-secrets 继续导出敏感状态：' >&2
+  IFS= read -r ans || ans=""
+  [ "$ans" = "include-secrets" ] || die "已取消敏感导出"
+}
+
+sensitive_basename() {
+  base="$(basename "$1" | tr 'A-Z' 'a-z')"
+  case "$base" in
+    auth.json|*.pem|*.key|*cookie*|*token*|*secret*|*credential*|*password*|*login*|*api_key*|*apikey*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+sensitive_file_content() {
+  file="$1"
+  [ -f "$file" ] || return 1
+  grep -E -i 'OPENAI_API_KEY|ANTHROPIC_API_KEY|GOOGLE_API_KEY|api[_-]?key|sk-[A-Za-z0-9][A-Za-z0-9_-]*|authorization|bearer[[:space:]]+[A-Za-z0-9._-]|refresh[_-]?token|access[_-]?token|id[_-]?token|cookie|password|secret' "$file" >/dev/null 2>&1
+}
+
+prune_default_secrets() {
+  root="$1"
+  [ -d "$root" ] || return 0
+
+  # Android WebView、数据库、no_backup 与内置浏览器目录经常携带登录态/cookie。
+  rm -rf \
+    "$root/root/.codex/sessions" \
+    "$root/app/app_webview" \
+    "$root/app/databases" \
+    "$root/app/no_backup" \
+    "$root/app/local/browser" 2>/dev/null || true
+
+  find "$root" -depth 2>/dev/null | while IFS= read -r p; do
+    [ "$p" = "$root" ] && continue
+    if sensitive_basename "$p"; then
+      rm -rf "$p"
+      continue
+    fi
+    if [ -f "$p" ] && sensitive_file_content "$p"; then
+      rm -f "$p"
+    fi
+  done
+}
+
+normalize_payload_for_tar() {
+  root="$1"
+  [ -d "$root" ] || return 0
+  # 不导出 symlink/device/fifo；import 侧也会拒绝这些 tar 成员。
+  for t in l b c p; do
+    find "$root" -type "$t" -exec rm -f {} \; 2>/dev/null || true
+  done
+  # 打散硬链接，避免 tar 生成 hardlink 成员。
+  find "$root" -type f 2>/dev/null | while IFS= read -r f; do
+    tmp="$f.regular.$$"
+    rm -f "$tmp"
+    if cp -p "$f" "$tmp" 2>/dev/null && mv "$tmp" "$f"; then
+      :
+    else
+      rm -f "$tmp"
+    fi
+  done
+}
+
 write_manifest() {
   manifest="$1"
   source_prefix="$(prefix_dir)"
@@ -161,6 +412,7 @@ write_manifest() {
     printf 'source_home=%s\n' "$source_home"
     printf 'source_codex_home=%s\n' "$source_codex_home"
     printf 'tool=%s\n' "$TOOL_NAME"
+    printf 'include_secrets=%s\n' "$include_secrets"
   } > "$manifest"
 }
 
@@ -173,6 +425,7 @@ manifest_value() {
 export_snapshot() {
   label="${1:-$(package_name)-snapshot}"
   ensure_tools
+  confirm_sensitive_export
   out="$(snapshot_path_for_label "$label")"
   stage="$WORK_ROOT/export-$$"
   rm -rf "$stage"
@@ -201,6 +454,14 @@ export_snapshot() {
     copy_path "$source_prefix/local/$name" "$stage/payload/app/local/$name"
   done
 
+  if [ "$include_secrets" -eq 1 ]; then
+    info "敏感导出已启用：快照会包含 auth/WebView/db/no_backup/browser/cookie/login 等状态。"
+  else
+    prune_default_secrets "$stage/payload"
+    info "默认安全导出：已排除 auth/API key/WebView/db/no_backup/browser/cookie/login 等敏感状态。"
+  fi
+  normalize_payload_for_tar "$stage/payload"
+
   du -sh "$stage/payload" 2>/dev/null | awk '{ print "payload_size=" $1 }' >> "$stage/manifest.txt" || true
   tmp_out="$out.part"
   rm -f "$tmp_out"
@@ -218,8 +479,7 @@ export_snapshot() {
 verify_snapshot() {
   file="$(resolve_snapshot_arg "${1:-latest}")"
   ensure_tools
-  tar -tzf "$file" >/dev/null || die "tar 校验失败：$file"
-  tar -tzf "$file" | grep -F -x 'manifest.txt' >/dev/null || die "缺少 manifest.txt"
+  validate_archive "$file"
   tar -tzf "$file" | grep -F -x 'payload/root/.codex/config.toml' >/dev/null 2>&1 || warn "包内没有 payload/root/.codex/config.toml"
   if have sha256sum && [ -r "$file.sha256" ]; then
     (cd "$(dirname "$file")" && sha256sum -c "$(basename "$file").sha256") >/dev/null || die "sha256 校验失败：$file.sha256"
@@ -313,29 +573,167 @@ replace_payload_path() {
   cp -a "$src" "$dst"
 }
 
+copy_dir_contents() {
+  cdc_src="$1"
+  cdc_dst="$2"
+  [ -d "$cdc_src" ] || return 0
+  mkdir -p "$cdc_dst"
+  for cdc_item in "$cdc_src"/* "$cdc_src"/.[!.]* "$cdc_src"/..?*; do
+    [ -e "$cdc_item" ] || [ -L "$cdc_item" ] || continue
+    cp -a "$cdc_item" "$cdc_dst/"
+  done
+}
+
+prepare_replace_payload_path() {
+  src="$1"
+  dst="$2"
+  staged="$3"
+  plan="$4"
+  [ -e "$src" ] || return 0
+  rm -rf "$staged"
+  mkdir -p "$(dirname "$staged")"
+  cp -a "$src" "$staged"
+  printf 'replace|%s|%s\n' "$dst" "$staged" >> "$plan"
+}
+
+prepare_merge_tree_payload() {
+  src="$1"
+  dst="$2"
+  staged="$3"
+  plan="$4"
+  [ -d "$src" ] || return 0
+  rm -rf "$staged"
+  mkdir -p "$staged"
+  [ -d "$dst" ] && copy_dir_contents "$dst" "$staged"
+  copy_dir_contents "$src" "$staged"
+  printf 'replace|%s|%s\n' "$dst" "$staged" >> "$plan"
+}
+
+prepare_merge_bin_payload() {
+  src="$1"
+  dst="$2"
+  staged="$3"
+  plan="$4"
+  [ -d "$src" ] || return 0
+  rm -rf "$staged"
+  mkdir -p "$staged"
+  [ -d "$dst" ] && copy_dir_contents "$dst" "$staged"
+  for old in "$staged"/[cC][oO][dD][eE][xX]*; do
+    [ -e "$old" ] || [ -L "$old" ] || continue
+    rm -rf "$old"
+  done
+  copy_dir_contents "$src" "$staged"
+  printf 'replace|%s|%s\n' "$dst" "$staged" >> "$plan"
+}
+
+rollback_committed() {
+  committed="$1"
+  [ -r "$committed" ] || return 0
+  while IFS='|' read -r dst bak had; do
+    [ -n "$dst" ] || continue
+    rm -rf "$dst"
+    if [ "$had" = "1" ] && [ -e "$bak" ]; then
+      mv "$bak" "$dst" 2>/dev/null || true
+    fi
+  done < "$committed"
+}
+
+transaction_commit() {
+  plan="$1"
+  backup_root="$2"
+  [ -s "$plan" ] || return 0
+  rm -rf "$backup_root"
+  mkdir -p "$backup_root"
+  committed="$backup_root/committed.txt"
+  : > "$committed"
+  idx=0
+
+  while IFS='|' read -r kind dst src; do
+    [ -n "$kind" ] || continue
+    idx=$((idx + 1))
+    bak="$backup_root/$idx"
+    had=0
+    parent="$(dirname "$dst")"
+    if ! mkdir -p "$parent"; then
+      rollback_committed "$committed"
+      return 1
+    fi
+    if [ -e "$dst" ] || [ -L "$dst" ]; then
+      if ! mv "$dst" "$bak"; then
+        rollback_committed "$committed"
+        return 1
+      fi
+      had=1
+    fi
+    if ! cp -a "$src" "$dst"; then
+      rm -rf "$dst"
+      if [ "$had" = "1" ] && [ -e "$bak" ]; then
+        mv "$bak" "$dst" 2>/dev/null || true
+      fi
+      rollback_committed "$committed"
+      return 1
+    fi
+    printf '%s|%s|%s\n' "$dst" "$bak" "$had" >> "$committed"
+  done < "$plan"
+
+  rm -rf "$backup_root"
+  return 0
+}
+
 apply_payload() {
   extract="$1"
   target_prefix="$(prefix_dir)"
   target_home="${HOME:-/root}"
   target_codex_home="$(codex_home_dir)"
+  manifest="$extract/manifest.txt"
+  archive_include_secrets="$(manifest_value include_secrets "$manifest")"
+  [ "$archive_include_secrets" = "0" ] || archive_include_secrets=1
 
+  if [ "$archive_include_secrets" = "0" ]; then
+    prune_default_secrets "$extract/payload"
+  fi
   rewrite_payload_paths "$extract"
 
-  replace_payload_path "$extract/payload/root/.codex" "$target_codex_home"
-  replace_payload_path "$extract/payload/root/.codex-for-tui" "$target_home/.codex-for-tui"
-  merge_bin_payload "$extract/payload/root/.local/bin" "$target_home/.local/bin"
-  replace_payload_path "$extract/payload/root/.local/share/codex-zh" "$target_home/.local/share/codex-zh"
-  replace_payload_path "$extract/payload/root/.cache/codex-zh" "$target_home/.cache/codex-zh"
-  merge_bin_payload "$extract/payload/usr/local/bin" "/usr/local/bin"
-  replace_payload_path "$extract/payload/usr/local/share/codex-zh" "/usr/local/share/codex-zh"
-  replace_payload_path "$extract/payload/etc/codex" "/etc/codex"
+  txn="$WORK_ROOT/apply-$$"
+  plan="$txn/plan.txt"
+  rm -rf "$txn"
+  mkdir -p "$txn/prepared"
+  : > "$plan"
 
-  for name in shared_prefs files databases app_webview no_backup; do
-    replace_payload_path "$extract/payload/app/$name" "$target_prefix/$name"
-  done
-  for name in bin lib browser media-preview agent-panel session-fold perf ops; do
-    replace_payload_path "$extract/payload/app/local/$name" "$target_prefix/local/$name"
-  done
+  if [ "$archive_include_secrets" = "0" ]; then
+    prepare_merge_tree_payload "$extract/payload/root/.codex" "$target_codex_home" "$txn/prepared/codex_home" "$plan"
+  else
+    prepare_replace_payload_path "$extract/payload/root/.codex" "$target_codex_home" "$txn/prepared/codex_home" "$plan"
+  fi
+  prepare_replace_payload_path "$extract/payload/root/.codex-for-tui" "$target_home/.codex-for-tui" "$txn/prepared/codex_for_tui" "$plan"
+  prepare_merge_bin_payload "$extract/payload/root/.local/bin" "$target_home/.local/bin" "$txn/prepared/home_local_bin" "$plan"
+  prepare_replace_payload_path "$extract/payload/root/.local/share/codex-zh" "$target_home/.local/share/codex-zh" "$txn/prepared/home_local_share_codex_zh" "$plan"
+  prepare_replace_payload_path "$extract/payload/root/.cache/codex-zh" "$target_home/.cache/codex-zh" "$txn/prepared/home_cache_codex_zh" "$plan"
+  prepare_merge_bin_payload "$extract/payload/usr/local/bin" "/usr/local/bin" "$txn/prepared/usr_local_bin" "$plan"
+  prepare_replace_payload_path "$extract/payload/usr/local/share/codex-zh" "/usr/local/share/codex-zh" "$txn/prepared/usr_local_share_codex_zh" "$plan"
+  prepare_replace_payload_path "$extract/payload/etc/codex" "/etc/codex" "$txn/prepared/etc_codex" "$plan"
+
+  if [ "$archive_include_secrets" = "0" ]; then
+    for name in shared_prefs files; do
+      prepare_merge_tree_payload "$extract/payload/app/$name" "$target_prefix/$name" "$txn/prepared/app_$name" "$plan"
+    done
+    for name in bin lib media-preview agent-panel session-fold perf ops; do
+      prepare_merge_tree_payload "$extract/payload/app/local/$name" "$target_prefix/local/$name" "$txn/prepared/app_local_$name" "$plan"
+    done
+  else
+    for name in shared_prefs files databases app_webview no_backup; do
+      prepare_replace_payload_path "$extract/payload/app/$name" "$target_prefix/$name" "$txn/prepared/app_$name" "$plan"
+    done
+    for name in bin lib browser media-preview agent-panel session-fold perf ops; do
+      prepare_replace_payload_path "$extract/payload/app/local/$name" "$target_prefix/local/$name" "$txn/prepared/app_local_$name" "$plan"
+    done
+  fi
+
+  if ! transaction_commit "$plan" "$txn/backup"; then
+    rm -rf "$txn"
+    return 1
+  fi
+  rm -rf "$txn"
 
   # 修复常用可执行权限；失败不阻断导入。
   chmod 755 "$target_prefix/local/bin"/* 2>/dev/null || true
@@ -346,19 +744,44 @@ apply_payload() {
 import_snapshot() {
   file="$(resolve_snapshot_arg "${1:-latest}")"
   ensure_tools
-  confirm_import
   verify_snapshot "$file" >/dev/null
+  confirm_import
+  rollback_file=""
   if [ "$no_backup" -ne 1 ]; then
     backup_label="rollback-$(package_name)-$(now_stamp)"
     info "导入前创建 rollback 包..."
     export_snapshot "$backup_label" >/dev/null
+    rollback_file="$(latest_snapshot "$SNAPSHOT_DIR/$TOOL_NAME-$backup_label-*.tar.gz" 1 2>/dev/null || true)"
   fi
   extract="$WORK_ROOT/import-$$"
   rm -rf "$extract"
   mkdir -p "$extract"
-  tar -xzf "$file" -C "$extract"
-  [ -r "$extract/manifest.txt" ] || die "缺少 manifest.txt"
-  apply_payload "$extract"
+  if ! tar -xzf "$file" -C "$extract"; then
+    rm -rf "$extract"
+    die "解包失败：$file"
+  fi
+  if [ ! -r "$extract/manifest.txt" ]; then
+    rm -rf "$extract"
+    die "缺少 manifest.txt"
+  fi
+  if ! apply_payload "$extract"; then
+    warn "导入失败，开始尝试恢复导入前状态..."
+    if [ -n "$rollback_file" ] && [ -r "$rollback_file" ]; then
+      restore_extract="$WORK_ROOT/restore-$$"
+      rm -rf "$restore_extract"
+      mkdir -p "$restore_extract"
+      if validate_archive "$rollback_file" && tar -xzf "$rollback_file" -C "$restore_extract" && [ -r "$restore_extract/manifest.txt" ] && apply_payload "$restore_extract"; then
+        rm -rf "$extract" "$restore_extract"
+        die "导入失败，已用 rollback 恢复。"
+      fi
+      rm -rf "$restore_extract"
+    fi
+    rm -rf "$extract"
+    if [ -n "$rollback_file" ]; then
+      die "导入失败，且 rollback 恢复失败；请检查：$rollback_file"
+    fi
+    die "导入失败，目标状态未提交或已回滚。"
+  fi
   rm -rf "$extract"
   info "导入完成：$file"
   info "建议重启当前 App 终端后再测试。"
@@ -421,6 +844,7 @@ while [ "$#" -gt 0 ]; do
     --json) json_mode=1; shift ;;
     --yes|-y) assume_yes=1; shift ;;
     --no-backup) no_backup=1; shift ;;
+    --include-secrets) include_secrets=1; shift ;;
     --help|-h|help) usage; exit 0 ;;
     *) break ;;
   esac
@@ -441,6 +865,13 @@ esac
 case "$cmd" in
   doctor|status) doctor ;;
   export)
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --yes|-y) assume_yes=1; shift ;;
+        --include-secrets) include_secrets=1; shift ;;
+        *) break ;;
+      esac
+    done
     label="${1:-$(package_name)-snapshot}"
     export_snapshot "$label"
     ;;

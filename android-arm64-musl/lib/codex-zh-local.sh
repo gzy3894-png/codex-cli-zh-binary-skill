@@ -224,7 +224,6 @@ codex_for_tui_offer_hook_auth() {
 
   codex_for_tui_load_config_libs
   codex_init_env
-  codex_config_ensure_default_hooks
   codex_config_managed_hooks_enabled && return 0
   codex_config_managed_hooks_available || return 0
 
@@ -233,6 +232,7 @@ codex_for_tui_offer_hook_auth() {
 
 快捷授权会写入系统级 Codex requirements.toml，把 RTK/context 注册为托管 hooks。
 这样启动后不需要再进入 /hooks 手动信任；用户自己的 hooks 不会被授权。
+只有输入 1 明确同意时才会写入 requirements/hooks；直接回车会跳过本次授权。
 
 请选择：
 1. 快捷授权并启动 Codex
@@ -240,10 +240,10 @@ codex_for_tui_offer_hook_auth() {
 3. 退出到 shell
 EOM
   while :; do
-    choice="$(codex_for_tui_tty_read "请输入选项编号" "1")"
+    choice="$(codex_for_tui_tty_read "请输入选项编号" "2")"
     case "$choice" in
-      1|"")
-        if codex_config_ensure_managed_hooks; then
+      1)
+        if ( codex_config_ensure_managed_hooks ); then
           printf '%s\n' "已完成 Codex for TUI 快捷授权。以后普通启动不会再询问。" >&2
           return 0
         fi

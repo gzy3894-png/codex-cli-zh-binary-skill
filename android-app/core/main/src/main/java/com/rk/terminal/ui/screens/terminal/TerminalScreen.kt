@@ -106,7 +106,7 @@ fun TerminalScreen(
             onCreateSession = { mode ->
                 val sessionId = generateUniqueSessionId(sessionBinder.getService().sessionList.keys.toList())
                 val terminal = terminalViewModel.terminalView ?: return@AddSessionDialog
-                val client = TerminalBackEnd(terminal, mainActivity)
+                val client = TerminalBackEnd(terminal, mainActivity, sessionId)
                 sessionBinder.createSession(sessionId, client, mode)
                 terminalViewModel.changeSession(context, sessionBinder, sessionId)
                 showAddDialog = false

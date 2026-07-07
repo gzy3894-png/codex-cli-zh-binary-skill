@@ -4,7 +4,7 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 ADB="${ADB:-adb}"
 APK="${CODEX_TUI_APK:-$ROOT_DIR/android-app/app/build/outputs/apk/debug/app-debug.apk}"
-PACKAGE="${CODEX_TUI_PACKAGE:-com.gzy3894.codexfortui.debug}"
+PACKAGE="${CODEX_TUI_PACKAGE:-com.gzy3894.codexfortui.test}"
 ACTIVITY="${CODEX_TUI_ACTIVITY:-com.rk.terminal.ui.activities.terminal.MainActivity}"
 
 fail() {

@@ -37,6 +37,14 @@ jobs:
       - name: Static guard tests
         run: sh tests/codex-for-tui-static-guards.sh
 
+      - name: Config manager smoke tests
+        run: sh tests/codex-for-tui-config-smoke.sh
+
+      - name: Dev transfer smoke tests
+        run: |
+          sh tests/codex-for-tui-dev-transfer-smoke.sh
+          sh tests/codex-for-tui-dev-transfer-security-smoke.sh
+
       - name: Device smoke script syntax
         run: sh -n tests/codex-for-tui-device-smoke.sh
 
@@ -159,7 +167,9 @@ jobs:
       ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
       ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
       CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc
-      CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.1
+      CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui
+      CODEX_TUI_EXPECTED_VERSION_CODE: "45"
+      CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.2
 
     steps:
       - name: Checkout
@@ -175,6 +185,22 @@ jobs:
           )"
           if [ "$version_name" != "$CODEX_TUI_EXPECTED_VERSION_NAME" ]; then
             echo "Gradle versionName mismatch: expected $CODEX_TUI_EXPECTED_VERSION_NAME, got $version_name" >&2
+            exit 1
+          fi
+          version_code="$(
+            sed -n 's/^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' app/build.gradle.kts \
+              | tail -n 1
+          )"
+          if [ "$version_code" != "$CODEX_TUI_EXPECTED_VERSION_CODE" ]; then
+            echo "Gradle versionCode mismatch: expected $CODEX_TUI_EXPECTED_VERSION_CODE, got $version_code" >&2
+            exit 1
+          fi
+          package_name="$(
+            sed -n 's/^[[:space:]]*applicationId[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' app/build.gradle.kts \
+              | tail -n 1
+          )"
+          if [ "$package_name" != "$CODEX_TUI_EXPECTED_PACKAGE_NAME" ]; then
+            echo "Gradle applicationId mismatch: expected $CODEX_TUI_EXPECTED_PACKAGE_NAME, got $package_name" >&2
             exit 1
           fi
           if [[ "${GITHUB_REF:-}" == refs/tags/codex-for-tui-v* ]]; then
@@ -226,21 +252,33 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -n "$ANDROID_RELEASE_KEYSTORE_BASE64" ] \
-            && [ -n "$ANDROID_RELEASE_KEY_ALIAS" ] \
-            && [ -n "$ANDROID_RELEASE_KEY_PASSWORD" ] \
-            && [ -n "$ANDROID_RELEASE_STORE_PASSWORD" ]; then
-            printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > /tmp/xed.keystore
-            {
-              printf 'keyAlias=%s\n' "$ANDROID_RELEASE_KEY_ALIAS"
-              printf 'keyPassword=%s\n' "$ANDROID_RELEASE_KEY_PASSWORD"
-              printf 'storePassword=%s\n' "$ANDROID_RELEASE_STORE_PASSWORD"
-            } > /tmp/signing.properties
-            echo "Using configured release signing key."
-          else
-            test -s app/codex-for-tui-2x-release.keystore
-            echo "Using repository 2.x release keystore from app/codex-for-tui-2x-release.keystore."
+          missing=0
+          for name in ANDROID_RELEASE_KEYSTORE_BASE64 ANDROID_RELEASE_KEY_ALIAS ANDROID_RELEASE_KEY_PASSWORD ANDROID_RELEASE_STORE_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required GitHub secret: $name" >&2
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Release signing secrets are required; repository/test keystore fallback is forbidden." >&2
+            exit 1
           fi
+          if ! printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > /tmp/xed.keystore; then
+            echo "ANDROID_RELEASE_KEYSTORE_BASE64 is not valid base64." >&2
+            exit 1
+          fi
+          test -s /tmp/xed.keystore || {
+            echo "Decoded release keystore is empty." >&2
+            exit 1
+          }
+          {
+            printf 'storeFile=%s\n' "/tmp/xed.keystore"
+            printf 'keyAlias=%s\n' "$ANDROID_RELEASE_KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$ANDROID_RELEASE_KEY_PASSWORD"
+            printf 'storePassword=%s\n' "$ANDROID_RELEASE_STORE_PASSWORD"
+          } > /tmp/signing.properties
+          chmod 600 /tmp/xed.keystore /tmp/signing.properties
+          echo "Using configured GitHub Secrets release signing key."
           echo "artifact_name=codex-for-tui-release-apk" >> "$GITHUB_OUTPUT"
 
       - name: Grant Gradle wrapper permission
@@ -277,11 +315,14 @@ jobs:
           fi
 
           expected="$(printf '%s' "$CODEX_TUI_RELEASE_CERT_SHA256" | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')"
+          certs_file="$(mktemp)"
+          badging_file="$(mktemp)"
+          trap 'rm -f "$certs_file" "$badging_file"' EXIT
           for apk in "${apks[@]}"; do
             echo "Verifying $apk"
-            "$apksigner" verify --print-certs "$apk" | tee /tmp/codex-for-tui-release-certs.txt
+            "$apksigner" verify --print-certs "$apk" | tee "$certs_file"
             actual="$(
-              awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' /tmp/codex-for-tui-release-certs.txt \
+              awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' "$certs_file" \
                 | tr '[:upper:]' '[:lower:]' \
                 | tr -d ':[:space:]'
             )"
@@ -295,16 +336,36 @@ jobs:
               echo "actual=$actual" >&2
               exit 1
             fi
+            "$aapt" dump badging "$apk" > "$badging_file"
             apk_version="$(
-              "$aapt" dump badging "$apk" \
-                | sed -n "s/^package: .*versionName='\\([^']*\\)'.*/\\1/p" \
+              sed -n "s/^package: .*versionName='\\([^']*\\)'.*/\\1/p" "$badging_file" \
                 | head -n 1
             )"
+            apk_version_code="$(
+              sed -n "s/^package: .*versionCode='\\([^']*\\)'.*/\\1/p" "$badging_file" \
+                | head -n 1
+            )"
+            apk_package="$(
+              sed -n "s/^package: name='\\([^']*\\)'.*/\\1/p" "$badging_file" \
+                | head -n 1
+            )"
+            if [ "$apk_package" != "$CODEX_TUI_EXPECTED_PACKAGE_NAME" ]; then
+              echo "Release APK packageName mismatch for $apk: expected $CODEX_TUI_EXPECTED_PACKAGE_NAME, got $apk_package" >&2
+              exit 1
+            fi
+            if [ "$apk_version_code" != "$CODEX_TUI_EXPECTED_VERSION_CODE" ]; then
+              echo "Release APK versionCode mismatch for $apk: expected $CODEX_TUI_EXPECTED_VERSION_CODE, got $apk_version_code" >&2
+              exit 1
+            fi
             if [ "$apk_version" != "$CODEX_TUI_EXPECTED_VERSION_NAME" ]; then
               echo "Release APK versionName mismatch for $apk: expected $CODEX_TUI_EXPECTED_VERSION_NAME, got $apk_version" >&2
               exit 1
             fi
-            echo "Release APK verified: cert=$actual versionName=$apk_version"
+            if grep -qx 'application-debuggable' "$badging_file"; then
+              echo "Release APK must not be debuggable: $apk" >&2
+              exit 1
+            fi
+            echo "Release APK verified: cert=$actual packageName=$apk_package versionCode=$apk_version_code versionName=$apk_version debuggable=false"
           done
 
       - name: Generate release SHA256SUMS

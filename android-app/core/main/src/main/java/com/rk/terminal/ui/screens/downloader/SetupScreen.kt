@@ -18,8 +18,6 @@ import com.rk.terminal.ui.screens.terminal.TerminalScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.io.FileOutputStream
 
 @Composable
 fun SetupScreen(
@@ -54,15 +52,7 @@ fun SetupScreen(
                 }
 
                 val assetName = "alpine-$alpineArch.tar.gz.rootfs"
-                val outputFile = context.filesDir.child("alpine.tar.gz")
-
-                if (!outputFile.exists() || outputFile.length() == 0L) {
-                    context.assets.open(assetName).use { input ->
-                        FileOutputStream(outputFile).use { output ->
-                            input.copyTo(output)
-                        }
-                    }
-                }
+                Rootfs.prepareArchiveFromAsset(context, assetName)
                 
                 withContext(Dispatchers.Main) {
                     Rootfs.isInstalled.value = true

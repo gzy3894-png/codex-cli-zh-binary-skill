@@ -223,7 +223,7 @@ class TerminalViewModel : ViewModel() {
     fun changeSession(context: Context, sessionBinder: SessionService.SessionBinder, sessionId: String) {
         val terminal = terminalView ?: return
         val activity = context as? MainActivity ?: return
-        val client = TerminalBackEnd(terminal, activity)
+        val client = TerminalBackEnd(terminal, activity, sessionId)
         
         val session = sessionBinder.getSession(sessionId)
             ?: sessionBinder.createSession(sessionId, client, Settings.working_Mode)

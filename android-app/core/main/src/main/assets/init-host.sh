@@ -4,12 +4,115 @@ set -e
 PREFIX="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}"
 ALPINE_DIR="$PREFIX/local/alpine"
 ALPINE_TARBALL="$PREFIX/files/alpine.tar.gz"
+ROOTFS_READY_MARKER=".codex-rootfs-ready"
+ROOTFS_LOCK="$PREFIX/local/alpine.install.lock"
+ROOTFS_WAIT_SECONDS="${ROOTFS_WAIT_SECONDS:-120}"
 
-mkdir -p "$ALPINE_DIR"
+rootfs_has_payload() {
+  [ -d "$ALPINE_DIR" ] || return 1
+  [ -n "$(find "$ALPINE_DIR" -mindepth 1 -maxdepth 1 ! -name root ! -name tmp ! -name "$ROOTFS_READY_MARKER" 2>/dev/null | sed -n '1p')" ]
+}
 
-if [ -f "$ALPINE_TARBALL" ] && [ -z "$(find "$ALPINE_DIR" -mindepth 1 -maxdepth 1 ! -name root ! -name tmp 2>/dev/null | sed -n '1p')" ]; then
-  tar -xf "$ALPINE_TARBALL" -C "$ALPINE_DIR"
-fi
+rootfs_mark_ready() {
+  mkdir -p "$ALPINE_DIR"
+  printf 'ready %s\n' "$(date '+%s' 2>/dev/null || printf unknown)" > "$ALPINE_DIR/$ROOTFS_READY_MARKER"
+}
+
+rootfs_ready() {
+  [ -f "$ALPINE_DIR/$ROOTFS_READY_MARKER" ] && rootfs_has_payload
+}
+
+wait_for_rootfs_ready() {
+  waited=0
+  while [ "$waited" -lt "$ROOTFS_WAIT_SECONDS" ]; do
+    if rootfs_ready; then
+      return 0
+    fi
+    if rootfs_has_payload; then
+      rootfs_mark_ready
+      return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
+cleanup_rootfs_install() {
+  [ -n "${ROOTFS_EXTRACT_DIR:-}" ] && rm -rf "$ROOTFS_EXTRACT_DIR"
+  [ -n "${ROOTFS_LOCK_HELD:-}" ] && rmdir "$ROOTFS_LOCK" 2>/dev/null || true
+}
+
+install_rootfs_if_needed() {
+  if rootfs_ready; then
+    return 0
+  fi
+  if rootfs_has_payload; then
+    rootfs_mark_ready
+    return 0
+  fi
+
+  [ -f "$ALPINE_TARBALL" ] || {
+    echo "Missing Alpine rootfs archive: $ALPINE_TARBALL" >&2
+    exit 1
+  }
+
+  mkdir -p "$PREFIX/local"
+  if mkdir "$ROOTFS_LOCK" 2>/dev/null; then
+    ROOTFS_LOCK_HELD=1
+    ROOTFS_EXTRACT_DIR="$PREFIX/local/alpine.extracting.$$"
+    ROOTFS_OLD_DIR="$PREFIX/local/alpine.previous.$$"
+    trap cleanup_rootfs_install EXIT
+    trap 'cleanup_rootfs_install; exit 1' HUP INT TERM
+
+    if rootfs_ready; then
+      cleanup_rootfs_install
+      ROOTFS_LOCK_HELD=
+      ROOTFS_EXTRACT_DIR=
+      ROOTFS_OLD_DIR=
+      trap - EXIT HUP INT TERM
+      return 0
+    fi
+
+    rm -rf "$ROOTFS_EXTRACT_DIR" "$ROOTFS_OLD_DIR"
+    mkdir -p "$ROOTFS_EXTRACT_DIR"
+    tar -xf "$ALPINE_TARBALL" -C "$ROOTFS_EXTRACT_DIR"
+    mkdir -p "$ROOTFS_EXTRACT_DIR/tmp"
+    chmod 1777 "$ROOTFS_EXTRACT_DIR/tmp" 2>/dev/null || true
+    printf 'ready %s\n' "$(date '+%s' 2>/dev/null || printf unknown)" > "$ROOTFS_EXTRACT_DIR/$ROOTFS_READY_MARKER"
+
+    if [ -d "$ALPINE_DIR" ]; then
+      if ! mv "$ALPINE_DIR" "$ROOTFS_OLD_DIR"; then
+        echo "Unable to stage previous Alpine rootfs: $ALPINE_DIR" >&2
+        exit 1
+      fi
+    fi
+    if ! mv "$ROOTFS_EXTRACT_DIR" "$ALPINE_DIR"; then
+      if [ -d "$ROOTFS_OLD_DIR" ]; then
+        mv "$ROOTFS_OLD_DIR" "$ALPINE_DIR" 2>/dev/null || true
+      fi
+      echo "Unable to activate new Alpine rootfs: $ALPINE_DIR" >&2
+      exit 1
+    fi
+    if [ -d "$ROOTFS_OLD_DIR/root" ] && [ -d "$ALPINE_DIR/root" ]; then
+      cp -a "$ROOTFS_OLD_DIR/root/." "$ALPINE_DIR/root/" 2>/dev/null || true
+    fi
+    rm -rf "$ROOTFS_OLD_DIR"
+    rmdir "$ROOTFS_LOCK" 2>/dev/null || true
+
+    ROOTFS_LOCK_HELD=
+    ROOTFS_EXTRACT_DIR=
+    ROOTFS_OLD_DIR=
+    trap - EXIT HUP INT TERM
+  else
+    wait_for_rootfs_ready || {
+      echo "Timed out waiting for Alpine rootfs install lock: $ROOTFS_LOCK" >&2
+      exit 1
+    }
+  fi
+}
+
+install_rootfs_if_needed
 
 add_bind() {
   src="$1"

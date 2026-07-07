@@ -17,6 +17,8 @@
 - files/browser/session/perf 状态补齐 `schema_version`、`timestamp_ms`、`needs_user`、`user_action` 等统一字段。
 - 浏览器 session log 只写 timestamp/request/state/action/ok 摘要，避免记录 URL、token 或 cookie。
 - 终端 perf 状态增加平均/最大帧耗时、慢帧、输入事件和近期合帧计数。
+- GitHub Actions 正式 release 签名只接受 `ANDROID_RELEASE_*` GitHub Secrets，缺失任一 secret 必须失败；仓库内不再提供 keystore/testkey fallback。
+- Release APK 上传前校验 packageName、versionCode、versionName、`debuggable=false` 和正式签名证书 SHA-256。
 
 ## 升级
 
@@ -35,7 +37,7 @@ codex-ops status
 
 ## 回滚
 
-- APK 回滚：覆盖安装上一稳定版 APK，正式 2.x 签名保持一致。
+- APK 回滚：Android 普通覆盖安装不能降低 `versionCode`，因此不能把 2.3.1（`versionCode=44`）直接覆盖安装回 2.3.0（`versionCode=43`）。需要回滚时请优先发布“前滚回滚包”（保留修复前行为但使用更高 `versionCode`），或在明确会丢失/需迁移数据的情况下卸载后重装旧版。
 - 清理回滚：如执行过 `codex-clean apply <scan_task_id>`，用输出里的 `apply_task_id` 运行：
 
 ```sh

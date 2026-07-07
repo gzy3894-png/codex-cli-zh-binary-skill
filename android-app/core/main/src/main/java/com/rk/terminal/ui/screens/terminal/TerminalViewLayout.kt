@@ -41,12 +41,13 @@ fun TerminalViewLayout(
                     setTextSize(dpToPx(Settings.terminal_font_size.toFloat(), ctx))
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
                     
-                    val client = TerminalBackEnd(this, mainActivity)
                     val service = sessionBinder.getService()
+                    val sessionId = service.currentSession.value.first
+                    val client = TerminalBackEnd(this, mainActivity, sessionId)
                     
-                    val session = sessionBinder.getSession(service.currentSession.value.first)
+                    val session = sessionBinder.getSession(sessionId)
                         ?: sessionBinder.createSession(
-                            service.currentSession.value.first,
+                            sessionId,
                             client,
                             Settings.working_Mode
                         )

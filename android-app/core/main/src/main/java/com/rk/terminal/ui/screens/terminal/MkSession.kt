@@ -14,6 +14,7 @@ import com.termux.terminal.TerminalEmulator
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
 import java.io.File
+import java.security.MessageDigest
 
 object MkSession {
     private val managedScripts = mapOf(
@@ -39,6 +40,20 @@ object MkSession {
         "install-reterminal-alpine.sh",
         "codex-local-resume.sh",
     )
+    private val unsafeSessionIdChars = Regex("[^A-Za-z0-9._-]")
+
+    fun sanitizeSessionId(sessionId: String): String {
+        val base = sessionId
+            .trim()
+            .replace(unsafeSessionIdChars, "_")
+            .trim('.', '-', '_')
+            .take(64)
+            .ifBlank { "session" }
+        return "$base-${sha256Prefix(sessionId)}"
+    }
+
+    fun sessionTempDir(context: Context, sessionId: String): File =
+        getTempDir(context).child(sanitizeSessionId(sessionId))
 
     private fun Context.syncManagedScripts() {
         obsoleteScripts.forEach { outputName ->
@@ -99,7 +114,7 @@ object MkSession {
                 "PKG=${packageName}",
                 "RISH_APPLICATION_ID=${packageName}",
                 "PKG_PATH=${applicationInfo.sourceDir}",
-                "PROOT_TMP_DIR=${getTempDir(this).child(sessionId).also { if (it.exists().not()) it.mkdirs() }}",
+                "PROOT_TMP_DIR=${sessionTempDir(this, sessionId).also { if (it.exists().not()) it.mkdirs() }}",
                 "TMPDIR=${getTempDir(this).absolutePath}",
                 "PROOT_LOADER=${applicationInfo.nativeLibraryDir}/libloader.so",
                 "PROOT=${applicationInfo.nativeLibraryDir}/libproot.so",
@@ -150,6 +165,11 @@ object MkSession {
                 sessionClient,
             )
         }
+    }
+
+    private fun sha256Prefix(value: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+        return digest.take(6).joinToString(separator = "") { "%02x".format(it.toInt() and 0xff) }
     }
 }
 
