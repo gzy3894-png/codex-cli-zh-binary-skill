@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.3.4-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.3.4)
+[![Release](https://img.shields.io/badge/release-v2.3.5-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.3.5)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.142.4-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,7 +9,9 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.3.4 更新
+## 重要：2.3.5 更新
+
+2.3.5 是配置热修版：第三方 OpenAI-compatible 配置继续使用内部 provider id `custom`，但生成和修复后的 `[model_providers.custom].name` 会稳定写为 `OpenAI`，避免配置模式把兼容服务显示/协议名写成 `custom`。旧配置中 `name = "custom"` 会在修复全权限或重新生成配置时规范化；用户手写的 provider 名称不会被覆盖。发布说明见 `docs/codex-for-tui-2.3.5-release-notes.md`。
 
 2.3.4 是 2.3.3 的状态字段热修版：修复 `codex-browser open` 成功后，同一个 `request_id` 的 `status/result` 被后续 WebView snapshot 回调覆盖成 `action=snapshot` 的问题。发布说明见 `docs/codex-for-tui-2.3.4-release-notes.md`。
 
@@ -33,7 +35,7 @@ codex-ops resume-hint
 
 `codex-clean scan` 默认只扫描；`apply` 只移动到 `$PREFIX/local/ops/trash/<task_id>/`，不永久删除；误清理可用 `codex-clean restore <apply_task_id>` 恢复。详细说明见 `docs/codex-for-tui-2.3.1-ops.md`，发布说明见 `docs/codex-for-tui-2.3.1-release-notes.md`。
 
-发布安全说明：正式 APK 构建必须使用 GitHub Secrets/离线签名输入，仓库内不再提供正式 keystore fallback；Release 门禁会校验包名、版本号、非 debuggable 和正式签名指纹。Android 不支持普通覆盖安装降级，2.3.4（`versionCode=47`）回滚到更低 `versionCode` 需要前滚回滚包或卸载重装。
+发布安全说明：正式 APK 构建必须使用 GitHub Secrets/离线签名输入，仓库内不再提供正式 keystore fallback；Release 门禁会校验包名、版本号、非 debuggable 和正式签名指纹。Android 不支持普通覆盖安装降级，2.3.5（`versionCode=48`）回滚到更低 `versionCode` 需要前滚回滚包或卸载重装。
 
 2.3.0 是 2.2.9 后的稳定化回归版：补齐 `docs/codex-for-tui-2.3.0-regression.md` 和 `tests/codex-for-tui-installed-device-smoke.sh`，把安装/更新/首启、RTK/context、文件托盘、会话折叠、浏览器后台截图、JS、Auth 状态清理和终端性能状态纳入可重复门禁。真机回归时发现 `codex-browser open` 重复打开当前已加载 URL 可能卡到超时并误报 `Page load timed out before userscript completion`，2.3.0 已修复为直接返回当前页面快照；需要强制刷新时仍使用 `codex-browser reload`。
 
@@ -45,7 +47,7 @@ codex-ops resume-hint
 
 内置 WebView 继续作为 Agent Browser，保留后台打开、DOM 读取、点击、输入、JS、截图、多标签、Cookie/WebStorage 持久化和 userscript；遇到验证码/风控/外部 scheme 时会进入明确的用户协作状态，而不是让 Agent 猜。
 
-已经安装 2.0.x/2.1.x/2.2.x/2.3.x 的用户需要从 Releases 下载并覆盖安装 2.3.4 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context`、`codex-doctor`、`codex-clean`、`codex-ops` 等 APK 内置桥接命令。
+已经安装 2.0.x/2.1.x/2.2.x/2.3.x 的用户需要从 Releases 下载并覆盖安装 2.3.5 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context`、`codex-doctor`、`codex-clean`、`codex-ops` 等 APK 内置桥接命令。
 
 注意：普通启动按设计不会自动联网更新 `~/.local/share/codex-zh/scripts` 下的安装/配置脚本。已安装用户覆盖 APK 后，为确保 `codex 配置模式` 也切到最新配置管理器，请手动执行一次：
 
@@ -66,6 +68,7 @@ codex 配置模式
 
 ## 2.0 新功能
 
+- 2.3.5 修复：第三方 OpenAI-compatible 配置生成 `name = "OpenAI"`，内部 provider id 仍保持 `custom`，旧 `name = "custom"` 可安全规范化且不覆盖用户手写名称。
 - 2.3.4 修复：协作浏览器显式动作结果不再被后续 snapshot 覆盖，`codex-browser result <request_id>` 会保留 `action=navigate` 等真实动作。
 - 2.3.3 修复：`codex-browser open` 页面主框架完成即可返回，不再被 userscript 回调超时误判失败。
 - 2.3.3 修复：`codex-panel/codex-preview/codex-browser events` 按文件托盘/浏览器来源过滤，避免 Agent 状态互串。
@@ -121,6 +124,7 @@ codex 配置模式
 - 运行环境：使用 Alpine/proot 路线承载 `aarch64-unknown-linux-musl` 构建。
 - 安装流程：自动准备依赖、下载 Codex 中文版二进制、写入 PATH 和大小写命令入口。
 - 配置流程：支持官方 Codex 初始化，也支持兼容 OpenAI Responses API 的第三方服务。
+- 第三方配置：内部 provider id 保持 `custom`，写入的 provider 名称为 `OpenAI`，`base_url` 可指向兼容 OpenAI Responses API 的第三方服务。
 - 文件协作：支持图片、视频、文本预览、用户选文件、长按分享和带说明发送。
 - 浏览器协作：支持内置 WebView、Custom Tabs/系统浏览器接管、多标签和页面自动化桥接。
 - 本地维护：普通启动不改配置；脚本更新和模型目录刷新都由用户显式命令触发。
@@ -131,7 +135,7 @@ codex 配置模式
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.3.4` |
+| Android App | `2.3.5` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug/Test 包名 | `com.gzy3894.codexfortui.test` |
 | Codex CLI | `0.142.4` 中文版 |
@@ -428,6 +432,16 @@ curl -v --http1.1 https://api.example.com/v1/models
 ```
 
 如果返回 `401`，通常说明网络通了，但缺少 Authorization；如果连不上，多半是 Base URL、代理或服务端兼容性问题。
+
+脚本生成的第三方配置会保留内部引用 `model_provider = "custom"`，但 provider 显示/协议名写为 `name = "OpenAI"`：
+
+```toml
+[model_providers.custom]
+name = "OpenAI"
+base_url = "https://api.example.com/v1"
+wire_api = "responses"
+requires_openai_auth = false
+```
 
 **Codex 结束时出现 hook 相关错误？**
 

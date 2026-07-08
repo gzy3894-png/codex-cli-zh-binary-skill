@@ -87,7 +87,7 @@ codex-local refresh-models
 codex 配置模式
 ```
 
-该命令会打开配置管理器，支持新建配置、选择配置、编辑当前配置、查看配置、删除配置、保存当前配置、刷新模型目录和修复全权限授权。第三方配置会写入 `config.toml`、`auth.json` 和 `model_catalog_json`；新建或编辑完成后会主动询问是否保存为配置档，切换或退出前会提示保存未保存修改。配置切换会保持自动压缩、fast mode、goals、statusline、RTK hook、context hook 和全权限设置；全权限模式会同时写入 `approval_policy = "never"` 和 `sandbox_mode = "danger-full-access"`。
+该命令会打开配置管理器，支持新建配置、选择配置、编辑当前配置、查看配置、删除配置、保存当前配置、刷新模型目录和修复全权限授权。第三方配置会写入 `config.toml`、`auth.json` 和 `model_catalog_json`；内部 provider id 保持 `custom`，provider 名称写为 `OpenAI`，`base_url` 可指向兼容 OpenAI Responses API 的第三方服务。新建或编辑完成后会主动询问是否保存为配置档，切换或退出前会提示保存未保存修改。配置切换会保持自动压缩、fast mode、goals、statusline、RTK hook、context hook 和全权限设置；全权限模式会同时写入 `approval_policy = "never"` 和 `sandbox_mode = "danger-full-access"`。
 
 ## ReTerminal Alpine 安装
 
@@ -307,6 +307,15 @@ curl -v --http1.1 https://api.example.com/v1/models
 ```
 
 返回 `401` 通常说明网络通了但缺少 Authorization；连接失败通常是 Base URL、代理或服务端兼容性问题。
+生成后的第三方 provider 示例：
+
+```toml
+[model_providers.custom]
+name = "OpenAI"
+base_url = "https://api.example.com/v1"
+wire_api = "responses"
+requires_openai_auth = false
+```
 
 **Codex 结束时报 `Stop hook exited with code 127`？**
 

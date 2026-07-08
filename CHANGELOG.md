@@ -1,5 +1,20 @@
 # Changelog
 
+## Codex for TUI 2.3.5
+
+Codex for TUI 2.3.5 是 2.3.4 的配置热修版。
+
+### 修复
+
+- 第三方 OpenAI-compatible 配置继续使用内部 provider id `custom`，但生成的 `[model_providers.custom]` 会写入 `name = "OpenAI"`，避免配置模式把兼容服务显示/协议名写成 `custom`。
+- 旧配置中 `name = "custom"` 或缺失 `name` 时，可在修复配置路径中规范化为 `name = "OpenAI"`。
+- 用户手写 provider 名称会被保留，例如 `name = "Krill AI"` 或单引号写法，不会被强行覆盖。
+
+### 验证与回滚
+
+- 本地只运行 shell/static/smoke 门禁，不本地构建 APK/Gradle；APK、正式签名和 Release 资产只通过 GitHub Actions 构建。
+- Android 不能普通覆盖降级安装；从 2.3.5（`versionCode=48`）回到更低版本需要前滚回滚包，或卸载重装并承担数据迁移/丢失风险。
+
 ## Codex for TUI 2.3.4
 
 Codex for TUI 2.3.4 是 2.3.3 的状态字段热修版。

@@ -328,8 +328,12 @@ EOF
   }
 
   assert_file_contains "$tmp/home/.codex/config.toml" 'model = "gpt-5.5"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'model_provider = "custom"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'name = "OpenAI"'
   assert_file_contains "$tmp/home/.codex/config.toml" 'approval_policy = "never"'
   assert_file_contains "$tmp/home/.codex/config.toml" 'sandbox_mode = "danger-full-access"'
+  assert_file_not_contains "$tmp/home/.codex/config.toml" 'name = "custom"'
+  assert_file_not_contains "$tmp/home/.codex/config.toml" "sk-test"
   assert_file_not_contains "$tmp/home/.codex/config.toml" "可用模型"
   assert_file_contains "$tmp/stderr" "可用模型"
   rm -rf "$tmp"
@@ -427,11 +431,95 @@ EOF
 
   assert_file_contains "$tmp/home/.codex/config.toml" 'model = "gpt-5.5"'
   assert_file_contains "$tmp/home/.codex/config.toml" 'base_url = "https://api.example.test/v1"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'name = "OpenAI"'
   assert_file_contains "$tmp/home/.codex/config.toml" 'approval_policy = "never"'
   assert_file_contains "$tmp/home/.codex/config.toml" 'sandbox_mode = "danger-full-access"'
   assert_file_contains "$tmp/home/.codex/auth.json" '"OPENAI_API_KEY": "sk-old"'
   find "$tmp/home/.codex/install-state/backups" -type f -name config.toml | grep . >/dev/null 2>&1 ||
     fail "editing current config should create a backup"
+  rm -rf "$tmp"
+}
+
+test_provider_name_normalization_keeps_custom_id_and_user_name() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-provider-name-normalize.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.codex"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-config.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+
+    cat > "$CODEX_HOME/config.toml" <<'EOF'
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+model_provider = "custom"
+model = "gpt-5.5"
+
+[model_providers.custom]
+name = "custom"
+base_url = "https://api.example.test/v1"
+wire_api = "responses"
+EOF
+    codex_config_repair_full_permission >"$tmp/stdout-legacy" 2>"$tmp/stderr-legacy"
+    grep -F 'name = "OpenAI"' "$CODEX_HOME/config.toml" >/dev/null 2>&1 ||
+      fail "legacy custom provider name should normalize to OpenAI"
+    grep -F 'model_provider = "custom"' "$CODEX_HOME/config.toml" >/dev/null 2>&1 ||
+      fail "provider id should remain custom"
+
+    cat > "$CODEX_HOME/config.toml" <<'EOF'
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+model_provider = "custom"
+model = "gpt-5.5"
+
+[model_providers.custom]
+base_url = "https://api.example.test/v1"
+wire_api = "responses"
+EOF
+    codex_config_normalize_third_party_provider_name "$CODEX_HOME/config.toml"
+    grep -F 'name = "OpenAI"' "$CODEX_HOME/config.toml" >/dev/null 2>&1 ||
+      fail "missing provider name should normalize to OpenAI"
+
+    cat > "$CODEX_HOME/config.toml" <<'EOF'
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+model_provider = "custom"
+model = "gpt-5.5"
+
+[model_providers.custom]
+name = "Krill AI"
+base_url = "https://api.example.test/v1"
+wire_api = "responses"
+EOF
+    codex_config_normalize_third_party_provider_name "$CODEX_HOME/config.toml"
+    grep -F 'name = "Krill AI"' "$CODEX_HOME/config.toml" >/dev/null 2>&1 ||
+      fail "user provider name should be preserved"
+    ! grep -F 'name = "OpenAI"' "$CODEX_HOME/config.toml" >/dev/null 2>&1 ||
+      fail "user provider name should not be overwritten"
+
+    cat > "$CODEX_HOME/config.toml" <<'EOF'
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+model_provider = "custom"
+model = "gpt-5.5"
+
+[model_providers.custom]
+name = 'Krill AI'
+base_url = "https://api.example.test/v1"
+wire_api = "responses"
+EOF
+    codex_config_normalize_third_party_provider_name "$CODEX_HOME/config.toml"
+    grep -F "name = 'Krill AI'" "$CODEX_HOME/config.toml" >/dev/null 2>&1 ||
+      fail "single-quoted user provider name should be preserved"
+    ! grep -F 'name = "OpenAI"' "$CODEX_HOME/config.toml" >/dev/null 2>&1 ||
+      fail "single-quoted user provider name should not be overwritten"
+  ) || {
+    sed -n '1,200p' "$tmp/stderr-legacy" >&2 || true
+    fail "provider name normalization should complete"
+  }
+
   rm -rf "$tmp"
 }
 
@@ -517,6 +605,7 @@ test_profile_save_and_use_switches_only_runtime_config() {
 
   assert_file_contains "$tmp/home/.codex/config.toml" 'model = "gpt-5.5"'
   assert_file_contains "$tmp/home/.codex/config.toml" 'base_url = "https://api-a.example.test/v1"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'name = "OpenAI"'
   assert_file_contains "$tmp/home/.codex/config.toml" 'approval_policy = "never"'
   assert_file_contains "$tmp/home/.codex/config.toml" 'sandbox_mode = "danger-full-access"'
   assert_file_contains "$tmp/home/.codex/auth.json" '"OPENAI_API_KEY": "sk-a"'
@@ -636,6 +725,7 @@ test_config_menu_can_select_saved_profile() {
 
   assert_file_contains "$tmp/home/.codex/config.toml" 'model = "gpt-5.5"'
   assert_file_contains "$tmp/home/.codex/config.toml" 'base_url = "https://api-a.example.test/v1"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'name = "OpenAI"'
   assert_file_contains "$tmp/home/.codex/auth.json" '"OPENAI_API_KEY": "sk-a"'
   assert_file_contains "$tmp/stderr" "Codex 配置模式"
   assert_file_contains "$tmp/stderr" "选择配置"
@@ -675,8 +765,10 @@ EOF
 
   assert_file_contains "$tmp/home/.codex/config.toml" 'model = "gpt-5.5"'
   assert_file_contains "$tmp/home/.codex/config.toml" 'base_url = "https://api.example.test/v1"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'name = "OpenAI"'
   assert_file_contains "$tmp/home/.codex/config-profiles/current" 'default'
   assert_file_contains "$tmp/home/.codex/config-profiles/default/config.toml" 'model = "gpt-5.5"'
+  assert_file_contains "$tmp/home/.codex/config-profiles/default/config.toml" 'name = "OpenAI"'
   assert_file_contains "$tmp/home/.codex/config-profiles/default/auth.json" '"OPENAI_API_KEY": "sk-test"'
   [ -s "$tmp/home/.codex/config-profiles/default/model_catalog.json" ] || fail "new profile should save model catalog"
   assert_file_contains "$tmp/stderr" "是否保存为配置档"
@@ -1096,6 +1188,7 @@ run_step test_interactive_model_choice_writes_only_model_id
 run_step test_third_party_setup_can_back_out_before_writing
 run_step test_model_choice_bad_input_loops_instead_of_defaulting
 run_step test_edit_current_config_preserves_key_and_writes_full_permission
+run_step test_provider_name_normalization_keeps_custom_id_and_user_name
 run_step test_repair_full_permission_adds_sandbox_mode
 run_step test_model_catalog_uses_current_codex_schema_shapes
 run_step test_profile_save_and_use_switches_only_runtime_config

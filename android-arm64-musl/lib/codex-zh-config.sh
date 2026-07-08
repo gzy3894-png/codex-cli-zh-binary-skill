@@ -337,6 +337,12 @@ function emit_if_match(line, trimmed, rest) {
     print trimmed
     exit
   }
+  if (trimmed ~ /^\047/) {
+    sub(/^\047/, "", trimmed)
+    sub(/\047.*$/, "", trimmed)
+    print trimmed
+    exit
+  }
 }
 is_section($0) { exit }
 { emit_if_match($0) }
@@ -375,6 +381,12 @@ function emit_if_match(line, trimmed, rest) {
     print trimmed
     exit
   }
+  if (trimmed ~ /^\047/) {
+    sub(/^\047/, "", trimmed)
+    sub(/\047.*$/, "", trimmed)
+    print trimmed
+    exit
+  }
 }
 is_section($0) {
   section = section_name($0)
@@ -407,6 +419,12 @@ function emit_if_match(line, trimmed, rest) {
     print trimmed
     exit
   }
+  if (trimmed ~ /^\047/) {
+    sub(/^\047/, "", trimmed)
+    sub(/\047.*$/, "", trimmed)
+    print trimmed
+    exit
+  }
 }
 { emit_if_match($0) }
 ' "$cfg" 2>/dev/null | sed -n '1p'
@@ -432,6 +450,66 @@ codex_config_current_base_url() {
   codex_config_any_string_value base_url "$cfg"
 }
 
+codex_config_third_party_provider_name_needs_normalize() {
+  codex_provider_cfg="${1:-$(codex_config_file)}"
+  [ -s "$codex_provider_cfg" ] || return 1
+  codex_provider_id="${CODEX_ZH_PROVIDER_ID:-custom}"
+  [ "$(codex_config_current_provider "$codex_provider_cfg")" = "$codex_provider_id" ] || return 1
+  codex_provider_base="$(codex_config_section_string_value "$codex_provider_cfg" "model_providers.$codex_provider_id" base_url)"
+  [ -n "$codex_provider_base" ] || return 1
+  codex_provider_current_name="$(codex_config_section_string_value "$codex_provider_cfg" "model_providers.$codex_provider_id" name)"
+  [ -z "$codex_provider_current_name" ] || [ "$codex_provider_current_name" = "$codex_provider_id" ]
+}
+
+codex_config_normalize_third_party_provider_name() {
+  codex_provider_cfg="${1:-$(codex_config_file)}"
+  codex_config_third_party_provider_name_needs_normalize "$codex_provider_cfg" || return 0
+  codex_provider_id="${CODEX_ZH_PROVIDER_ID:-custom}"
+  codex_provider_display_name="${CODEX_ZH_PROVIDER_NAME:-OpenAI}"
+  codex_provider_display_name_esc="$(codex_toml_escape "$codex_provider_display_name")"
+  codex_provider_cfg_tmp="$(codex_config_tmp_path "$codex_provider_cfg")"
+  awk \
+    -v provider="$codex_provider_id" \
+    -v provider_name="$codex_provider_display_name_esc" '
+function section_name(line, s) {
+  s = line
+  sub(/^[[:space:]]*\[/, "", s)
+  sub(/\][[:space:]]*($|#.*$)/, "", s)
+  return s
+}
+function is_section(line) {
+  return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*($|#)/
+}
+function emit_missing_name() {
+  if (in_provider && !provider_name_seen) {
+    print "name = \"" provider_name "\""
+    provider_name_seen = 1
+  }
+}
+{
+  if (is_section($0)) {
+    emit_missing_name()
+    section = section_name($0)
+    in_provider = (section == "model_providers." provider)
+    provider_name_seen = 0
+    print
+    next
+  }
+  if (in_provider && $0 ~ /^[[:space:]]*name[[:space:]]*=/) {
+    print "name = \"" provider_name "\""
+    provider_name_seen = 1
+    next
+  }
+  print
+}
+END {
+  emit_missing_name()
+}
+' "$codex_provider_cfg" > "$codex_provider_cfg_tmp"
+  codex_config_atomic_install_file "$codex_provider_cfg_tmp" "$codex_provider_cfg" 600 ||
+    codex_die "无法修复第三方 provider 名称：$codex_provider_cfg"
+}
+
 codex_config_current_catalog_path() {
   cfg="${1:-$(codex_config_file)}"
   path="$(codex_config_root_string_value model_catalog_json "$cfg")"
@@ -448,6 +526,7 @@ codex_config_is_full_permission() {
 codex_config_apply_full_permission() {
   cfg="${1:-$(codex_config_file)}"
   [ -s "$cfg" ] || codex_die "缺少 $cfg，无法修复授权"
+  codex_config_normalize_third_party_provider_name "$cfg"
   cfg_tmp="$(codex_config_tmp_path "$cfg")"
   awk '
 function is_section(line) {
@@ -928,6 +1007,7 @@ codex_config_write_third_party_config() {
   codex_config_write_model_catalog "$models_file" "$default_model" "$catalog"
   api_base_esc="$(codex_toml_escape "$api_base")"
   model_esc="$(codex_toml_escape "$default_model")"
+  provider_name_esc="$(codex_toml_escape "${CODEX_ZH_PROVIDER_NAME:-OpenAI}")"
   helper_esc="$(codex_toml_escape "$helper")"
   home_esc="$(codex_toml_escape "$home_dir")"
   catalog_esc="$(codex_toml_escape "$catalog")"
@@ -943,7 +1023,7 @@ codex_config_write_third_party_config() {
 
   cat >> "$config_tmp" <<EOF
 [model_providers.$CODEX_ZH_PROVIDER_ID]
-name = "$CODEX_ZH_PROVIDER_ID"
+name = "$provider_name_esc"
 base_url = "$api_base_esc"
 wire_api = "responses"
 requires_openai_auth = false
@@ -1633,12 +1713,17 @@ codex_config_menu_repair_full_permission() {
 codex_config_repair_full_permission() {
   cfg="$(codex_config_file)"
   [ -s "$cfg" ] || codex_die "缺少 $cfg，无法修复授权"
-  if codex_config_is_full_permission "$cfg"; then
+  need_provider_name=0
+  codex_config_third_party_provider_name_needs_normalize "$cfg" && need_provider_name=1
+  if codex_config_is_full_permission "$cfg" && [ "$need_provider_name" -eq 0 ]; then
     codex_info "当前已是全权限模式：approval_policy=never，sandbox_mode=danger-full-access"
     return 0
   fi
   codex_config_backup_current
   codex_config_apply_full_permission "$cfg"
+  if [ "$need_provider_name" -eq 1 ]; then
+    codex_info "已修复第三方 provider 名称：name=${CODEX_ZH_PROVIDER_NAME:-OpenAI}"
+  fi
   codex_info "已修复授权：approval_policy=never，sandbox_mode=danger-full-access"
 }
 
