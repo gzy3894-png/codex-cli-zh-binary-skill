@@ -332,16 +332,19 @@ hooks = true
 codex-rtk status
 codex-rtk verify
 codex-context status
+codex-context report
 codex-context verify
 ```
 
-普通用户不需要再进入 Codex TUI 运行 `/hooks`。快捷授权会清理 `~/.codex/config.toml` 里的旧 Codex for TUI 用户级 hook 块；用户自己的 hooks 不会被授权或删除。检查 RTK/context 命令：
+普通用户不需要再进入 Codex TUI 运行 `/hooks`。快捷授权只管理 Codex for TUI 的 RTK/context 托管 hook；必要时清理 `~/.codex/config.toml` 里的旧版兼容 hook 块，不遍历或改写 session/transcript 文件。检查 RTK/context 命令：
 
 ```sh
 codex-rtk status
 codex-rtk disable
 codex-context status
+codex-context report
 codex-context disable
+codex 上下文监测
 ```
 
 ## 文件校验

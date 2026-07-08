@@ -5,7 +5,8 @@ MARK_BEGIN="# codex-for-tui-context-hook begin"
 MARK_END="# codex-for-tui-context-hook end"
 
 usage() {
-  printf '%s\n' "用法: codex-context status|events|hook|enable|disable|verify"
+  printf '%s\n' "用法: codex-context status|report|events|hook|enable|disable|verify"
+  printf '%s\n' "status 给 Agent 读取上下文检测信号；report 给用户显示最近一次压缩时间和本会话次数。"
 }
 
 codex_home() {
@@ -22,6 +23,10 @@ requirements_file() {
 
 state_dir() {
   printf '%s/context-state\n' "$(codex_home)"
+}
+
+metrics_file() {
+  printf '%s/metrics\n' "$(state_dir)"
 }
 
 backup_file() {
@@ -190,6 +195,292 @@ ref_value() {
   printf '%s' "$1" | tr '\r\n' '  '
 }
 
+normalize_context_trigger() {
+  case "$1" in
+    auto|manual|startup|resume|clear|compact)
+      printf '%s\n' "$1"
+      ;;
+    *)
+      printf '%s\n' "unknown"
+      ;;
+  esac
+}
+
+normalize_compact_location() {
+  case "$1" in
+    local|device|client|cli|on-device|on_device)
+      printf '%s\n' "local"
+      ;;
+    remote|cloud|server|hosted|openai|api)
+      printf '%s\n' "remote"
+      ;;
+    *)
+      printf '%s\n' "unknown"
+      ;;
+  esac
+}
+
+print_default_metrics() {
+  printf 'metrics_file=%s\n' "$(metrics_file)"
+  printf 'context_auto_detection=enabled\n'
+  printf 'agent_context_detection=enabled\n'
+  printf 'agent_prepare_required=false\n'
+  printf 'agent_prepare_reason=none\n'
+  printf 'agent_prepare_at=none\n'
+  printf 'hook_event_count=0\n'
+  printf 'pre_compact_count=0\n'
+  printf 'pre_compact_auto_trigger_count=0\n'
+  printf 'pre_compact_manual_trigger_count=0\n'
+  printf 'pre_compact_unknown_trigger_count=0\n'
+  printf 'post_compact_count=0\n'
+  printf 'post_compact_auto_trigger_count=0\n'
+  printf 'post_compact_manual_trigger_count=0\n'
+  printf 'post_compact_unknown_trigger_count=0\n'
+  printf 'compact_count=0\n'
+  printf 'compact_completed_count=0\n'
+  printf 'compact_local_count=0\n'
+  printf 'compact_remote_count=0\n'
+  printf 'compact_unknown_location_count=0\n'
+  printf 'current_session_key=unknown\n'
+  printf 'session_compact_count=0\n'
+  printf 'session_compact_local_count=0\n'
+  printf 'session_compact_remote_count=0\n'
+  printf 'session_compact_unknown_location_count=0\n'
+  printf 'session_start_count=0\n'
+  printf 'session_start_startup_count=0\n'
+  printf 'session_start_resume_count=0\n'
+  printf 'session_start_clear_count=0\n'
+  printf 'session_start_compact_count=0\n'
+  printf 'session_start_unknown_count=0\n'
+  printf 'last_hook_phase=none\n'
+  printf 'last_hook_trigger=none\n'
+  printf 'last_hook_at=none\n'
+  printf 'last_compact_phase=none\n'
+  printf 'last_compact_trigger=none\n'
+  printf 'last_compact_location=unknown\n'
+  printf 'last_compact_at=none\n'
+  printf 'last_compact_completed_at=none\n'
+}
+
+print_metrics() {
+  metrics="$(metrics_file)"
+  if [ -r "$metrics" ]; then
+    cat "$metrics"
+  else
+    print_default_metrics
+  fi
+}
+
+update_metrics() {
+  phase="$1"
+  trigger="$(normalize_context_trigger "$2")"
+  location="$(normalize_compact_location "$3")"
+  stamp="$4"
+  session_key="${5:-unknown}"
+  [ -n "$session_key" ] || session_key="unknown"
+  dir="$(state_dir)"
+  metrics="$(metrics_file)"
+  input="$metrics"
+  [ -r "$input" ] || input="/dev/null"
+  tmp="$dir/metrics.tmp.$$"
+  awk -v phase="$phase" -v trigger="$trigger" -v location="$location" -v stamp="$stamp" -v session_key="$session_key" -v metrics_file="$metrics" '
+function init(k, v) {
+  if (!(k in value) || value[k] == "") {
+    value[k] = v
+  }
+}
+function inc(k) {
+  init(k, 0)
+  value[k] = value[k] + 1
+}
+function emit(k) {
+  print k "=" value[k]
+}
+function reset_session_counts() {
+  value["session_compact_count"] = 0
+  value["session_compact_local_count"] = 0
+  value["session_compact_remote_count"] = 0
+  value["session_compact_unknown_location_count"] = 0
+  value["last_compact_phase"] = "none"
+  value["last_compact_trigger"] = "none"
+  value["last_compact_location"] = "unknown"
+  value["last_compact_at"] = "none"
+  value["last_compact_completed_at"] = "none"
+}
+BEGIN {
+  keys = "hook_event_count pre_compact_count pre_compact_auto_trigger_count pre_compact_manual_trigger_count pre_compact_unknown_trigger_count post_compact_count post_compact_auto_trigger_count post_compact_manual_trigger_count post_compact_unknown_trigger_count compact_count compact_completed_count compact_local_count compact_remote_count compact_unknown_location_count session_compact_count session_compact_local_count session_compact_remote_count session_compact_unknown_location_count session_start_count session_start_startup_count session_start_resume_count session_start_clear_count session_start_compact_count session_start_unknown_count"
+}
+/^[A-Za-z0-9_]+=/ {
+  key = $0
+  sub(/=.*/, "", key)
+  val = $0
+  sub(/^[^=]*=/, "", val)
+  value[key] = val
+}
+END {
+  split(keys, numeric_keys, " ")
+  for (i in numeric_keys) {
+    init(numeric_keys[i], 0)
+  }
+  init("last_hook_phase", "none")
+  init("last_hook_trigger", "none")
+  init("last_hook_at", "none")
+  init("last_compact_phase", "none")
+  init("last_compact_trigger", "none")
+  init("last_compact_location", "unknown")
+  init("last_compact_at", "none")
+  init("last_compact_completed_at", "none")
+  init("agent_prepare_required", "false")
+  init("agent_prepare_reason", "none")
+  init("agent_prepare_at", "none")
+  init("current_session_key", "unknown")
+
+  inc("hook_event_count")
+  value["last_hook_phase"] = phase
+  value["last_hook_trigger"] = trigger
+  value["last_hook_at"] = stamp
+  compact_trigger = trigger
+  if (compact_trigger != "auto" && compact_trigger != "manual") {
+    compact_trigger = "unknown"
+  }
+  session_trigger = trigger
+  if (session_trigger != "startup" && session_trigger != "resume" && session_trigger != "clear" && session_trigger != "compact") {
+    session_trigger = "unknown"
+  }
+  if (session_key != "unknown" && session_key != value["current_session_key"]) {
+    value["current_session_key"] = session_key
+    reset_session_counts()
+  }
+  location_key = location
+  if (location_key == "unknown") {
+    location_key = "unknown_location"
+  }
+
+  if (phase == "pre_compact") {
+    inc("pre_compact_count")
+    inc("pre_compact_" compact_trigger "_trigger_count")
+    inc("compact_count")
+    inc("compact_" location_key "_count")
+    inc("session_compact_count")
+    inc("session_compact_" location_key "_count")
+    value["last_compact_phase"] = phase
+    value["last_compact_trigger"] = compact_trigger
+    value["last_compact_location"] = location
+    value["last_compact_at"] = stamp
+    if (compact_trigger == "auto") {
+      value["agent_prepare_required"] = "true"
+      value["agent_prepare_reason"] = "auto_compact_about_to_run"
+      value["agent_prepare_at"] = stamp
+    } else {
+      value["agent_prepare_required"] = "false"
+      value["agent_prepare_reason"] = "manual_compact"
+      value["agent_prepare_at"] = stamp
+    }
+  } else if (phase == "post_compact") {
+    inc("post_compact_count")
+    inc("post_compact_" compact_trigger "_trigger_count")
+    inc("compact_completed_count")
+    value["last_compact_completed_at"] = stamp
+    value["agent_prepare_required"] = "false"
+    value["agent_prepare_reason"] = "compact_completed"
+    value["agent_prepare_at"] = stamp
+  } else if (phase == "session_start") {
+    inc("session_start_count")
+    inc("session_start_" session_trigger "_count")
+    if (session_trigger == "startup" || session_trigger == "clear") {
+      reset_session_counts()
+      value["agent_prepare_required"] = "false"
+      value["agent_prepare_reason"] = "session_start"
+      value["agent_prepare_at"] = stamp
+    }
+  }
+
+  print "metrics_file=" metrics_file
+  print "context_auto_detection=enabled"
+  print "agent_context_detection=enabled"
+  emit("agent_prepare_required")
+  emit("agent_prepare_reason")
+  emit("agent_prepare_at")
+  emit("hook_event_count")
+  emit("pre_compact_count")
+  emit("pre_compact_auto_trigger_count")
+  emit("pre_compact_manual_trigger_count")
+  emit("pre_compact_unknown_trigger_count")
+  emit("post_compact_count")
+  emit("post_compact_auto_trigger_count")
+  emit("post_compact_manual_trigger_count")
+  emit("post_compact_unknown_trigger_count")
+  emit("compact_count")
+  emit("compact_completed_count")
+  emit("compact_local_count")
+  emit("compact_remote_count")
+  emit("compact_unknown_location_count")
+  emit("current_session_key")
+  emit("session_compact_count")
+  emit("session_compact_local_count")
+  emit("session_compact_remote_count")
+  emit("session_compact_unknown_location_count")
+  emit("session_start_count")
+  emit("session_start_startup_count")
+  emit("session_start_resume_count")
+  emit("session_start_clear_count")
+  emit("session_start_compact_count")
+  emit("session_start_unknown_count")
+  emit("last_hook_phase")
+  emit("last_hook_trigger")
+  emit("last_hook_at")
+  emit("last_compact_phase")
+  emit("last_compact_trigger")
+  emit("last_compact_location")
+  emit("last_compact_at")
+  emit("last_compact_completed_at")
+}
+' "$input" > "$tmp"
+  mv "$tmp" "$metrics"
+  chmod 600 "$metrics" 2>/dev/null || true
+}
+
+metric_value() {
+  key="$1"
+  print_metrics | sed -n 's/^'"$key"'=//p' | sed -n '1p'
+}
+
+format_user_time() {
+  stamp="$1"
+  epoch="${stamp%%.*}"
+  case "$epoch" in
+    ""|*[!0-9]*)
+      date '+%H:%M'
+      ;;
+    *)
+      date -d "@$epoch" '+%H:%M' 2>/dev/null ||
+        date -r "$epoch" '+%H:%M' 2>/dev/null ||
+        date '+%H:%M'
+      ;;
+  esac
+}
+
+compact_location_label() {
+  case "$1" in
+    local) printf '%s\n' "本地" ;;
+    remote) printf '%s\n' "远程" ;;
+    *) printf '%s\n' "未知来源" ;;
+  esac
+}
+
+report() {
+  count="$(metric_value session_compact_count)"
+  [ -n "$count" ] || count=0
+  at="$(metric_value last_compact_at)"
+  location="$(metric_value last_compact_location)"
+  if [ "$count" = "0" ] || [ -z "$at" ] || [ "$at" = "none" ]; then
+    printf '%s\n' "当前会话还没有记录到压缩。"
+    return 0
+  fi
+  label="$(compact_location_label "$location")"
+  printf '%s 触发了一次%s压缩，当前会话已压缩%s次。\n' "$(format_user_time "$at")" "$label" "$count"
+}
+
 find_prefix() {
   if [ -n "${PREFIX:-}" ] && [ -d "${PREFIX%/}/local" ]; then
     printf '%s\n' "${PREFIX%/}"
@@ -218,7 +509,8 @@ write_session_event() {
   event_name="$2"
   phase="$3"
   trigger="$4"
-  reason="$5"
+  location="$5"
+  reason="$6"
   prefix="$(find_prefix 2>/dev/null || true)"
   [ -n "$prefix" ] || return 0
   dir="$prefix/local/session-fold"
@@ -231,6 +523,7 @@ write_session_event() {
     printf 'reason=%s\n' "$(ref_value "$reason")"
     printf 'hook_event=%s\n' "$(ref_value "$event_name")"
     printf 'trigger=%s\n' "$(ref_value "$trigger")"
+    printf 'compact_location=%s\n' "$(ref_value "$location")"
     printf '%s\n' '---'
   } >> "$dir/events" 2>/dev/null || true
 }
@@ -238,7 +531,9 @@ write_session_event() {
 record_event() {
   event_name="$1"
   trigger="$2"
-  reason="$3"
+  location="$3"
+  session_key="$4"
+  reason="$5"
   dir="$(state_dir)"
   mkdir -p "$dir"
   stamp="$(date +%s 2>/dev/null || printf 0).$$"
@@ -254,6 +549,8 @@ record_event() {
     printf 'hook_event=%s\n' "$(ref_value "$event_name")"
     printf 'phase=%s\n' "$phase"
     printf 'trigger=%s\n' "$(ref_value "$trigger")"
+    printf 'compact_location=%s\n' "$(normalize_compact_location "$location")"
+    printf 'session_key=%s\n' "$(ref_value "$session_key")"
     printf 'reason=%s\n' "$(ref_value "$reason")"
     printf 'cwd=%s\n' "$(pwd 2>/dev/null || true)"
     printf 'stamp=%s\n' "$stamp"
@@ -263,13 +560,16 @@ record_event() {
     cat "$dir/status"
     printf '%s\n' '---'
   } >> "$dir/events"
-  write_session_event "$stamp" "$event_name" "$phase" "$trigger" "$reason"
+  update_metrics "$phase" "$trigger" "$location" "$stamp" "$session_key"
+  write_session_event "$stamp" "$event_name" "$phase" "$trigger" "$(normalize_compact_location "$location")" "$reason"
 }
 
 run_hook() {
   input="$(cat || true)"
   event_name=""
   trigger=""
+  location=""
+  session_key=""
   reason=""
   if [ -n "$input" ]; then
     event_name="$(printf '%s' "$input" | json_value hook_event_name)"
@@ -279,12 +579,27 @@ run_hook() {
     [ -n "$trigger" ] || trigger="$(printf '%s' "$input" | json_value compact_trigger)"
     [ -n "$trigger" ] || trigger="$(printf '%s' "$input" | json_value source)"
     [ -n "$trigger" ] || trigger="$(printf '%s' "$input" | json_value matcher)"
+    location="$(printf '%s' "$input" | json_value compact_location)"
+    [ -n "$location" ] || location="$(printf '%s' "$input" | json_value compactLocation)"
+    [ -n "$location" ] || location="$(printf '%s' "$input" | json_value compression_location)"
+    [ -n "$location" ] || location="$(printf '%s' "$input" | json_value compressionLocation)"
+    [ -n "$location" ] || location="$(printf '%s' "$input" | json_value location)"
+    [ -n "$location" ] || location="$(printf '%s' "$input" | json_value origin)"
+    [ -n "$location" ] || location="$(printf '%s' "$input" | json_value source)"
+    session_key="$(printf '%s' "$input" | json_value session_id)"
+    [ -n "$session_key" ] || session_key="$(printf '%s' "$input" | json_value sessionId)"
+    [ -n "$session_key" ] || session_key="$(printf '%s' "$input" | json_value conversation_id)"
+    [ -n "$session_key" ] || session_key="$(printf '%s' "$input" | json_value conversationId)"
+    [ -n "$session_key" ] || session_key="$(printf '%s' "$input" | json_value thread_id)"
+    [ -n "$session_key" ] || session_key="$(printf '%s' "$input" | json_value threadId)"
     reason="$(printf '%s' "$input" | json_value reason)"
   fi
   [ -n "$event_name" ] || event_name="unknown"
   [ -n "$trigger" ] || trigger="unknown"
+  [ -n "$location" ] || location="unknown"
+  [ -n "$session_key" ] || session_key="unknown"
   [ -n "$reason" ] || reason="$event_name:$trigger"
-  record_event "$event_name" "$trigger" "$reason"
+  record_event "$event_name" "$trigger" "$location" "$session_key" "$reason"
 }
 
 status() {
@@ -297,6 +612,7 @@ status() {
   else
     printf 'model_auto_compact_token_limit=default\n'
   fi
+  print_metrics
   if [ -f "$cfg" ] && grep -Eq '^[[:space:]]*hooks[[:space:]]*=[[:space:]]*true' "$cfg"; then
     printf 'hooks_feature=true\n'
   elif [ -f "$cfg" ] && grep -Eq '^[[:space:]]*hooks[[:space:]]*=[[:space:]]*false' "$cfg"; then
@@ -330,15 +646,25 @@ verify() {
     rm -rf "$tmp"
     exit 1
   }
-  sample='{"hook_event_name":"PreCompact","trigger":"auto"}'
+  sample='{"hook_event_name":"PreCompact","trigger":"auto","compact_location":"remote","session_id":"verify"}'
   printf '%s' "$sample" | CODEX_HOME="$tmp/home/.codex" HOME="$tmp/home" sh "$0" hook
   grep -F 'phase=pre_compact' "$tmp/home/.codex/context-state/events" >/dev/null 2>&1 || {
     printf '%s\n' "context hook 未记录 pre_compact" >&2
     rm -rf "$tmp"
     exit 1
   }
+  grep -F 'session_compact_count=1' "$tmp/home/.codex/context-state/metrics" >/dev/null 2>&1 || {
+    printf '%s\n' "context hook 未记录本会话压缩计数" >&2
+    rm -rf "$tmp"
+    exit 1
+  }
+  grep -F 'compact_remote_count=1' "$tmp/home/.codex/context-state/metrics" >/dev/null 2>&1 || {
+    printf '%s\n' "context hook 未记录远程压缩计数" >&2
+    rm -rf "$tmp"
+    exit 1
+  }
   rm -rf "$tmp"
-  printf '%s\n' "Codex context hook 可用。首次启用后请在 Codex 内用 /hooks 信任该 hook。"
+  printf '%s\n' "Codex context hook 可用。普通启动建议使用 Codex for TUI 快捷授权的托管 hooks。"
 }
 
 [ "$#" -ge 1 ] || { usage >&2; exit 2; }
@@ -350,6 +676,9 @@ case "$cmd" in
   status)
     status
     ;;
+  report)
+    report
+    ;;
   events)
     events
     ;;
@@ -359,11 +688,11 @@ case "$cmd" in
   enable)
     set_hooks_feature true
     install_hook_block
-    printf '%s\n' "已启用 Codex for TUI context hook。请在 Codex 内运行 /hooks 信任该 hook。"
+    printf '%s\n' "已启用 Codex for TUI context 兼容 config hook。普通启动建议使用 Codex for TUI 快捷授权的托管 hooks。"
     ;;
   disable)
     remove_hook_block
-    printf '%s\n' "已移除 Codex for TUI context hook。未修改用户其他 hooks。"
+    printf '%s\n' "已移除 Codex for TUI context 兼容 config hook。未修改托管 requirements。"
     ;;
   verify)
     verify

@@ -184,6 +184,41 @@ codex_for_tui_update() {
   exit 1
 }
 
+codex_for_tui_context_monitor() {
+  if command -v codex-context >/dev/null 2>&1; then
+    subcommand="${1:-report}"
+    case "$subcommand" in
+      ""|报告|report)
+        shift 2>/dev/null || true
+        set -- report "$@"
+        ;;
+      状态|status)
+        shift 2>/dev/null || true
+        set -- status "$@"
+        ;;
+      安装|启用|enable|install)
+        shift
+        set -- enable "$@"
+        ;;
+      禁用|disable)
+        shift
+        set -- disable "$@"
+        ;;
+      日志|事件|events)
+        shift
+        set -- events "$@"
+        ;;
+      验证|verify)
+        shift
+        set -- verify "$@"
+        ;;
+    esac
+    exec codex-context "$@"
+  fi
+  printf '%s\n' "错误: 找不到 codex-context。请先运行 codex 更新。" >&2
+  exit 1
+}
+
 codex_for_tui_tty_read() {
   prompt="$1"
   default="${2:-}"
@@ -230,8 +265,8 @@ codex_for_tui_offer_hook_auth() {
   cat >&2 <<'EOM'
 检测到 Codex for TUI 增强功能尚未快捷授权。
 
-快捷授权会写入系统级 Codex requirements.toml，把 RTK/context 注册为托管 hooks。
-这样启动后不需要再进入 /hooks 手动信任；用户自己的 hooks 不会被授权。
+快捷授权会写入系统级 Codex requirements.toml，把 RTK/context 注册为 Codex for TUI 托管 hooks。
+这样启动后不需要再进入 /hooks；脚本不会遍历、授权或改写其他 hook。
 只有输入 1 明确同意时才会写入 requirements/hooks；直接回车会跳过本次授权。
 
 请选择：
@@ -365,6 +400,10 @@ case "${1:-}" in
   更新|update)
     shift
     codex_for_tui_update "$@"
+    ;;
+  上下文监测|context-monitor|monitor)
+    shift
+    codex_for_tui_context_monitor "$@"
     ;;
 esac
 

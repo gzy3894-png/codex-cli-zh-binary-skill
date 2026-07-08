@@ -1,5 +1,25 @@
 # Changelog
 
+## Codex for TUI 2.3.7
+
+Codex for TUI 2.3.7 是基于 2.3.6 稳定基线的上下文监测小版本，只增加 hook 触发后的上下文自动检测、压缩来源记录和本会话压缩次数监测。
+
+### 新增
+
+- `codex-context status` 会输出给 Agent 读取的上下文检测信号；`PreCompact auto` 会标记自动压缩即将发生，便于 Agent 做准备。
+- `PreCompact`、`PostCompact` 和 `SessionStart` hook 事件会维护 `~/.codex/context-state/metrics`，记录本地/远程/未知来源压缩和本会话压缩次数。
+- 新增 `codex-context report` 和 `codex 上下文监测` 用户报告入口，只显示最近一次压缩的用户时区时间和当前会话已压缩次数。
+
+### 边界
+
+- 本版本不继承 `origin/context-monitor-v2.3.7` 废案，不读取、不扫描、不改写 session/transcript 文件。
+- 计数来源仅为 Codex hook 事件；不做 token 估算，不推断未触发的压缩。
+
+### 验证与回滚
+
+- 本地只运行 shell/static/smoke 门禁，不本地构建 APK/Gradle；APK、正式签名和 Release 资产只通过 GitHub Actions 构建。
+- Android 不能普通覆盖降级安装；从 2.3.7（`versionCode=50`）回到更低版本需要前滚回滚包，或卸载重装并承担数据迁移/丢失风险。
+
 ## Codex for TUI 2.3.6
 
 Codex for TUI 2.3.6 是 2.3.5 的浏览器真机复测热修版。

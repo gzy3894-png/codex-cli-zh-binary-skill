@@ -140,15 +140,15 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 49'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.6"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 50'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.7"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "49"'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.6'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "50"'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.7'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -1081,7 +1081,7 @@ test_codex_context_bridge_asset() {
   rm -rf "$tmp"
   mkdir -p "$tmp/home/.codex" "$tmp/prefix/local"
 
-  assert_file_contains "$CONTEXT_ASSET" 'codex-context status|events|hook|enable|disable|verify'
+  assert_file_contains "$CONTEXT_ASSET" 'codex-context status|report|events|hook|enable|disable|verify'
   assert_file_contains "$CONTEXT_ASSET" 'codex-for-tui-context-hook begin'
   assert_file_contains "$CONTEXT_ASSET" '[[hooks.PreCompact]]'
   assert_file_contains "$CONTEXT_ASSET" '[[hooks.PostCompact]]'
@@ -1089,6 +1089,14 @@ test_codex_context_bridge_asset() {
   assert_file_contains "$CONTEXT_ASSET" 'matcher = "manual|auto"'
   assert_file_contains "$CONTEXT_ASSET" 'matcher = "startup|resume|compact"'
   assert_file_contains "$CONTEXT_ASSET" 'context_hook_source='
+  assert_file_contains "$CONTEXT_ASSET" 'context_auto_detection=enabled'
+  assert_file_contains "$CONTEXT_ASSET" 'agent_prepare_required='
+  assert_file_contains "$CONTEXT_ASSET" 'compact_remote_count='
+  assert_file_contains "$CONTEXT_ASSET" 'session_compact_count='
+  assert_file_contains "$CONTEXT_ASSET" 'pre_compact_unknown_trigger_count='
+  assert_file_contains "$CONTEXT_ASSET" 'post_compact_manual_trigger_count='
+  assert_file_not_contains "$CONTEXT_ASSET" '/sessions'
+  assert_file_not_contains "$CONTEXT_ASSET" 'rollout-'
 
   HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" enable >/dev/null || fail "codex-context enable failed"
   assert_file_contains "$tmp/home/.codex/config.toml" 'hooks = true'
@@ -1098,15 +1106,73 @@ test_codex_context_bridge_asset() {
   assert_file_contains "$tmp/status" 'context_hook=enabled'
   assert_file_contains "$tmp/status" 'context_hook_source=config'
 
-  sample='{"hook_event_name":"PreCompact","trigger":"auto"}'
+  sample='{"hook_event_name":"PreCompact","trigger":"auto","compact_location":"remote","session_id":"alpha"}'
   printf '%s' "$sample" | PREFIX="$tmp/prefix" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" hook
   assert_file_contains "$tmp/home/.codex/context-state/events" 'phase=pre_compact'
+  assert_file_contains "$tmp/home/.codex/context-state/events" 'compact_location=remote'
   assert_file_contains "$tmp/prefix/local/session-fold/events" 'source=context'
   assert_file_contains "$tmp/prefix/local/session-fold/events" 'type=context_pre_compact'
+  assert_file_contains "$tmp/prefix/local/session-fold/events" 'compact_location=remote'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'context_auto_detection=enabled'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'agent_prepare_required=true'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'agent_prepare_reason=auto_compact_about_to_run'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'pre_compact_count=1'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'pre_compact_auto_trigger_count=1'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'compact_count=1'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'compact_remote_count=1'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'session_compact_count=1'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'session_compact_remote_count=1'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'last_compact_phase=pre_compact'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'last_compact_trigger=auto'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'last_compact_location=remote'
+  HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" report >"$tmp/report" || fail "codex-context report failed"
+  assert_file_contains "$tmp/report" '触发了一次远程压缩，当前会话已压缩1次。'
+
+  sample='{"hook_event_name":"PostCompact","trigger":"manual","compact_location":"remote","session_id":"alpha"}'
+  printf '%s' "$sample" | PREFIX="$tmp/prefix" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" hook
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'post_compact_count=1'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'post_compact_manual_trigger_count=1'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'compact_completed_count=1'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'agent_prepare_required=false'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'last_compact_phase=pre_compact'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'last_compact_trigger=auto'
+
+  sample='{"hook_event_name":"PreCompact","trigger":"unexpected","compact_location":"local","session_id":"alpha"}'
+  printf '%s' "$sample" | PREFIX="$tmp/prefix" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" hook
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'pre_compact_unknown_trigger_count=1'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'compact_local_count=1'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'session_compact_count=2'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'session_compact_local_count=1'
+  HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" report >"$tmp/report" || fail "codex-context second report failed"
+  assert_file_contains "$tmp/report" '触发了一次本地压缩，当前会话已压缩2次。'
+
+  sample='{"hook_event_name":"PreCompact","trigger":"auto","session_id":"alpha"}'
+  printf '%s' "$sample" | PREFIX="$tmp/prefix" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" hook
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'compact_unknown_location_count=1'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'session_compact_unknown_location_count=1'
+  HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" report >"$tmp/report" || fail "codex-context unknown-location report failed"
+  assert_file_contains "$tmp/report" '触发了一次未知来源压缩，当前会话已压缩3次。'
+
+  sample='{"hook_event_name":"PostCompact","trigger":"unknown","compact_location":"local","session_id":"alpha"}'
+  printf '%s' "$sample" | PREFIX="$tmp/prefix" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" hook
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'post_compact_unknown_trigger_count=1'
+
+  sample='{"hook_event_name":"SessionStart","trigger":"compact","session_id":"alpha"}'
+  printf '%s' "$sample" | PREFIX="$tmp/prefix" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" hook
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'session_start_count=1'
+  assert_file_contains "$tmp/home/.codex/context-state/metrics" 'session_start_compact_count=1'
 
   CODEX_FOR_TUI_REQUIREMENTS_FILE="$tmp/requirements.toml" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" status >"$tmp/status" || fail "codex-context status failed"
   assert_file_contains "$tmp/status" 'context_hook=enabled'
   assert_file_contains "$tmp/status" 'context_hook_source=config'
+  assert_file_contains "$tmp/status" 'compact_count=3'
+  assert_file_contains "$tmp/status" 'compact_remote_count=1'
+  assert_file_contains "$tmp/status" 'compact_local_count=1'
+  assert_file_contains "$tmp/status" 'compact_unknown_location_count=1'
+  assert_file_contains "$tmp/status" 'session_compact_count=3'
+  assert_file_contains "$tmp/status" 'compact_completed_count=2'
+  assert_file_contains "$tmp/status" 'post_compact_manual_trigger_count=1'
+  assert_file_contains "$tmp/status" 'session_start_compact_count=1'
   cat > "$tmp/requirements.toml" <<'EOF'
 [features]
 hooks = true
@@ -1195,6 +1261,12 @@ printf 'bridge-preview:%s:%s\n' "$PREFIX" "$*"
 EOF
   chmod +x "$tmp/prefix/local/bin/codex-preview"
 
+  cat > "$tmp/prefix/local/bin/codex-context" <<'EOF'
+#!/usr/bin/env sh
+printf 'bridge-context:%s:%s\n' "$PREFIX" "$*"
+EOF
+  chmod +x "$tmp/prefix/local/bin/codex-context"
+
   cat > "$tmp/bin/codex-update" <<'EOF'
 #!/usr/bin/env sh
 printf 'update-ran:%s\n' "$*"
@@ -1213,6 +1285,7 @@ EOF
 
   assert_file_contains "$tmp/bin/codex" '配置模式'
   assert_file_contains "$tmp/bin/codex" '更新'
+  assert_file_contains "$tmp/bin/codex" '上下文监测'
   assert_file_contains "$tmp/bin/codex" 'codex_config_menu'
   assert_file_contains "$tmp/bin/codex" 'CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"'
   assert_file_contains "$tmp/bin/codex" 'codex_for_tui_prefix_bin'
@@ -1252,6 +1325,30 @@ EOF
     fail "codex update launcher command failed"
   fi
   printf '%s\n' "$output" | grep -F 'update-ran:apply' >/dev/null 2>&1 || fail "codex 更新 did not invoke codex-update apply"
+
+  if ! output="$(
+    HOME="$tmp/home" \
+    CODEX_HOME="$tmp/home/.codex" \
+    PREFIX="$tmp/prefix" \
+    CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR" \
+    PATH="$tmp/bin:/bin:/usr/bin" \
+    "$tmp/bin/codex" 上下文监测
+  )"; then
+    fail "codex context monitor default launcher command failed"
+  fi
+  printf '%s\n' "$output" | grep -F "bridge-context:$tmp/prefix:report" >/dev/null 2>&1 || fail "codex 上下文监测 did not invoke codex-context report by default"
+
+  if ! output="$(
+    HOME="$tmp/home" \
+    CODEX_HOME="$tmp/home/.codex" \
+    PREFIX="$tmp/prefix" \
+    CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR" \
+    PATH="$tmp/bin:/bin:/usr/bin" \
+    "$tmp/bin/codex" 上下文监测 状态
+  )"; then
+    fail "codex context monitor launcher command failed"
+  fi
+  printf '%s\n' "$output" | grep -F "bridge-context:$tmp/prefix:status" >/dev/null 2>&1 || fail "codex 上下文监测 did not invoke codex-context status"
   rm -rf "$tmp"
 }
 
