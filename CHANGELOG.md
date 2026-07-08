@@ -1,5 +1,20 @@
 # Changelog
 
+## Codex for TUI 2.3.8
+
+Codex for TUI 2.3.8 是 2.3.7 的用户时区热修版。
+
+### 修复
+
+- `codex-context report` / `codex 上下文监测` 在 Android 环境中优先使用 `/system/bin/date` 格式化压缩触发时间，避免 Alpine/proot 默认 UTC 导致用户侧报告时间偏移。
+- 非 Android 环境仍保留普通 `date` / `date -r` 兜底，方便本地脚本验证。
+
+### 验证与回滚
+
+- 已在已安装 2.3.7 环境中热修验证：报告时间与 Android 系统时区一致。
+- 本地只运行 shell/static/smoke 门禁，不本地构建 APK/Gradle；APK、正式签名和 Release 资产只通过 GitHub Actions 构建。
+- Android 不能普通覆盖降级安装；从 2.3.8（`versionCode=51`）回到更低版本需要前滚回滚包，或卸载重装并承担数据迁移/丢失风险。
+
 ## Codex for TUI 2.3.7
 
 Codex for TUI 2.3.7 是基于 2.3.6 稳定基线的上下文监测小版本，只增加 hook 触发后的上下文自动检测、压缩来源记录和本会话压缩次数监测。

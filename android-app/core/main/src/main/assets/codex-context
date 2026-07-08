@@ -450,11 +450,14 @@ format_user_time() {
   epoch="${stamp%%.*}"
   case "$epoch" in
     ""|*[!0-9]*)
-      date '+%H:%M'
+      /system/bin/date '+%H:%M' 2>/dev/null ||
+        date '+%H:%M'
       ;;
     *)
-      date -d "@$epoch" '+%H:%M' 2>/dev/null ||
+      /system/bin/date -d "@$epoch" '+%H:%M' 2>/dev/null ||
+        date -d "@$epoch" '+%H:%M' 2>/dev/null ||
         date -r "$epoch" '+%H:%M' 2>/dev/null ||
+        /system/bin/date '+%H:%M' 2>/dev/null ||
         date '+%H:%M'
       ;;
   esac

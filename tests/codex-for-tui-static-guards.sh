@@ -140,15 +140,15 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 50'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.7"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 51'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.8"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "50"'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.7'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "51"'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.8'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -1095,6 +1095,7 @@ test_codex_context_bridge_asset() {
   assert_file_contains "$CONTEXT_ASSET" 'session_compact_count='
   assert_file_contains "$CONTEXT_ASSET" 'pre_compact_unknown_trigger_count='
   assert_file_contains "$CONTEXT_ASSET" 'post_compact_manual_trigger_count='
+  assert_file_contains "$CONTEXT_ASSET" '/system/bin/date -d "@$epoch"'
   assert_file_not_contains "$CONTEXT_ASSET" '/sessions'
   assert_file_not_contains "$CONTEXT_ASSET" 'rollout-'
 
