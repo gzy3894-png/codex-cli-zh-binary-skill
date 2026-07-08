@@ -223,6 +223,7 @@ test_android_security_guards() {
   assert_file_contains "$NETWORK_SECURITY_CONFIG" '<domain-config cleartextTrafficPermitted="true"'
   assert_file_contains "$NETWORK_SECURITY_CONFIG" '<domain>localhost</domain>'
   assert_file_contains "$NETWORK_SECURITY_CONFIG" '<domain>127.0.0.1</domain>'
+  assert_file_contains "$NETWORK_SECURITY_CONFIG" '<domain>10.0.2.2</domain>'
   assert_file_contains "$FILE_PATHS_XML" 'name="media_preview_share"'
   assert_file_contains "$FILE_PATHS_XML" 'path="media-preview-share/"'
   assert_file_not_contains "$FILE_PATHS_XML" '<external-path'
