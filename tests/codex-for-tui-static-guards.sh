@@ -140,15 +140,15 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 49'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.6"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 50'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.7"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "49"'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.6'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "50"'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.7'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -1089,6 +1089,8 @@ test_codex_context_bridge_asset() {
   assert_file_contains "$CONTEXT_ASSET" 'matcher = "manual|auto"'
   assert_file_contains "$CONTEXT_ASSET" 'matcher = "startup|resume|compact"'
   assert_file_contains "$CONTEXT_ASSET" 'context_hook_source='
+  assert_file_contains "$CONTEXT_ASSET" 'token_count_status='
+  assert_file_contains "$CONTEXT_ASSET" 'compaction_route_inferred='
 
   HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" enable >/dev/null || fail "codex-context enable failed"
   assert_file_contains "$tmp/home/.codex/config.toml" 'hooks = true'
@@ -1129,6 +1131,37 @@ EOF
   CODEX_FOR_TUI_REQUIREMENTS_FILE="$tmp/requirements.toml" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" status >"$tmp/status" || fail "codex-context requirements status failed"
   assert_file_contains "$tmp/status" 'context_hook=enabled'
   assert_file_contains "$tmp/status" 'context_hook_source=requirements'
+
+  mkdir -p "$tmp/home/.codex/sessions/2026/07/08"
+  cat > "$tmp/home/.codex/config.toml" <<'EOF'
+model_provider = "anyrouter"
+model_auto_compact_token_limit = 120000
+
+[features]
+hooks = true
+remote_compaction_v2 = true
+
+[model_providers.anyrouter]
+name = "OpenAI"
+base_url = "https://api.krill-ai.com/codex/v1"
+wire_api = "responses"
+EOF
+  cat > "$tmp/home/.codex/sessions/2026/07/08/sample.jsonl" <<'EOF'
+{"timestamp":"2026-07-08T06:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"model_context_window":258400,"total_token_usage":{"input_tokens":1000,"cached_input_tokens":900,"output_tokens":234,"reasoning_output_tokens":50,"total_tokens":1234},"last_token_usage":{"input_tokens":300,"cached_input_tokens":250,"output_tokens":21,"reasoning_output_tokens":5,"total_tokens":321}}}}
+{"timestamp":"2026-07-08T06:01:00Z","type":"event_msg","payload":{"type":"context_compacted"}}
+EOF
+  HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" status >"$tmp/status" || fail "codex-context monitor status failed"
+  assert_file_contains "$tmp/status" 'model_auto_compact_token_limit=120000'
+  assert_file_contains "$tmp/status" 'provider_name=OpenAI'
+  assert_file_contains "$tmp/status" 'provider_base_url_host=api.krill-ai.com'
+  assert_file_contains "$tmp/status" 'remote_compaction_v2_enabled=true'
+  assert_file_contains "$tmp/status" 'compaction_route_inferred=remote_v2'
+  assert_file_contains "$tmp/status" 'token_count_status=found'
+  assert_file_contains "$tmp/status" 'model_context_window=258400'
+  assert_file_contains "$tmp/status" 'token_total_tokens=1234'
+  assert_file_contains "$tmp/status" 'last_token_total_tokens=321'
+  assert_file_contains "$tmp/status" 'compactions_seen=1'
+  assert_file_contains "$tmp/status" 'latest_compaction_timestamp=2026-07-08T06:01:00Z'
   sh "$CONTEXT_ASSET" verify >/dev/null || fail "codex-context verify failed"
   rm -rf "$tmp"
 }
@@ -1195,6 +1228,12 @@ printf 'bridge-preview:%s:%s\n' "$PREFIX" "$*"
 EOF
   chmod +x "$tmp/prefix/local/bin/codex-preview"
 
+  cat > "$tmp/prefix/local/bin/codex-context" <<'EOF'
+#!/usr/bin/env sh
+printf 'bridge-context:%s:%s\n' "$PREFIX" "$*"
+EOF
+  chmod +x "$tmp/prefix/local/bin/codex-context"
+
   cat > "$tmp/bin/codex-update" <<'EOF'
 #!/usr/bin/env sh
 printf 'update-ran:%s\n' "$*"
@@ -1213,6 +1252,7 @@ EOF
 
   assert_file_contains "$tmp/bin/codex" '配置模式'
   assert_file_contains "$tmp/bin/codex" '更新'
+  assert_file_contains "$tmp/bin/codex" '上下文监测'
   assert_file_contains "$tmp/bin/codex" 'codex_config_menu'
   assert_file_contains "$tmp/bin/codex" 'CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"'
   assert_file_contains "$tmp/bin/codex" 'codex_for_tui_prefix_bin'
@@ -1252,6 +1292,18 @@ EOF
     fail "codex update launcher command failed"
   fi
   printf '%s\n' "$output" | grep -F 'update-ran:apply' >/dev/null 2>&1 || fail "codex 更新 did not invoke codex-update apply"
+
+  if ! output="$(
+    HOME="$tmp/home" \
+    CODEX_HOME="$tmp/home/.codex" \
+    PREFIX="$tmp/prefix" \
+    CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR" \
+    PATH="$tmp/bin:/bin:/usr/bin" \
+    "$tmp/bin/codex" 上下文监测 状态
+  )"; then
+    fail "codex context monitor launcher command failed"
+  fi
+  printf '%s\n' "$output" | grep -F "bridge-context:$tmp/prefix:status" >/dev/null 2>&1 || fail "codex 上下文监测 did not invoke codex-context status"
   rm -rf "$tmp"
 }
 

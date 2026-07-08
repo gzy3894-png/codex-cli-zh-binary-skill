@@ -33,12 +33,13 @@ APK assets 中的 `codex-for-tui-bootstrap.sh` 必须和 `../android-arm64-musl/
 ```sh
 codex 更新
 codex 配置模式
+codex 上下文监测
 codex-update check
 codex-update apply
 codex-local refresh-models
 ```
 
-`codex 更新` 只增量更新脚本，不重装依赖、不替换 Codex 二进制；`codex 配置模式` 打开配置管理器，支持配置增删改查、切换和未保存保护：新建或编辑后会主动询问保存，切换或退出前会提示保存未保存修改。安装器不管理 `AGENTS.md`，需要项目规则时请在 Codex 内运行 `/init`。
+`codex 更新` 只增量更新脚本，不重装依赖、不替换 Codex 二进制；`codex 配置模式` 打开配置管理器，支持配置增删改查、切换和未保存保护：新建或编辑后会主动询问保存，切换或退出前会提示保存未保存修改。`codex 上下文监测` 会调用 App 内置 `codex-context status`，查看 token_count、context_compacted 记录和压缩路线推断。安装器不管理 `AGENTS.md`，需要项目规则时请在 Codex 内运行 `/init`。
 
 ## 文件面板
 

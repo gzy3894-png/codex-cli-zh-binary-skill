@@ -331,11 +331,12 @@ hooks = true
 ```sh
 codex-rtk status
 codex-rtk verify
+codex 上下文监测
 codex-context status
 codex-context verify
 ```
 
-普通用户不需要再进入 Codex TUI 运行 `/hooks`。快捷授权会清理 `~/.codex/config.toml` 里的旧 Codex for TUI 用户级 hook 块；用户自己的 hooks 不会被授权或删除。检查 RTK/context 命令：
+`codex 上下文监测` 等价于 `codex-context status`，会显示最近 token_count、context_compacted 记录和压缩路线推断。普通用户不需要再进入 Codex TUI 运行 `/hooks`。快捷授权会清理 `~/.codex/config.toml` 里的旧 Codex for TUI 用户级 hook 块；用户自己的 hooks 不会被授权或删除。检查 RTK/context 命令：
 
 ```sh
 codex-rtk status

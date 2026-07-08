@@ -184,6 +184,37 @@ codex_for_tui_update() {
   exit 1
 }
 
+codex_for_tui_context_monitor() {
+  if command -v codex-context >/dev/null 2>&1; then
+    subcommand="${1:-status}"
+    case "$subcommand" in
+      ""|状态|status)
+        shift 2>/dev/null || true
+        set -- status "$@"
+        ;;
+      安装|启用|enable|install)
+        shift
+        set -- enable "$@"
+        ;;
+      禁用|disable)
+        shift
+        set -- disable "$@"
+        ;;
+      日志|事件|events)
+        shift
+        set -- events "$@"
+        ;;
+      验证|verify)
+        shift
+        set -- verify "$@"
+        ;;
+    esac
+    exec codex-context "$@"
+  fi
+  printf '%s\n' "错误: 找不到 codex-context。请先运行 codex 更新。" >&2
+  exit 1
+}
+
 codex_for_tui_tty_read() {
   prompt="$1"
   default="${2:-}"
@@ -365,6 +396,10 @@ case "${1:-}" in
   更新|update)
     shift
     codex_for_tui_update "$@"
+    ;;
+  上下文监测|context-monitor|monitor)
+    shift
+    codex_for_tui_context_monitor "$@"
     ;;
 esac
 

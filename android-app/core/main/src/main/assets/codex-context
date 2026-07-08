@@ -6,6 +6,7 @@ MARK_END="# codex-for-tui-context-hook end"
 
 usage() {
   printf '%s\n' "用法: codex-context status|events|hook|enable|disable|verify"
+  printf '%s\n' "status 会汇报 token_count、context_compacted 记录和本机推断的压缩路线。"
 }
 
 codex_home() {
@@ -186,6 +187,214 @@ json_value() {
   sed -n 's/.*"'"$key"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed -n '1p'
 }
 
+json_string_field() {
+  key="$1"
+  sed -n 's/.*"'"$key"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed -n '1p'
+}
+
+json_number_field() {
+  key="$1"
+  sed -n 's/.*"'"$key"'"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | sed -n '1p'
+}
+
+json_object_number_field() {
+  object="$1"
+  key="$2"
+  sed -n 's/.*"'"$object"'"[[:space:]]*:[[:space:]]*{[^}]*"'"$key"'"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | sed -n '1p'
+}
+
+toml_clean_value() {
+  sed 's/[[:space:]]*#.*$//' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | sed 's/^"//; s/"$//'
+}
+
+toml_top_value() {
+  key="$1"
+  cfg="$(config_file)"
+  [ -r "$cfg" ] || return 0
+  awk -v key="$key" '
+    function section_name(line, value) {
+      value = line
+      sub(/^[[:space:]]*\[/, "", value)
+      sub(/\][[:space:]]*$/, "", value)
+      return value
+    }
+    BEGIN { section = "" }
+    /^[[:space:]]*\[[^]]+\][[:space:]]*$/ {
+      section = section_name($0)
+      next
+    }
+    section == "" {
+      line = $0
+      sub(/[[:space:]]*#.*$/, "", line)
+      if (line ~ "^[[:space:]]*" key "[[:space:]]*=") {
+        sub(/^[^=]*=/, "", line)
+        print line
+        exit
+      }
+    }
+  ' "$cfg" | toml_clean_value | sed -n '1p'
+}
+
+toml_section_value() {
+  target="$1"
+  key="$2"
+  cfg="$(config_file)"
+  [ -r "$cfg" ] || return 0
+  awk -v target="$target" -v key="$key" '
+    function section_name(line, value) {
+      value = line
+      sub(/^[[:space:]]*\[/, "", value)
+      sub(/\][[:space:]]*$/, "", value)
+      return value
+    }
+    BEGIN { section = "" }
+    /^[[:space:]]*\[[^]]+\][[:space:]]*$/ {
+      section = section_name($0)
+      next
+    }
+    section == target {
+      line = $0
+      sub(/[[:space:]]*#.*$/, "", line)
+      if (line ~ "^[[:space:]]*" key "[[:space:]]*=") {
+        sub(/^[^=]*=/, "", line)
+        print line
+        exit
+      }
+    }
+  ' "$cfg" | toml_clean_value | sed -n '1p'
+}
+
+url_host() {
+  value="$1"
+  [ -n "$value" ] || return 0
+  value="${value#*://}"
+  value="${value%%/*}"
+  value="${value%%:*}"
+  printf '%s\n' "$value"
+}
+
+config_route_status() {
+  provider_id="$(toml_top_value model_provider)"
+  [ -n "$provider_id" ] || provider_id="default"
+  provider_section="model_providers.$provider_id"
+  provider_name="$(toml_section_value "$provider_section" name)"
+  base_url="$(toml_section_value "$provider_section" base_url)"
+  base_url_host="$(url_host "$base_url")"
+  wire_api="$(toml_section_value "$provider_section" wire_api)"
+  remote_v2="$(toml_section_value features remote_compaction_v2)"
+  [ -n "$remote_v2" ] || remote_v2="default"
+  [ -n "$provider_name" ] || provider_name="unknown"
+  [ -n "$base_url_host" ] || base_url_host="unknown"
+  [ -n "$wire_api" ] || wire_api="unknown"
+
+  supports_remote="false"
+  case "$provider_name" in
+    OpenAI|AzureOpenAI|Azure\ OpenAI)
+      supports_remote="true"
+      ;;
+  esac
+  case "$base_url_host" in
+    api.openai.com|*.openai.azure.com)
+      supports_remote="true"
+      ;;
+  esac
+
+  if [ "$supports_remote" = "true" ]; then
+    case "$remote_v2" in
+      true) route="remote_v2" ;;
+      *) route="remote" ;;
+    esac
+  else
+    route="local"
+  fi
+
+  printf 'model_provider=%s\n' "$provider_id"
+  printf 'provider_name=%s\n' "$provider_name"
+  printf 'provider_base_url_host=%s\n' "$base_url_host"
+  printf 'provider_wire_api=%s\n' "$wire_api"
+  printf 'remote_compaction_v2_enabled=%s\n' "$remote_v2"
+  printf 'supports_remote_compaction=%s\n' "$supports_remote"
+  printf 'compaction_route_inferred=%s\n' "$route"
+  printf 'compaction_route_basis=%s\n' "config+codex-source-rules"
+}
+
+scan_transcript_status() {
+  sessions_root="$(codex_home)/sessions"
+  printf 'sessions_root=%s\n' "$sessions_root"
+  if [ ! -d "$sessions_root" ]; then
+    printf 'token_count_status=missing\n'
+    printf 'compactions_seen=0\n'
+    printf 'latest_compaction_timestamp=none\n'
+    return 0
+  fi
+
+  files="$(find "$sessions_root" -type f -name '*.jsonl' 2>/dev/null | sort | tail -n 40 || true)"
+  if [ -z "$files" ]; then
+    printf 'token_count_status=missing\n'
+    printf 'compactions_seen=0\n'
+    printf 'latest_compaction_timestamp=none\n'
+    return 0
+  fi
+
+  latest_token_line=""
+  latest_token_file=""
+  latest_compaction_timestamp=""
+  latest_compaction_file=""
+  latest_compaction_kind=""
+  compaction_count=0
+
+  for file in $files; do
+    [ -r "$file" ] || continue
+    while IFS= read -r line; do
+      case "$line" in
+        *'"token_count"'*)
+          latest_token_line="$line"
+          latest_token_file="$file"
+          ;;
+      esac
+      case "$line" in
+        *'"context_compacted"'*|*'"type":"compacted"'*|*'"type": "compacted"'*)
+          compaction_count=$((compaction_count + 1))
+          latest_compaction_timestamp="$(printf '%s\n' "$line" | json_string_field timestamp)"
+          latest_compaction_file="$file"
+          case "$line" in
+            *'"context_compacted"'*) latest_compaction_kind="event_msg.context_compacted" ;;
+            *) latest_compaction_kind="compacted" ;;
+          esac
+          ;;
+      esac
+    done < "$file"
+  done
+
+  if [ -n "$latest_token_line" ]; then
+    printf 'token_count_status=found\n'
+    printf 'latest_token_count_session=%s\n' "$latest_token_file"
+    printf 'latest_token_count_timestamp=%s\n' "$(printf '%s\n' "$latest_token_line" | json_string_field timestamp)"
+    printf 'model_context_window=%s\n' "$(printf '%s\n' "$latest_token_line" | json_number_field model_context_window)"
+    printf 'token_total_tokens=%s\n' "$(printf '%s\n' "$latest_token_line" | json_object_number_field total_token_usage total_tokens)"
+    printf 'token_input_tokens=%s\n' "$(printf '%s\n' "$latest_token_line" | json_object_number_field total_token_usage input_tokens)"
+    printf 'token_cached_input_tokens=%s\n' "$(printf '%s\n' "$latest_token_line" | json_object_number_field total_token_usage cached_input_tokens)"
+    printf 'token_output_tokens=%s\n' "$(printf '%s\n' "$latest_token_line" | json_object_number_field total_token_usage output_tokens)"
+    printf 'token_reasoning_output_tokens=%s\n' "$(printf '%s\n' "$latest_token_line" | json_object_number_field total_token_usage reasoning_output_tokens)"
+    printf 'last_token_total_tokens=%s\n' "$(printf '%s\n' "$latest_token_line" | json_object_number_field last_token_usage total_tokens)"
+    printf 'last_token_input_tokens=%s\n' "$(printf '%s\n' "$latest_token_line" | json_object_number_field last_token_usage input_tokens)"
+    printf 'last_token_cached_input_tokens=%s\n' "$(printf '%s\n' "$latest_token_line" | json_object_number_field last_token_usage cached_input_tokens)"
+    printf 'last_token_output_tokens=%s\n' "$(printf '%s\n' "$latest_token_line" | json_object_number_field last_token_usage output_tokens)"
+    printf 'last_token_reasoning_output_tokens=%s\n' "$(printf '%s\n' "$latest_token_line" | json_object_number_field last_token_usage reasoning_output_tokens)"
+  else
+    printf 'token_count_status=missing\n'
+  fi
+
+  printf 'compactions_seen=%s\n' "$compaction_count"
+  if [ -n "$latest_compaction_timestamp" ]; then
+    printf 'latest_compaction_timestamp=%s\n' "$latest_compaction_timestamp"
+    printf 'latest_compaction_session=%s\n' "$latest_compaction_file"
+    printf 'latest_compaction_kind=%s\n' "$latest_compaction_kind"
+  else
+    printf 'latest_compaction_timestamp=none\n'
+  fi
+}
+
 ref_value() {
   printf '%s' "$1" | tr '\r\n' '  '
 }
@@ -297,6 +506,8 @@ status() {
   else
     printf 'model_auto_compact_token_limit=default\n'
   fi
+  config_route_status
+  scan_transcript_status
   if [ -f "$cfg" ] && grep -Eq '^[[:space:]]*hooks[[:space:]]*=[[:space:]]*true' "$cfg"; then
     printf 'hooks_feature=true\n'
   elif [ -f "$cfg" ] && grep -Eq '^[[:space:]]*hooks[[:space:]]*=[[:space:]]*false' "$cfg"; then
