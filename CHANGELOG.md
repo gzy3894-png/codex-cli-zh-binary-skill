@@ -1,5 +1,19 @@
 # Changelog
 
+## Codex for TUI 2.3.6
+
+Codex for TUI 2.3.6 是 2.3.5 的浏览器真机复测热修版。
+
+### 修复
+
+- 内置浏览器重复打开当前已加载根路径 URL 时，会把 `https://example.com` 与 WebView 回调的 `https://example.com/` 规范为同一加载目标，避免 `codex-browser open` 等到 `Page load timed out`。
+- 同一 URL 的后台导航、安装后 smoke 复测和日常签到脚本不再因为根路径尾部 `/` 差异误判失败。
+
+### 验证与回滚
+
+- 本地只运行 shell/static/smoke 门禁，不本地构建 APK/Gradle；APK、正式签名和 Release 资产只通过 GitHub Actions 构建。
+- Android 不能普通覆盖降级安装；从 2.3.6（`versionCode=49`）回到更低版本需要前滚回滚包，或卸载重装并承担数据迁移/丢失风险。
+
 ## Codex for TUI 2.3.5
 
 Codex for TUI 2.3.5 是 2.3.4 的配置热修版。

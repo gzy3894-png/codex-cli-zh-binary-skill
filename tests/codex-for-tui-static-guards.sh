@@ -140,15 +140,15 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 48'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.5"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 49'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.6"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "48"'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.5'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "49"'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.6'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -263,6 +263,8 @@ test_terminal_performance_guards() {
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'new Function(source)'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'val alreadyLoaded = tab.currentUrl.isNotBlank()'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'if (alreadyLoaded) {'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'private fun canonicalLoadUrl'
+  assert_file_contains "$TERMINAL_BROWSER_SESSION" 'uri.encodedPath.orEmpty().ifBlank { "/" }'
   assert_file_contains "$BROWSER_SMOKE" 'opening the already loaded URL should complete'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'attachOffscreenCaptureHost'
   assert_file_contains "$TERMINAL_BROWSER_SESSION" 'CapturableWebView'

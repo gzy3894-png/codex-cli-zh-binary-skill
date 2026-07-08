@@ -2150,9 +2150,24 @@ class TerminalBrowserSessionManager(
 
     private fun urlsSameForLoad(left: String, right: String): Boolean {
         if (right.isBlank()) return true
-        return left == right || runCatching {
-            Uri.parse(left).normalizeScheme().toString() == Uri.parse(right).normalizeScheme().toString()
-        }.getOrDefault(false)
+        return left == right || canonicalLoadUrl(left) == canonicalLoadUrl(right)
+    }
+
+    private fun canonicalLoadUrl(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank()) return ""
+        return runCatching {
+            val uri = Uri.parse(trimmed).normalizeScheme()
+            val scheme = uri.scheme.orEmpty().lowercase()
+            val host = uri.host.orEmpty().lowercase()
+            if (scheme.isBlank() || host.isBlank()) return@runCatching trimmed
+            val defaultPort = (scheme == "http" && uri.port == 80) ||
+                (scheme == "https" && uri.port == 443)
+            val port = if (uri.port >= 0 && !defaultPort) ":${uri.port}" else ""
+            val path = uri.encodedPath.orEmpty().ifBlank { "/" }
+            val query = uri.encodedQuery?.let { "?$it" }.orEmpty()
+            "$scheme://$host$port$path$query"
+        }.getOrDefault(trimmed)
     }
 
     private fun redactAuthCode(code: String): String {
