@@ -208,7 +208,7 @@ disable_response_storage = true
 auto_compaction = true
 fast_mode = true
 goals = true
-hooks = true
+hooks = false
 
 [tui]
 status_line = ["model-with-reasoning", "current-dir", "context-remaining", "used-tokens", "total-input-tokens", "total-output-tokens", "fast-mode", "task-progress"]
@@ -319,11 +319,11 @@ requires_openai_auth = false
 
 **Codex 结束时报 `Stop hook exited with code 127`？**
 
-2.0.8 起脚本生成的新配置会写入：
+2.3.7 起脚本生成的新配置会保持用户级 hooks 关闭：
 
 ```toml
 [features]
-hooks = true
+hooks = false
 ```
 
 如果你迁移了旧配置，请手动检查 `~/.codex/config.toml`。需要检查 RTK 和上下文压缩监测时运行：

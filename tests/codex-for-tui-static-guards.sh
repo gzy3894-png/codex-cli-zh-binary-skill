@@ -1166,7 +1166,7 @@ EOF
   rm -rf "$tmp"
 }
 
-test_codex_config_default_hooks_survive_profile_use() {
+test_codex_config_hooks_false_baseline_survives_profile_use() {
   tmp="${TMPDIR:-/tmp}/codex-tui-static-config-hooks.$$"
   rm -rf "$tmp"
   mkdir -p "$tmp/home/.codex" "$tmp/bin"
@@ -1199,11 +1199,11 @@ EOF
     codex_config_profile_use no-hooks
   ) >/dev/null
 
-  assert_file_contains "$tmp/home/.codex/config.toml" 'hooks = true'
-  assert_file_contains "$tmp/home/.codex/config.toml" 'codex-for-tui-rtk-hook begin'
-  assert_file_contains "$tmp/home/.codex/config.toml" 'codex-for-tui-context-hook begin'
-  assert_file_contains "$tmp/home/.codex/config.toml" 'command = "codex-rtk hook"'
-  assert_file_contains "$tmp/home/.codex/config.toml" 'command = "codex-context hook"'
+  assert_file_contains "$tmp/home/.codex/config.toml" 'hooks = false'
+  assert_file_not_contains "$tmp/home/.codex/config.toml" 'codex-for-tui-rtk-hook begin'
+  assert_file_not_contains "$tmp/home/.codex/config.toml" 'codex-for-tui-context-hook begin'
+  assert_file_not_contains "$tmp/home/.codex/config.toml" 'command = "codex-rtk hook"'
+  assert_file_not_contains "$tmp/home/.codex/config.toml" 'command = "codex-context hook"'
   assert_file_contains "$tmp/home/.codex/config.toml" 'approval_policy = "never"'
   assert_file_contains "$tmp/home/.codex/config.toml" 'sandbox_mode = "danger-full-access"'
   assert_file_contains "$tmp/home/.codex/config-profiles/current" 'no-hooks'
@@ -1493,7 +1493,7 @@ run_step test_agent_panel_bridge_asset
 run_step test_session_fold_bridge_asset
 run_step test_codex_rtk_bridge_asset
 run_step test_codex_context_bridge_asset
-run_step test_codex_config_default_hooks_survive_profile_use
+run_step test_codex_config_hooks_false_baseline_survives_profile_use
 run_step test_generated_launcher_entrypoints_and_normal_path
 run_step test_generated_launcher_first_run_configures_then_runs
 run_step test_update_apply_installs_self_test_script_and_aliases

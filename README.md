@@ -452,11 +452,11 @@ requires_openai_auth = false
 
 **Codex 结束时出现 hook 相关错误？**
 
-2.0.8 起配置模式默认写入：
+2.3.7 起配置模式默认保持用户级 hooks 关闭：
 
 ```toml
 [features]
-hooks = true
+hooks = false
 ```
 
 如果你迁移过旧配置，运行 `codex` 并在启动前选择 `1. 快捷授权并启动 Codex`。脚本会把 RTK/context 写入系统级 `requirements.toml`，并清理 `~/.codex/config.toml` 里的旧 Codex for TUI 用户级 hook 块；用户自己的 hooks 不会被授权或删除。`codex-rtk disable` 或 `codex-context disable` 只用于移除用户级手动 hook 配置。
