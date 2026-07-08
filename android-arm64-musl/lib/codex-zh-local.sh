@@ -189,11 +189,11 @@ codex_for_tui_context_monitor() {
     subcommand="${1:-report}"
     case "$subcommand" in
       ""|报告|report)
-        shift 2>/dev/null || true
+        [ "$#" -gt 0 ] && shift
         set -- report "$@"
         ;;
       状态|status)
-        shift 2>/dev/null || true
+        [ "$#" -gt 0 ] && shift
         set -- status "$@"
         ;;
       安装|启用|enable|install)
