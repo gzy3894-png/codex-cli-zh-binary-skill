@@ -124,14 +124,36 @@ jobs:
           log-accepted-android-sdk-licenses: false
 
       - name: Install Android SDK packages
+        shell: bash
         run: |
-          sdkmanager --install \
-            "platform-tools" \
-            "platforms;android-36" \
-            "build-tools;36.0.0" \
-            "cmake;3.22.1" \
-            "ndk;29.0.13846066"
-          yes | sdkmanager --licenses
+          set -euo pipefail
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$sdk_root" ]; then
+            echo "ANDROID_HOME/ANDROID_SDK_ROOT is not set" >&2
+            exit 1
+          fi
+          yes | sdkmanager --licenses >/dev/null || true
+          for attempt in 1 2 3; do
+            echo "::group::Install Android SDK packages (attempt ${attempt}/3)"
+            set +e
+            sdkmanager --install \
+              "platform-tools" \
+              "platforms;android-36" \
+              "build-tools;36.0.0" \
+              "cmake;3.22.1" \
+              "ndk;29.0.13846066"
+            rc=$?
+            set -e
+            echo "::endgroup::"
+            if [ "$rc" -eq 0 ]; then
+              yes | sdkmanager --licenses >/dev/null || true
+              exit 0
+            fi
+            echo "sdkmanager install failed with exit code $rc" >&2
+            rm -rf "$sdk_root/.temp" "$sdk_root/ndk/29.0.13846066"
+            sleep "$((attempt * 10))"
+          done
+          exit 1
 
       - name: Add RTK binary asset
         uses: actions/download-artifact@v4
@@ -240,14 +262,36 @@ jobs:
           log-accepted-android-sdk-licenses: false
 
       - name: Install Android SDK packages
+        shell: bash
         run: |
-          sdkmanager --install \
-            "platform-tools" \
-            "platforms;android-36" \
-            "build-tools;36.0.0" \
-            "cmake;3.22.1" \
-            "ndk;29.0.13846066"
-          yes | sdkmanager --licenses
+          set -euo pipefail
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$sdk_root" ]; then
+            echo "ANDROID_HOME/ANDROID_SDK_ROOT is not set" >&2
+            exit 1
+          fi
+          yes | sdkmanager --licenses >/dev/null || true
+          for attempt in 1 2 3; do
+            echo "::group::Install Android SDK packages (attempt ${attempt}/3)"
+            set +e
+            sdkmanager --install \
+              "platform-tools" \
+              "platforms;android-36" \
+              "build-tools;36.0.0" \
+              "cmake;3.22.1" \
+              "ndk;29.0.13846066"
+            rc=$?
+            set -e
+            echo "::endgroup::"
+            if [ "$rc" -eq 0 ]; then
+              yes | sdkmanager --licenses >/dev/null || true
+              exit 0
+            fi
+            echo "sdkmanager install failed with exit code $rc" >&2
+            rm -rf "$sdk_root/.temp" "$sdk_root/ndk/29.0.13846066"
+            sleep "$((attempt * 10))"
+          done
+          exit 1
 
       - name: Add RTK binary asset
         uses: actions/download-artifact@v4
