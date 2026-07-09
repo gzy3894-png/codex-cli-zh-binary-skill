@@ -1,5 +1,20 @@
 # Changelog
 
+## Codex for TUI 2.3.11
+
+Codex for TUI 2.3.11 是 2.3.10 的文件托盘桥接竞态热修版。
+
+### 修复
+
+- `codex-preview`、`codex-panel`、`codex-browser`、`codex-session` 的桥接请求不再把工作临时 `.req.tmp` 放进 App 监听/可能被清理的 `queue/` 目录。
+- 队列请求改为先在 bridge 根目录完成临时文件，再发布到 `queue/*.req` 和 legacy `request`，避免 App 处理 `clear` 时删除 `queue/` 导致 shell 端 `mv ... No such file or directory`。
+- 修复 2.3.10 安装后真机 smoke 在 `codex-preview clear installed_smoke_clear` 阶段暴露的请求发布竞态。
+
+### 验证与回滚
+
+- 本地运行 shell 语法检查、静态门禁、ops/config/installer/dev-transfer smoke；APK 编译、签名、Release 资产和安装后真机验证通过 GitHub Actions 与 installed-device smoke 完成。
+- Android 不能普通覆盖降级安装；从 2.3.11（`versionCode=54`）回到更低版本需要前滚回滚包，或卸载重装并承担数据迁移/丢失风险。
+
 ## Codex for TUI 2.3.10
 
 Codex for TUI 2.3.10 是 2.3.9 的文件托盘缓存生命周期热修版。

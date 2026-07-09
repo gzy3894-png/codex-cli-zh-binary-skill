@@ -45,7 +45,8 @@ write_request() {
   mkdir -p "$queue_dir"
   request_id="$(date +%s 2>/dev/null || printf 0).$$"
   safe_request_id="$(safe_id "$request_id")"
-  req_tmp="$queue_dir/$safe_request_id.req.tmp.$$"
+  req_tmp="$bridge_dir/.$safe_request_id.req.tmp.$$"
+  queue_tmp="$queue_dir/.$safe_request_id.req.tmp.$$"
   req_file="$queue_dir/$safe_request_id.req"
   {
     printf 'request_id=%s\n' "$request_id"
@@ -56,10 +57,12 @@ write_request() {
       shift 2
     done
   } > "$req_tmp"
+  cp "$req_tmp" "$queue_tmp"
+  mv "$queue_tmp" "$req_file"
   legacy_tmp="$request_file.tmp.$$"
   cp "$req_tmp" "$legacy_tmp"
   mv "$legacy_tmp" "$request_file"
-  mv "$req_tmp" "$req_file"
+  rm -f "$req_tmp"
   printf '%s\n' "$request_id"
 }
 
