@@ -115,6 +115,13 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action defaults to "tools platform-tools".  The obsolete
+          # "tools" package can pull emulator archives we do not use and has
+          # failed intermittently on hosted runners. Install only our explicit
+          # package list in the next step.
+          packages: ""
+          log-accepted-android-sdk-licenses: false
 
       - name: Install Android SDK packages
         run: |
@@ -224,6 +231,13 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action defaults to "tools platform-tools".  The obsolete
+          # "tools" package can pull emulator archives we do not use and has
+          # failed intermittently on hosted runners. Install only our explicit
+          # package list in the next step.
+          packages: ""
+          log-accepted-android-sdk-licenses: false
 
       - name: Install Android SDK packages
         run: |
