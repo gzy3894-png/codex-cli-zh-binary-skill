@@ -63,6 +63,10 @@ private const val BRIDGE_FALLBACK_POLL_MS = 1500L
 private const val BRIDGE_STATUS_SCHEMA_VERSION = "2.3.1"
 private const val TERMINAL_PERF_STATUS_MIN_INTERVAL_MS = 5000L
 private const val TRAY_SEND_ENTER_DELAY_MS = 320L
+private const val MEDIA_PREVIEW_RESTORE_LIMIT = 60
+private const val MEDIA_PREVIEW_MAX_CACHE_FILES = 200
+private const val MEDIA_PREVIEW_MAX_CACHE_BYTES = 200L * 1024L * 1024L
+private const val MEDIA_PREVIEW_MAX_CACHE_AGE_MS = 7L * 24L * 60L * 60L * 1000L
 private val REQUEST_FILE_OBSERVER_EVENTS =
     FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO
 private val QUEUE_FILE_OBSERVER_EVENTS =
@@ -93,6 +97,7 @@ class MainActivity : ComponentActivity() {
     private var lastSessionFoldRequest = ""
     private var lastBrowserNeedsUserEventKey = ""
     private var lastTerminalPerfStatusWriteAt = 0L
+    private var mediaPreviewCacheRestoreStarted = false
     private val mediaPreviewProcessedRequestIds = linkedSetOf<String>()
     private val browserProcessedRequestIds = linkedSetOf<String>()
     private val sessionFoldProcessedRequestIds = linkedSetOf<String>()
@@ -218,6 +223,7 @@ class MainActivity : ComponentActivity() {
         primeMediaPreviewRequestCache()
         primeBrowserRequestCache()
         primeSessionFoldRequestCache()
+        restoreMediaPreviewCacheAfterColdStart()
         setupKeyboardListener()
     }
 
@@ -825,13 +831,187 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun restoreMediaPreviewCacheAfterColdStart() {
+        if (mediaPreviewCacheRestoreStarted) return
+        mediaPreviewCacheRestoreStarted = true
+        lifecycleScope.launch {
+            val restored = recoverMediaPreviewCache()
+            restored.forEach { preview -> addMediaPreviewWithCacheCleanup(preview) }
+            if (restored.isNotEmpty()) {
+                syncMediaPreviewStatus(reason = "startup_restore", state = "ready")
+                writeAgentPanelEvent(
+                    source = "files",
+                    type = "agent_restored_cache",
+                    state = "ready",
+                    reason = "startup_restore",
+                    extra = mapOf("restored_count" to restored.size.toString())
+                )
+                writeAgentPanelStatus(
+                    source = "files",
+                    state = "ready",
+                    reason = "startup_restore",
+                    extra = mapOf("restored_count" to restored.size.toString())
+                )
+            }
+        }
+    }
+
+    private suspend fun recoverMediaPreviewCache(): List<TerminalMediaPreview> {
+        val previewDir = localDir().child("media-preview")
+        val refsDir = previewDir.child("refs")
+        val refs = withContext(Dispatchers.IO) {
+            refsDir.listFiles()
+                ?.filter { it.isFile && !it.name.endsWith(".tmp") }
+                ?.sortedBy { it.lastModified() }
+                ?: emptyList()
+        }
+        val candidates = mutableListOf<TerminalMediaPreview>()
+        for (ref in refs) {
+            val values = withContext(Dispatchers.IO) {
+                runCatching { parseMediaPreviewRequest(ref.readText()) }.getOrDefault(emptyMap())
+            }
+            val path = values["path"]?.let { unrefValue(it) }.orEmpty()
+            val file = File(path)
+            val kind = mediaPreviewKindFromString(values["kind"].orEmpty())
+            val readable = withContext(Dispatchers.IO) { file.isFile && file.canRead() }
+            if (path.isBlank() || kind == null || !readable || !isLocalPreviewCacheFile(file)) {
+                withContext(Dispatchers.IO) { runCatching { ref.delete() } }
+                continue
+            }
+
+            val bounds = if (kind == TerminalMediaPreviewKind.IMAGE) readImageBounds(file) else null
+            val textPreview = if (kind == TerminalMediaPreviewKind.TEXT) readTextPreview(file) else null
+            candidates.add(
+                TerminalMediaPreview(
+                    path = file.absolutePath,
+                    name = values["name"]?.let { unrefValue(it) }?.ifBlank { file.name } ?: file.name,
+                    kind = kind,
+                    stamp = values["stamp"]?.let { unrefValue(it) }?.ifBlank { ref.name } ?: ref.name,
+                    width = bounds?.first,
+                    height = bounds?.second,
+                    sizeBytes = file.length(),
+                    mimeType = mimeTypeForPreview(kind, file),
+                    textPreview = textPreview
+                )
+            )
+        }
+
+        val survivors = enforceMediaPreviewCacheBudget(candidates)
+        val survivorPaths = survivors.map { canonicalPathOrAbsolute(File(it.path)) }.toSet()
+        withContext(Dispatchers.IO) {
+            cleanupOrphanMediaPreviewCacheFiles(survivorPaths)
+        }
+        return survivors.sortedBy { File(it.path).lastModified() }
+    }
+
+    private suspend fun enforceMediaPreviewCacheBudget(
+        candidates: List<TerminalMediaPreview>
+    ): List<TerminalMediaPreview> = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val newestFirst = candidates.sortedByDescending { File(it.path).lastModified() }
+        val kept = mutableListOf<TerminalMediaPreview>()
+        var keptBytes = 0L
+        for (preview in newestFirst) {
+            val file = File(preview.path)
+            val size = file.length().coerceAtLeast(0L)
+            val tooOld = now - file.lastModified() > MEDIA_PREVIEW_MAX_CACHE_AGE_MS
+            val overCount = kept.size >= MEDIA_PREVIEW_RESTORE_LIMIT ||
+                kept.size >= MEDIA_PREVIEW_MAX_CACHE_FILES
+            val overBytes = keptBytes + size > MEDIA_PREVIEW_MAX_CACHE_BYTES
+            if (tooOld || overCount || overBytes) {
+                deleteMediaPreviewCacheNow(preview)
+            } else {
+                kept.add(preview)
+                keptBytes += size
+            }
+        }
+        kept
+    }
+
+    private fun addMediaPreviewWithCacheCleanup(preview: TerminalMediaPreview) {
+        val evicted = terminalViewModel.addMediaPreview(preview)
+        if (evicted.isNotEmpty()) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                evicted.forEach { deleteMediaPreviewCacheNow(it) }
+            }
+        }
+    }
+
+    private fun deleteMediaPreviewCache(preview: TerminalMediaPreview) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            deleteMediaPreviewCacheNow(preview)
+        }
+    }
+
+    private fun deleteMediaPreviewCacheNow(preview: TerminalMediaPreview) {
+        val file = File(preview.path)
+        if (isLocalPreviewCacheFile(file)) {
+            runCatching { file.delete() }
+        }
+        runCatching { removePreviewReference(preview) }
+    }
+
+    private fun clearAllMediaPreviewCache(previewDir: File = localDir().child("media-preview")) {
+        runCatching { previewDir.child("files").deleteRecursively() }
+        runCatching { previewDir.child("refs").deleteRecursively() }
+        runCatching { previewDir.child("queue").deleteRecursively() }
+        runCatching { localDir().child("browser").child("screenshots").deleteRecursively() }
+    }
+
+    private fun cleanupOrphanMediaPreviewCacheFiles(survivorPaths: Set<String>) {
+        mediaPreviewCacheRoots().forEach { root ->
+            if (!root.isDirectory) return@forEach
+            root.walkTopDown()
+                .filter { it.isFile }
+                .forEach { file ->
+                    val canonical = canonicalPathOrAbsolute(file)
+                    if (canonical !in survivorPaths) {
+                        runCatching { file.delete() }
+                    }
+                }
+        }
+    }
+
+    private fun mediaPreviewCacheRoots(): List<File> {
+        return listOf(
+            localDir().child("media-preview").child("files"),
+            localDir().child("browser").child("screenshots")
+        )
+    }
+
+    private fun isLocalPreviewCacheFile(file: File): Boolean {
+        val filePath = canonicalPathOrAbsolute(file)
+        return mediaPreviewCacheRoots().any { root ->
+            val rootPath = canonicalPathOrAbsolute(root)
+            filePath == rootPath || filePath.startsWith("$rootPath${File.separator}")
+        }
+    }
+
+    private fun canonicalPathOrAbsolute(file: File): String {
+        return runCatching { file.canonicalPath }.getOrElse { file.absolutePath }
+    }
+
+    private fun mediaPreviewKindFromString(value: String): TerminalMediaPreviewKind? {
+        return when (value.lowercase(Locale.ROOT)) {
+            "image" -> TerminalMediaPreviewKind.IMAGE
+            "video" -> TerminalMediaPreviewKind.VIDEO
+            "text" -> TerminalMediaPreviewKind.TEXT
+            else -> null
+        }
+    }
+
+    private fun mimeTypeForPreview(kind: TerminalMediaPreviewKind, file: File): String {
+        return when (kind) {
+            TerminalMediaPreviewKind.IMAGE -> "image/${file.extension.ifBlank { "png" }}"
+            TerminalMediaPreviewKind.VIDEO -> "video/${file.extension.ifBlank { "mp4" }}"
+            TerminalMediaPreviewKind.TEXT -> "text/plain"
+        }
+    }
+
     fun dismissMediaPreview() {
-        val paths = terminalViewModel.mediaPreviews.map { it.path }
         terminalViewModel.clearMediaPreviews()
         lifecycleScope.launch(Dispatchers.IO) {
-            paths.forEach { path -> runCatching { File(path).delete() } }
-            runCatching { localDir().child("media-preview").child("files").deleteRecursively() }
-            runCatching { localDir().child("media-preview").child("refs").deleteRecursively() }
+            clearAllMediaPreviewCache()
         }
         writeMediaPreviewStatus(localDir().child("media-preview"), "closed=1\n")
         writeAgentPanelEvent(source = "files", type = "user_cleared", state = "closed", reason = "clear")
@@ -842,10 +1022,7 @@ class MainActivity : ComponentActivity() {
         val refId = previewReferenceId(preview)
         val previewExtras = mediaPreviewExtras(preview)
         terminalViewModel.removeMediaPreview(preview.stamp)
-        lifecycleScope.launch(Dispatchers.IO) {
-            runCatching { File(preview.path).delete() }
-            runCatching { removePreviewReference(preview) }
-        }
+        deleteMediaPreviewCache(preview)
         syncMediaPreviewStatus(reason = "delete_item", state = "ready")
         writeAgentPanelEvent(
             source = "files",
@@ -1002,7 +1179,7 @@ class MainActivity : ComponentActivity() {
             textPreview = text.take(64 * 1024),
             source = TerminalMediaPreviewSource.USER
         )
-        terminalViewModel.addMediaPreview(preview)
+        addMediaPreviewWithCacheCleanup(preview)
 
         val refId = previewReferenceId(preview)
         val refWritten = runCatching {
@@ -1084,6 +1261,30 @@ class MainActivity : ComponentActivity() {
             .replace("\\", "\\\\")
             .replace("\r", "\\r")
             .replace("\n", "\\n")
+    }
+
+    private fun unrefValue(value: String): String {
+        val out = StringBuilder()
+        var escaping = false
+        value.forEach { ch ->
+            if (escaping) {
+                out.append(
+                    when (ch) {
+                        'r' -> '\r'
+                        'n' -> '\n'
+                        '\\' -> '\\'
+                        else -> ch
+                    }
+                )
+                escaping = false
+            } else if (ch == '\\') {
+                escaping = true
+            } else {
+                out.append(ch)
+            }
+        }
+        if (escaping) out.append('\\')
+        return out.toString()
     }
 
     private fun bridgeTextKeys(text: String): Set<String> {
@@ -2433,7 +2634,7 @@ class MainActivity : ComponentActivity() {
             sizeBytes = data.optLong("bytes").takeIf { it > 0 } ?: file.length(),
             mimeType = "image/png"
         )
-        terminalViewModel.addMediaPreview(preview)
+        addMediaPreviewWithCacheCleanup(preview)
         val refId = previewReferenceId(preview)
         withContext(Dispatchers.IO) {
             writePreviewReference(preview, refId)
@@ -2553,8 +2754,7 @@ class MainActivity : ComponentActivity() {
         if (action == "clear") {
             terminalViewModel.clearMediaPreviews()
             withContext(Dispatchers.IO) {
-                runCatching { previewDir.child("files").deleteRecursively() }
-                runCatching { previewDir.child("refs").deleteRecursively() }
+                clearAllMediaPreviewCache(previewDir)
             }
             writeMediaPreviewStatus(previewDir, "cleared=1\n")
             writeMediaPreviewResult(previewDir, requestId, action, ok = true, state = "closed", reason = reason)
@@ -2604,8 +2804,7 @@ class MainActivity : ComponentActivity() {
                     val refId = previewReferenceId(selected)
                     terminalViewModel.removeMediaPreview(selected.stamp)
                     withContext(Dispatchers.IO) {
-                        runCatching { File(selected.path).delete() }
-                        runCatching { removePreviewReference(selected) }
+                        deleteMediaPreviewCacheNow(selected)
                     }
                     syncMediaPreviewStatus(reason = reason, state = "ready")
                     writeMediaPreviewResult(previewDir, requestId, action, ok = true, state = "ready", reason = reason, itemId = refId, extra = mediaPreviewExtras(selected))
@@ -2683,7 +2882,7 @@ class MainActivity : ComponentActivity() {
             sizeBytes = mediaFile.length(),
             textPreview = textPreview
         )
-        terminalViewModel.addMediaPreview(preview)
+        addMediaPreviewWithCacheCleanup(preview)
         val refId = previewReferenceId(preview)
         val shouldPresent = request["present"] != "0"
         if (shouldPresent) {
@@ -2787,20 +2986,22 @@ class MainActivity : ComponentActivity() {
             null
         }
 
-        terminalViewModel.addMediaPreview(
-            TerminalMediaPreview(
-                path = target.absolutePath,
-                name = info.name.ifBlank { target.name },
-                kind = kind,
-                stamp = stamp,
-                width = bounds?.first,
-                height = bounds?.second,
-                sizeBytes = info.sizeBytes?.takeIf { it >= 0 } ?: copiedBytes,
-                mimeType = info.mimeType,
-                textPreview = textPreview,
-                source = TerminalMediaPreviewSource.USER
-            )
+        val preview = TerminalMediaPreview(
+            path = target.absolutePath,
+            name = info.name.ifBlank { target.name },
+            kind = kind,
+            stamp = stamp,
+            width = bounds?.first,
+            height = bounds?.second,
+            sizeBytes = info.sizeBytes?.takeIf { it >= 0 } ?: copiedBytes,
+            mimeType = info.mimeType,
+            textPreview = textPreview,
+            source = TerminalMediaPreviewSource.USER
         )
+        withContext(Dispatchers.IO) {
+            writePreviewReference(preview, previewReferenceId(preview))
+        }
+        addMediaPreviewWithCacheCleanup(preview)
         writeAgentPanelEvent(
             source = "files",
             type = "user_selected_file",

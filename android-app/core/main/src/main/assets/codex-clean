@@ -294,9 +294,11 @@ $2"
       clean_scan_patterns "$(ops_prefix)/tmp" "prefix_tmp"
       clean_scan_patterns "$(ops_prefix)/local/tmp" "prefix_local_tmp"
       clean_scan_all_files_in_dir "$(ops_prefix)/local/media-preview/files" "media_preview_cache"
+      clean_scan_all_files_in_dir "$(ops_prefix)/local/media-preview/refs" "media_preview_refs"
       clean_scan_all_files_in_dir "$(ops_prefix)/local/browser/results" "browser_request_results"
       clean_scan_all_files_in_dir "$(ops_prefix)/local/browser/request-results" "browser_request_results"
       clean_scan_all_files_in_dir "$(ops_prefix)/local/browser/logs" "browser_logs"
+      clean_scan_all_files_in_dir "$(ops_prefix)/local/browser/screenshots" "browser_screenshots"
     fi
     if [ "$include_ops_tasks" -eq 1 ]; then
       tasks_dir="$(ops_tasks_dir)"

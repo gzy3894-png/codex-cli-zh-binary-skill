@@ -17,6 +17,7 @@ rtk_path() {
     command -v rtk
     return 0
   fi
+  [ "${CODEX_RTK_NO_FALLBACK:-0}" = "1" ] && return 1
   for path in \
     "${PREFIX:-}/local/bin/rtk" \
     "/usr/local/bin/rtk" \

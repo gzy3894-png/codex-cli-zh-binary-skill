@@ -72,13 +72,15 @@ class TerminalViewModel : ViewModel() {
             }
         }
 
-    fun addMediaPreview(preview: TerminalMediaPreview) {
-        if (mediaPreviews.lastOrNull() == preview) return
+    fun addMediaPreview(preview: TerminalMediaPreview): List<TerminalMediaPreview> {
+        if (mediaPreviews.lastOrNull() == preview) return emptyList()
         mediaPreviews.removeAll { it.stamp == preview.stamp || it.path == preview.path }
         mediaPreviews.add(preview)
+        val evicted = mutableListOf<TerminalMediaPreview>()
         while (mediaPreviews.size > MAX_MEDIA_PREVIEWS) {
-            mediaPreviews.removeAt(0)
+            evicted.add(mediaPreviews.removeAt(0))
         }
+        return evicted
     }
 
     fun clearMediaPreviews() {

@@ -140,15 +140,15 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 52'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.9"'
+assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 53'
+assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.10"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "52"'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.9'
+assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "53"'
+assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.10'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -366,6 +366,14 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$MAIN_ACTIVITY" 'syncMediaPreviewStatus(reason = "delete_item", state = "ready")'
   assert_file_contains "$MAIN_ACTIVITY" 'syncMediaPreviewStatus(reason = "composer_sent", state = "done")'
   assert_file_contains "$MAIN_ACTIVITY" 'user_sent_text'
+  assert_file_contains "$MAIN_ACTIVITY" 'restoreMediaPreviewCacheAfterColdStart'
+  assert_file_contains "$MAIN_ACTIVITY" 'recoverMediaPreviewCache'
+  assert_file_contains "$MAIN_ACTIVITY" 'clearAllMediaPreviewCache'
+  assert_file_contains "$MAIN_ACTIVITY" 'deleteMediaPreviewCacheNow'
+  assert_file_contains "$MAIN_ACTIVITY" 'MEDIA_PREVIEW_MAX_CACHE_BYTES'
+  assert_file_contains "$MAIN_ACTIVITY" 'MEDIA_PREVIEW_MAX_CACHE_AGE_MS'
+  assert_file_contains "$MAIN_ACTIVITY" 'localDir().child("browser").child("screenshots")'
+  assert_file_contains "$MAIN_ACTIVITY" 'writePreviewReference(preview, previewReferenceId(preview))'
   assert_file_contains "$MAIN_ACTIVITY" 'visible='
   assert_file_contains "$MAIN_ACTIVITY" 'collapsed='
   assert_file_not_contains "$MAIN_ACTIVITY" '不要让我粘贴全文'
@@ -378,7 +386,8 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$INIT_ASSET" 'codex-preview path FILE_ID'
   assert_file_contains "$INIT_ASSET" '[ -x "$bin_dir/codex-preview" ]'
   assert_file_contains "$INIT_ASSET" 'codex-preview [--present|--background] text --stdin'
-  assert_file_contains "$TERMINAL_VIEW_MODEL" 'fun addMediaPreview'
+  assert_file_contains "$TERMINAL_VIEW_MODEL" 'fun addMediaPreview(preview: TerminalMediaPreview): List<TerminalMediaPreview>'
+  assert_file_contains "$TERMINAL_VIEW_MODEL" 'evicted.add(mediaPreviews.removeAt(0))'
   assert_file_not_contains "$TERMINAL_VIEW_MODEL" 'mediaPreviewExpanded = true'
   assert_file_not_contains "$TERMINAL_VIEW_MODEL" 'browserPanelExpanded = true'
   assert_file_not_contains "$TERMINAL_TOP_BAR" 'onPickFileClick'
@@ -543,6 +552,9 @@ test_codex_ops_tool_assets() {
   assert_file_contains "$CLEAN_ASSET" 'apply'
   assert_file_contains "$CLEAN_ASSET" 'restore'
   assert_file_contains "$CLEAN_ASSET" 'trash'
+  assert_file_contains "$CLEAN_ASSET" 'local/media-preview/files'
+  assert_file_contains "$CLEAN_ASSET" 'local/media-preview/refs'
+  assert_file_contains "$CLEAN_ASSET" 'local/browser/screenshots'
   assert_file_contains "$OPS_ASSET" 'status'
   assert_file_contains "$OPS_ASSET" 'events'
   assert_file_contains "$OPS_ASSET" 'resume_hint'
@@ -1012,7 +1024,7 @@ test_codex_rtk_bridge_asset() {
   assert_file_contains "$RTK_ASSET" 'rtk_hook_source='
 
   sample='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status"}}'
-  output="$(printf '%s' "$sample" | RTK_DISABLED=0 PREFIX="$tmp/no-prefix" PATH="$tmp/empty:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" hook)"
+  output="$(printf '%s' "$sample" | CODEX_RTK_NO_FALLBACK=1 RTK_DISABLED=0 PREFIX="$tmp/no-prefix" PATH="$tmp/empty:/usr/bin:/bin" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$RTK_ASSET" hook)"
   [ -z "$output" ] || fail "codex-rtk hook should fail open when rtk is missing"
 
   cat > "$tmp/bin/rtk" <<'EOF'

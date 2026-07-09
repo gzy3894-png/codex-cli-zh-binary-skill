@@ -1,5 +1,20 @@
 # Changelog
 
+## Codex for TUI 2.3.10
+
+Codex for TUI 2.3.10 是 2.3.9 的文件托盘缓存生命周期热修版。
+
+### 修复
+
+- App 退出重进、进程重启或覆盖安装后，会从 App 本地 refs 恢复仍有效的文件托盘图片、视频、文本和浏览器截图，避免“托盘 UI 空了但临时文件不可见残留”。
+- 文件托盘“清空”、单项删除、Agent clear 和超过托盘上限的自动淘汰都会同步删除 App 本地临时副本与 refs；清空还会清理浏览器截图缓存。
+- `codex-clean` 现在会扫描文件托盘 refs 与浏览器截图缓存，继续采用 scan/apply/restore 的可回滚清理模型。
+
+### 验证与回滚
+
+- 本地已运行 shell 语法检查、`tests/codex-for-tui-static-guards.sh` 和 `tests/codex-for-tui-ops-smoke.sh`；APK 编译、签名和真机验证通过 GitHub Actions release 流程完成。
+- Android 不能普通覆盖降级安装；从 2.3.10（`versionCode=53`）回到更低版本需要前滚回滚包，或卸载重装并承担数据迁移/丢失风险。
+
 ## Codex for TUI 2.3.9
 
 Codex for TUI 2.3.9 是 2.3.8 的文件托盘热修版。

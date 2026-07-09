@@ -65,7 +65,9 @@ tmp="${TMPDIR:-/tmp}/codex-tui-ops-smoke.$$"
 rm -rf "$tmp"
 mkdir -p "$tmp/bin" "$tmp/out" "$tmp/home/.codex" \
   "$tmp/prefix/local/media-preview/files" \
+  "$tmp/prefix/local/media-preview/refs" \
   "$tmp/prefix/local/browser/request-results" \
+  "$tmp/prefix/local/browser/screenshots" \
   "$tmp/prefix/local/browser" \
   "$tmp/prefix/local/ops"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
@@ -130,11 +132,15 @@ cat > "$PREFIX/local/ops/resume_hint" <<EOF
 EOF
 
 clean_target="$PREFIX/local/media-preview/files/worker-d-clean-target.txt"
+clean_ref="$PREFIX/local/media-preview/refs/worker-d-clean-target"
 clean_result="$PREFIX/local/browser/request-results/worker-d-result.json"
+clean_screenshot="$PREFIX/local/browser/screenshots/worker-d-shot.png"
 clean_marker="worker-d-clean-marker"
 printf '%s\n' "$clean_marker" > "$clean_target"
+printf 'path=%s\nkind=text\nstamp=worker-d-clean-target\n' "$clean_target" > "$clean_ref"
 printf '{"marker":"%s"}\n' "$clean_marker" > "$clean_result"
-touch -t 202001010000 "$clean_target" "$clean_result" 2>/dev/null || true
+printf 'png:%s\n' "$clean_marker" > "$clean_screenshot"
+touch -t 202001010000 "$clean_target" "$clean_ref" "$clean_result" "$clean_screenshot" 2>/dev/null || true
 
 run_capture doctor_default codex-doctor
 
@@ -144,12 +150,16 @@ run_capture ops_resume_hint codex-ops resume_hint
 
 run_capture clean_scan codex-clean scan
 [ -s "$clean_target" ] || fail "codex-clean scan removed media-preview file"
+[ -s "$clean_ref" ] || fail "codex-clean scan removed media-preview ref"
 [ -s "$clean_result" ] || fail "codex-clean scan removed browser result file"
+[ -s "$clean_screenshot" ] || fail "codex-clean scan removed browser screenshot"
 [ -s "$CODEX_HOME/auth.json" ] || fail "codex-clean scan touched auth.json"
 
 run_capture clean_apply codex-clean apply --yes --all
 [ ! -e "$clean_target" ] || fail "codex-clean apply should move media-preview file out of its original location"
+[ ! -e "$clean_ref" ] || fail "codex-clean apply should move media-preview ref out of its original location"
 [ ! -e "$clean_result" ] || fail "codex-clean apply should move browser result file out of its original location"
+[ ! -e "$clean_screenshot" ] || fail "codex-clean apply should move browser screenshot out of its original location"
 [ -s "$CODEX_HOME/auth.json" ] || fail "codex-clean apply must not remove auth.json"
 
 trash_copy="$(find_trash_copy "$(basename "$clean_target")")"
@@ -167,7 +177,9 @@ else
 fi
 
 [ -s "$clean_target" ] || fail "codex-clean restore did not restore media-preview file"
+[ -s "$clean_ref" ] || fail "codex-clean restore did not restore media-preview ref"
 [ -s "$clean_result" ] || fail "codex-clean restore did not restore browser result file"
+[ -s "$clean_screenshot" ] || fail "codex-clean restore did not restore browser screenshot"
 assert_file_contains "$clean_target" "$clean_marker"
 
 printf 'OK: Codex for TUI ops smoke passed\n'
