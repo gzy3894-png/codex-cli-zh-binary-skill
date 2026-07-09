@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.FileObserver
 import android.provider.OpenableColumns
+import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.webkit.MimeTypeMap
@@ -42,6 +43,7 @@ import com.rk.terminal.ui.screens.terminal.TerminalSessionFoldItem
 import com.rk.terminal.ui.screens.terminal.TerminalSessionFoldItemKind
 import com.rk.terminal.ui.screens.terminal.TerminalViewModel
 import com.rk.terminal.ui.theme.KarbonTheme
+import com.termux.terminal.TerminalSession
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
@@ -60,6 +62,7 @@ import org.json.JSONObject
 private const val BRIDGE_FALLBACK_POLL_MS = 1500L
 private const val BRIDGE_STATUS_SCHEMA_VERSION = "2.3.1"
 private const val TERMINAL_PERF_STATUS_MIN_INTERVAL_MS = 5000L
+private const val TRAY_SEND_ENTER_DELAY_MS = 320L
 private val REQUEST_FILE_OBSERVER_EVENTS =
     FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO
 private val QUEUE_FILE_OBSERVER_EVENTS =
@@ -898,9 +901,8 @@ class MainActivity : ComponentActivity() {
                 append(cleanMessage).append("。")
             }
             append("路径：codex-preview path ").append(refId)
-            append('\n')
         }
-        session.write(prompt)
+        submitPromptToSession(session, prompt)
         writeAgentPanelEvent(
             source = "files",
             type = "user_sent_file",
@@ -1010,9 +1012,10 @@ class MainActivity : ComponentActivity() {
         }.isSuccess
         if (!refWritten) return false
 
-        session.write(
+        submitPromptToSession(
+            session,
             buildString {
-                append("文本[").append(refId).append("] 路径：codex-preview path ").append(refId).append('\n')
+                append("文本[").append(refId).append("] 路径：codex-preview path ").append(refId)
             }
         )
         writeAgentPanelEvent(
@@ -1110,6 +1113,34 @@ class MainActivity : ComponentActivity() {
 
     private fun collapseTerminalText(value: String): String {
         return value.replace(Regex("\\s+"), " ").trim()
+    }
+
+    private fun submitPromptToSession(session: TerminalSession, prompt: String) {
+        val cleanPrompt = prompt.trimEnd('\r', '\n')
+        session.write(cleanPrompt)
+
+        val terminalView = terminalViewModel.terminalView
+        if (terminalView?.currentSession !== session) {
+            lifecycleScope.launch {
+                delay(TRAY_SEND_ENTER_DELAY_MS)
+                session.write("\r")
+            }
+            return
+        }
+
+        terminalView.requestFocus()
+        // Keep the submit key separate from the programmatic text write. Codex
+        // may classify a same-tick text+enter burst as pasted text and leave it
+        // in the composer; a short delay makes this follow the real user key
+        // path while still feeling immediate in the tray UI.
+        terminalView.postDelayed({
+            if (terminalView.currentSession === session) {
+                terminalView.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
+                terminalView.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+            } else {
+                session.write("\r")
+            }
+        }, TRAY_SEND_ENTER_DELAY_MS)
     }
 
     private fun shortenForTerminal(value: String, maxLength: Int): String {

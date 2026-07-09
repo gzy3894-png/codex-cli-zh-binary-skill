@@ -31,20 +31,16 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -196,7 +192,6 @@ fun TerminalMediaPreviewTray(
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val trayHeight = (screenHeight * 0.42f).coerceIn(220.dp, 420.dp)
     var dialogState by remember { mutableStateOf<PreviewDialogState?>(null) }
-    var sendTarget by remember { mutableStateOf<TerminalMediaPreview?>(null) }
     val imagePreviews = previews.filter { it.kind == TerminalMediaPreviewKind.IMAGE }
     val openPreview = { preview: TerminalMediaPreview, state: PreviewDialogState ->
         dialogState = state
@@ -243,7 +238,7 @@ fun TerminalMediaPreviewTray(
                         imagePreviews = imagePreviews,
                         onOpen = { openPreview(preview, it) },
                         onRemove = { onRemove(preview) },
-                        onSendToAi = { sendTarget = preview },
+                        onSendToAi = { onSendToAi(preview, "") },
                         onShare = { onPreviewShared(preview) }
                     )
                 }
@@ -262,16 +257,6 @@ fun TerminalMediaPreviewTray(
         )
     }
 
-    sendTarget?.let { preview ->
-        SendPreviewDialog(
-            preview = preview,
-            onDismiss = { sendTarget = null },
-            onConfirm = { message ->
-                onSendToAi(preview, message)
-                sendTarget = null
-            }
-        )
-    }
 }
 
 @Composable
@@ -330,51 +315,6 @@ private fun TextComposerTile(onSendText: (String) -> Boolean) {
             }
         }
     }
-}
-
-@Composable
-private fun SendPreviewDialog(
-    preview: TerminalMediaPreview,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit
-) {
-    var message by remember(preview.stamp) { mutableStateOf("") }
-    val send = { onConfirm(message.trim()) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("发送文件") },
-        text = {
-            Column {
-                Text(
-                    text = preview.name,
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = message,
-                    onValueChange = { message = it },
-                    label = { Text("附加说明（可选）") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardActions = KeyboardActions(onDone = { send() }),
-                    keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Done)
-                )
-            }
-        },
-        confirmButton = {
-            Button(onClick = send) {
-                Text("发送")
-            }
-        },
-        dismissButton = {
-            OutlinedButton(onClick = onDismiss) {
-                Text("取消")
-            }
-        }
-    )
 }
 
 @Composable

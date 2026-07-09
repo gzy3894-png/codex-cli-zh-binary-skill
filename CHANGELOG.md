@@ -1,5 +1,20 @@
 # Changelog
 
+## Codex for TUI 2.3.9
+
+Codex for TUI 2.3.9 是 2.3.8 的文件托盘热修版。
+
+### 修复
+
+- 文件托盘文本框和文件卡片点击“发送”后，短引用会写入当前 Codex TUI 会话，并延迟触发真实 Enter，避免只停在输入框等待用户再次手动发送。
+- 文件卡片发送不再弹出“发送文件/附加说明”二次对话框，点击后立即走当前会话发送链路。
+- `codex-preview path <编号>`、refs、status/events 和 session fold 协议保持兼容。
+
+### 验证与回滚
+
+- 本地已运行 `git diff --check` 和文件托盘目标静态门禁；本机缺少 Java/adb，APK 编译、签名和真机验证通过 GitHub Actions release 流程完成。
+- Android 不能普通覆盖降级安装；从 2.3.9（`versionCode=52`）回到更低版本需要前滚回滚包，或卸载重装并承担数据迁移/丢失风险。
+
 ## Codex for TUI 2.3.8
 
 Codex for TUI 2.3.8 是 2.3.7 的用户时区热修版。

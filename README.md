@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.3.8-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.3.8)
+[![Release](https://img.shields.io/badge/release-v2.3.9-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.3.9)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.142.4-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,7 +9,9 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.3.8 更新
+## 重要：2.3.9 更新
+
+2.3.9 是 2.3.8 的文件托盘热修版：文本托盘和文件卡片点“发送”后会把短引用写入当前 Codex 会话，并延迟触发真实 Enter，避免只停在输入框里等待手动提交。发布说明见 `docs/codex-for-tui-2.3.9-release-notes.md`。
 
 2.3.8 是 2.3.7 的用户时区热修版：`codex-context report` / `codex 上下文监测` 在 Android 环境中优先使用系统时间接口格式化“几点几分”，避免 Alpine/proot 默认 UTC 导致用户侧压缩报告偏移。发布说明见 `docs/codex-for-tui-2.3.8-release-notes.md`。
 
@@ -41,7 +43,7 @@ codex-ops resume-hint
 
 `codex-clean scan` 默认只扫描；`apply` 只移动到 `$PREFIX/local/ops/trash/<task_id>/`，不永久删除；误清理可用 `codex-clean restore <apply_task_id>` 恢复。详细说明见 `docs/codex-for-tui-2.3.1-ops.md`，发布说明见 `docs/codex-for-tui-2.3.1-release-notes.md`。
 
-发布安全说明：正式 APK 构建必须使用 GitHub Secrets/离线签名输入，仓库内不再提供正式 keystore fallback；Release 门禁会校验包名、版本号、非 debuggable 和正式签名指纹。Android 不支持普通覆盖安装降级，2.3.8（`versionCode=51`）回滚到更低 `versionCode` 需要前滚回滚包或卸载重装。
+发布安全说明：正式 APK 构建必须使用 GitHub Secrets/离线签名输入，仓库内不再提供正式 keystore fallback；Release 门禁会校验包名、版本号、非 debuggable 和正式签名指纹。Android 不支持普通覆盖安装降级，2.3.9（`versionCode=52`）回滚到更低 `versionCode` 需要前滚回滚包或卸载重装。
 
 2.3.0 是 2.2.9 后的稳定化回归版：补齐 `docs/codex-for-tui-2.3.0-regression.md` 和 `tests/codex-for-tui-installed-device-smoke.sh`，把安装/更新/首启、RTK/context、文件托盘、会话折叠、浏览器后台截图、JS、Auth 状态清理和终端性能状态纳入可重复门禁。真机回归时发现 `codex-browser open` 重复打开当前已加载 URL 可能卡到超时并误报 `Page load timed out before userscript completion`，2.3.0 已修复为直接返回当前页面快照；需要强制刷新时仍使用 `codex-browser reload`。
 
@@ -53,7 +55,7 @@ codex-ops resume-hint
 
 内置 WebView 继续作为 Agent Browser，保留后台打开、DOM 读取、点击、输入、JS、截图、多标签、Cookie/WebStorage 持久化和 userscript；遇到验证码/风控/外部 scheme 时会进入明确的用户协作状态，而不是让 Agent 猜。
 
-已经安装 2.0.x/2.1.x/2.2.x/2.3.x 的用户需要从 Releases 下载并覆盖安装 2.3.8 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context`、`codex-doctor`、`codex-clean`、`codex-ops` 等 APK 内置桥接命令。
+已经安装 2.0.x/2.1.x/2.2.x/2.3.x 的用户需要从 Releases 下载并覆盖安装 2.3.9 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context`、`codex-doctor`、`codex-clean`、`codex-ops` 等 APK 内置桥接命令。
 
 注意：普通启动按设计不会自动联网更新 `~/.local/share/codex-zh/scripts` 下的安装/配置脚本。已安装用户覆盖 APK 后，为确保 `codex 配置模式` 也切到最新配置管理器，请手动执行一次：
 
@@ -74,6 +76,7 @@ codex 配置模式
 
 ## 2.0 新功能
 
+- 2.3.9 修复：文件托盘文本/文件点击“发送”后延迟触发真实 Enter，避免短引用只停在 Codex 输入框而不提交。
 - 2.3.8 修复：`codex-context report` / `codex 上下文监测` 在 Android 上使用系统用户时区显示压缩触发时间。
 - 2.3.7 新增：`codex-context` 基于 Codex hooks 记录本地/远程压缩来源、本会话压缩次数，并提供 `codex 上下文监测` 用户报告入口。
 - 2.3.6 修复：内置浏览器重复打开当前根路径 URL 时，会把 `https://example.com` 与 `https://example.com/` 视为同一次加载，不再误报 `Page load timed out`。
@@ -134,7 +137,7 @@ codex 配置模式
 - 安装流程：自动准备依赖、下载 Codex 中文版二进制、写入 PATH 和大小写命令入口。
 - 配置流程：支持官方 Codex 初始化，也支持兼容 OpenAI Responses API 的第三方服务。
 - 第三方配置：内部 provider id 保持 `custom`，写入的 provider 名称为 `OpenAI`，`base_url` 可指向兼容 OpenAI Responses API 的第三方服务。
-- 文件协作：支持图片、视频、文本预览、用户选文件、长按分享和带说明发送。
+- 文件协作：支持图片、视频、文本预览、用户选文件、长按分享；文件卡片点“发送”会立即提交到当前会话。
 - 浏览器协作：支持内置 WebView、Custom Tabs/系统浏览器接管、多标签和页面自动化桥接。
 - 本地维护：普通启动不改配置；脚本更新和模型目录刷新都由用户显式命令触发。
 
@@ -144,7 +147,7 @@ codex 配置模式
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.3.8` |
+| Android App | `2.3.9` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug/Test 包名 | `com.gzy3894.codexfortui.test` |
 | Codex CLI | `0.142.4` 中文版 |
@@ -246,7 +249,7 @@ codex-preview --background /path/to/video.mp4
 printf '很长的文本\n' | codex-preview text --stdin --name notes.txt
 ```
 
-用户也可以在托盘里点“添加”，用 Android 系统文件管理器选择文件。托盘第一格是常驻文本框，发送后会保存为文本引用并清空输入框；文件卡片发送时可以附加一句说明。终端提示只会展示短文件编号；需要在 shell 中解析真实路径时使用：
+用户也可以在托盘里点“添加”，用 Android 系统文件管理器选择文件。托盘第一格是常驻文本框，发送后会保存为文本引用并清空输入框；文件卡片点“发送”会立即提交到当前会话。终端提示只会展示短文件编号；需要在 shell 中解析真实路径时使用：
 
 ```sh
 codex-preview path <编号>
