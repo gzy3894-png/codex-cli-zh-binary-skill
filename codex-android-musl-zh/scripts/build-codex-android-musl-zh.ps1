@@ -1065,6 +1065,9 @@ Apply-CodeModeMuslStub -CargoRoot $cargoRoot -RustTarget $Target
 if ($Target -eq "aarch64-unknown-linux-musl") {
     Update-CargoLockfile -CargoRoot $cargoRoot -CargoHomePath $CargoHome
 }
+Write-Step "Format patched Rust source"
+Invoke-Checked -FilePath "cargo" -Arguments @("fmt", "--all") -WorkingDirectory $cargoRoot
+Invoke-Checked -FilePath "cargo" -Arguments @("fmt", "--all", "--", "--check") -WorkingDirectory $cargoRoot
 Write-Step "Validate patched source diff"
 Invoke-Checked -FilePath "git" -Arguments @("-C", $sourcePath, "diff", "--check")
 if ($PrepareSourceOnly) {
