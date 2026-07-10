@@ -91,7 +91,7 @@ jobs:
             -CargoHome (Join-Path $workRoot "cargo-home") `
             -CargoTargetDir (Join-Path $workRoot "target-aarch64-musl") `
             -CargoToolsRoot (Join-Path $workRoot "cargo-tools") `
-            -ZigDir (Join-Path $workRoot "zig") `
+            -ZigDir (Join-Path $workRoot "zig\zig-x86_64-windows-0.16.0") `
             -StrawberryPerlRoot (Join-Path $workRoot "strawberry-perl") `
             -DistDir $distDir `
             -PythonExe $python `
