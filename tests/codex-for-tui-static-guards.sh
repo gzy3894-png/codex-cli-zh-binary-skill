@@ -143,16 +143,16 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 55'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.4.0"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 56'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.4.1"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" '- "release/codex-for-tui-*"'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "55"'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.4.0'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "56"'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.4.1'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -1363,7 +1363,11 @@ test_generated_launcher_entrypoints_and_normal_path() {
 
   cat > "$tmp/bin/codex-zh-bin" <<'EOF'
 #!/usr/bin/env sh
-printf 'real-codex:%s:%s:%s:%s\n' "$HOME" "$CODEX_HOME" "$PATH" "$*"
+if [ "${1:-}" = "--version" ]; then
+  printf '%s\n' "codex-cli test-build"
+  exit 0
+fi
+printf 'real-codex:%s:%s:%s:%s:%s\n' "$HOME" "$CODEX_HOME" "${CODEX_SQLITE_HOME:-}" "$PATH" "$*"
 EOF
   chmod +x "$tmp/bin/codex-zh-bin"
 
@@ -1423,6 +1427,8 @@ EOF
     fail "normal codex launcher command failed"
   fi
   printf '%s\n' "$output" | grep -F 'real-codex:' >/dev/null 2>&1 || fail "normal codex did not run real binary"
+  printf '%s\n' "$output" | grep -F "$tmp/home/.codex/sqlite-builds/" >/dev/null 2>&1 ||
+    fail "normal codex did not isolate SQLite by binary build"
   printf '%s\n' "$output" | grep -F "$tmp/prefix/local/bin" >/dev/null 2>&1 || fail "normal codex did not carry app bridge bin in PATH"
   printf '%s\n' "$output" | grep -F 'update-ran' >/dev/null 2>&1 && fail "normal codex invoked update path"
   printf '%s\n' "$output" | grep -F ':/root:' >/dev/null 2>&1 && fail "test did not isolate HOME"
@@ -1461,6 +1467,243 @@ EOF
     fail "codex context monitor launcher command failed"
   fi
   printf '%s\n' "$output" | grep -F "bridge-context:$tmp/prefix:status" >/dev/null 2>&1 || fail "codex 上下文监测 did not invoke codex-context status"
+
+  PYTHONNOUSERSITE=1 python3 "$SCRIPT_DIR/libexec/codex-config-engine.py" \
+    --codex-home "$tmp/home/.codex" \
+    profile create \
+    --name menu-test \
+    --mode official \
+    --model gpt-5.4 \
+    --activate >/dev/null
+  if ! printf 'b\n' |
+    HOME="$tmp/home" \
+    CODEX_HOME="$tmp/home/.codex" \
+    CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR" \
+    CODEX_ZH_FORCE_STDIN=1 \
+    CODEX_FOR_TUI_HOOK_AUTH_PROMPT=0 \
+    CODEX_FOR_TUI_OFFICIAL_LOGIN_PROMPT=0 \
+    PATH="$tmp/bin:/bin:/usr/bin" \
+    "$tmp/bin/codex" 配置模式 >"$tmp/config-mode.out" 2>"$tmp/config-mode.err"
+  then
+    fail "codex config mode back path failed"
+  fi
+  assert_file_contains "$tmp/config-mode.err" "Codex 配置模式"
+  assert_file_contains "$tmp/config-mode.out" "已退出配置模式。"
+  assert_file_not_contains "$tmp/config-mode.out" "real-codex:"
+
+  printf '%s\n' '{invalid-json' > "$tmp/home/.codex/config-profiles-v2/index.json"
+  set +e
+  HOME="$tmp/home" \
+  CODEX_HOME="$tmp/home/.codex" \
+  CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR" \
+  CODEX_FOR_TUI_HOOK_AUTH_PROMPT=0 \
+  CODEX_FOR_TUI_OFFICIAL_LOGIN_PROMPT=0 \
+  PATH="$tmp/bin:/bin:/usr/bin" \
+    "$tmp/bin/codex" should-not-run >"$tmp/corrupt.out" 2>"$tmp/corrupt.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "corrupt V2 state should block Codex startup"
+  assert_file_contains "$tmp/corrupt.err" "未启动 Codex"
+  assert_file_not_contains "$tmp/corrupt.out" "real-codex:"
+  rm -rf "$tmp"
+}
+
+test_generated_launcher_does_not_start_after_migration_failure() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-static-migration-failure.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.codex/config-profiles/broken" "$tmp/bin"
+  printf '%s\n' \
+    'model = "gpt-5.4"' \
+    'model_auto_compact_token_limit = 220000' \
+    > "$tmp/home/.codex/config.toml"
+  cp "$tmp/home/.codex/config.toml" \
+    "$tmp/home/.codex/config-profiles/broken/config.toml"
+  printf '%s\n' 'broken' > "$tmp/home/.codex/config-profiles/current"
+
+  cat > "$tmp/bin/codex-zh-bin" <<'EOF'
+#!/usr/bin/env sh
+if [ "${1:-}" = "--version" ]; then
+  printf '%s\n' "codex-cli migration-failure"
+  exit 0
+fi
+printf 'real-codex-should-not-run:%s\n' "$*"
+EOF
+  chmod +x "$tmp/bin/codex-zh-bin"
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-local.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_INSTALL_DIR="$tmp/bin"
+    codex_local_write_launcher
+  )
+
+  set +e
+  printf '1\n' |
+    HOME="$tmp/home" \
+    CODEX_HOME="$tmp/home/.codex" \
+    CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR" \
+    CODEX_ZH_FORCE_STDIN=1 \
+    PATH="$tmp/bin:/bin:/usr/bin" \
+    "$tmp/bin/codex" 配置模式 >"$tmp/stdout" 2>"$tmp/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "migration failure should return a non-zero status"
+  assert_file_contains "$tmp/stderr" "配置模式未完成，未启动 Codex"
+  assert_file_not_contains "$tmp/stdout" "real-codex-should-not-run:"
+  assert_file_not_contains "$tmp/stderr" "real-codex-should-not-run:"
+  rm -rf "$tmp"
+}
+
+test_generated_launcher_isolates_parallel_profiles() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-static-profile-isolation.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.codex/sessions" "$tmp/bin"
+  log="$tmp/runs.log"
+  release="$tmp/release-first"
+  printf '%s\n' 'sqlite_home = "/tmp/shared-old-sqlite"' > "$tmp/home/.codex/config.toml"
+  printf '%s\n' '{"session":"must-not-be-shared"}' > "$tmp/home/.codex/sessions/control.jsonl"
+  printf '%s\n' '{"history":"must-not-be-shared"}' > "$tmp/home/.codex/history.jsonl"
+
+  cat > "$tmp/bin/codex-zh-bin" <<'EOF'
+#!/usr/bin/env sh
+if [ "${1:-}" = "--version" ]; then
+  printf '%s\n' "codex-cli profile-isolation"
+  exit 0
+fi
+model="$(sed -n 's/^[[:space:]]*model[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$CODEX_HOME/config.toml" | sed -n '1p')"
+config_sqlite="$(sed -n 's/^[[:space:]]*sqlite_home[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$CODEX_HOME/config.toml" | sed -n '1p')"
+base_url="$(sed -n 's/^[[:space:]]*base_url[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$CODEX_HOME/config.toml" | sed -n '1p')"
+printf '%s|%s|%s|%s|%s\n' "$CODEX_HOME" "${CODEX_SQLITE_HOME:-}" "$model" "$config_sqlite" "$base_url" >> "$CODEX_TEST_LOG"
+if [ "${1:-}" = "hold" ]; then
+  while [ ! -e "$CODEX_TEST_RELEASE" ]; do
+    sleep 0.1
+  done
+fi
+EOF
+  chmod +x "$tmp/bin/codex-zh-bin"
+
+  PYTHONNOUSERSITE=1 python3 "$SCRIPT_DIR/libexec/codex-config-engine.py" \
+    --codex-home "$tmp/home/.codex" \
+    profile create \
+    --name alpha \
+    --mode third_party \
+    --provider-name Alpha \
+    --base-url https://alpha.example.test/v1 \
+    --model gpt-5.4 \
+    --activate >/dev/null
+  PYTHONNOUSERSITE=1 python3 "$SCRIPT_DIR/libexec/codex-config-engine.py" \
+    --codex-home "$tmp/home/.codex" \
+    profile create \
+    --name beta \
+    --mode third_party \
+    --provider-name Beta \
+    --base-url https://beta.example.test/v1 \
+    --model gpt-5.5 >/dev/null
+
+  (
+    . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-local.sh"
+    export HOME="$tmp/home"
+    export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_INSTALL_DIR="$tmp/bin"
+    codex_local_write_launcher
+  )
+
+  HOME="$tmp/home" \
+  CODEX_HOME="$tmp/home/.codex" \
+  CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR" \
+  CODEX_FOR_TUI_HOOK_AUTH_PROMPT=0 \
+  CODEX_FOR_TUI_OFFICIAL_LOGIN_PROMPT=0 \
+  CODEX_TEST_LOG="$log" \
+  CODEX_TEST_RELEASE="$release" \
+  PATH="$tmp/bin:/bin:/usr/bin" \
+    "$tmp/bin/codex" hold &
+  first_pid=$!
+
+  attempts=0
+  while [ ! -s "$log" ] && [ "$attempts" -lt 100 ]; do
+    sleep 0.1
+    attempts=$((attempts + 1))
+  done
+  [ -s "$log" ] || {
+    kill "$first_pid" 2>/dev/null || true
+    fail "first isolated profile did not start"
+  }
+
+  PYTHONNOUSERSITE=1 python3 "$SCRIPT_DIR/libexec/codex-config-engine.py" \
+    --codex-home "$tmp/home/.codex" \
+    profile activate beta >/dev/null
+  HOME="$tmp/home" \
+  CODEX_HOME="$tmp/home/.codex" \
+  CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR" \
+  CODEX_FOR_TUI_HOOK_AUTH_PROMPT=0 \
+  CODEX_FOR_TUI_OFFICIAL_LOGIN_PROMPT=0 \
+  CODEX_TEST_LOG="$log" \
+  CODEX_TEST_RELEASE="$release" \
+  PATH="$tmp/bin:/bin:/usr/bin" \
+    "$tmp/bin/codex" second
+
+  kill -0 "$first_pid" 2>/dev/null || fail "starting beta terminated the live alpha session"
+  printf '%s\n' '# same version, different localized build' >> "$tmp/bin/codex-zh-bin"
+  HOME="$tmp/home" \
+  CODEX_HOME="$tmp/home/.codex" \
+  CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR" \
+  CODEX_FOR_TUI_HOOK_AUTH_PROMPT=0 \
+  CODEX_FOR_TUI_OFFICIAL_LOGIN_PROMPT=0 \
+  CODEX_TEST_LOG="$log" \
+  CODEX_TEST_RELEASE="$release" \
+  PATH="$tmp/bin:/bin:/usr/bin" \
+    "$tmp/bin/codex" rebuilt
+  kill -0 "$first_pid" 2>/dev/null ||
+    fail "starting a rebuilt binary terminated the older live session"
+
+  first_runtime="$(sed -n '1p' "$log" | cut -d '|' -f 1)"
+  first_sqlite="$(sed -n '1p' "$log" | cut -d '|' -f 2)"
+  first_model="$(sed -n '1p' "$log" | cut -d '|' -f 3)"
+  second_runtime="$(sed -n '2p' "$log" | cut -d '|' -f 1)"
+  second_sqlite="$(sed -n '2p' "$log" | cut -d '|' -f 2)"
+  second_model="$(sed -n '2p' "$log" | cut -d '|' -f 3)"
+  third_runtime="$(sed -n '3p' "$log" | cut -d '|' -f 1)"
+  third_sqlite="$(sed -n '3p' "$log" | cut -d '|' -f 2)"
+  first_config_sqlite="$(sed -n '1p' "$log" | cut -d '|' -f 4)"
+  second_config_sqlite="$(sed -n '2p' "$log" | cut -d '|' -f 4)"
+  third_config_sqlite="$(sed -n '3p' "$log" | cut -d '|' -f 4)"
+  first_base_url="$(sed -n '1p' "$log" | cut -d '|' -f 5)"
+  second_base_url="$(sed -n '2p' "$log" | cut -d '|' -f 5)"
+  [ "$first_runtime" != "$second_runtime" ] || fail "different profiles shared one runtime home"
+  [ "$first_sqlite" != "$second_sqlite" ] || fail "different profiles shared one SQLite home"
+  [ "$second_runtime" = "$third_runtime" ] || fail "one profile changed runtime home after a rebuild"
+  [ "$second_sqlite" != "$third_sqlite" ] ||
+    fail "same-version rebuilt binaries reused one SQLx migration database"
+  [ "$first_model" = "gpt-5.4" ] || fail "alpha launched with the wrong model"
+  [ "$second_model" = "gpt-5.5" ] || fail "beta launched with the wrong model"
+  [ "$first_base_url" = "https://alpha.example.test/v1" ] ||
+    fail "alpha launched against the wrong provider site"
+  [ "$second_base_url" = "https://beta.example.test/v1" ] ||
+    fail "beta launched against the wrong provider site"
+  [ "$first_config_sqlite" = "$first_sqlite" ] ||
+    fail "alpha config.toml overrode the build-isolated SQLite home"
+  [ "$second_config_sqlite" = "$second_sqlite" ] ||
+    fail "beta config.toml overrode the build-isolated SQLite home"
+  [ "$third_config_sqlite" = "$third_sqlite" ] ||
+    fail "rebuilt config.toml reused the previous SQLx migration database"
+  [ ! -L "$first_runtime/sessions" ] || fail "alpha runtime symlinked shared sessions"
+  [ ! -L "$first_runtime/history.jsonl" ] || fail "alpha runtime symlinked shared history"
+  [ ! -e "$first_runtime/sessions/control.jsonl" ] ||
+    fail "alpha runtime inherited control-home session data"
+  [ ! -L "$second_runtime/sessions" ] || fail "beta runtime symlinked shared sessions"
+  [ ! -e "$second_runtime/sessions/control.jsonl" ] ||
+    fail "beta runtime inherited control-home session data"
+  assert_file_contains "$first_runtime/config.toml" 'model = "gpt-5.4"'
+  assert_file_contains "$first_runtime/config.toml" 'base_url = "https://alpha.example.test/v1"'
+  assert_file_contains "$second_runtime/config.toml" 'model = "gpt-5.5"'
+  assert_file_contains "$second_runtime/config.toml" 'base_url = "https://beta.example.test/v1"'
+
+  : > "$release"
+  wait "$first_pid"
+  assert_file_contains "$tmp/home/.codex/config.toml" 'model = "gpt-5.5"'
   rm -rf "$tmp"
 }
 
@@ -1618,6 +1861,15 @@ test_codex_local_profile_commands_are_explicit_only() {
   assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" 'codex_config_write_model_catalog'
   assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" 'codex_config_write_third_party_config'
   assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" 'context_window": 272000'
+  assert_file_not_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'openai/codex/main'
+  assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'slug.startswith("codex-auto-")'
+  assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'model["visibility"] = "hide"'
+  assert_file_contains "$SCRIPT_DIR/data/openai-models-source.json" '"source_ref": "rust-v0.144.1"'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'elif command -v openssl'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" '无法计算 Codex 二进制 SHA-256'
+  assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'wc -c < "$real_bin"'
+  assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-update.sh" 'codex_local_install_binary'
+  assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-update.sh" 'codex-zh-bin'
   assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'profile-use'
 }
 
@@ -1656,6 +1908,8 @@ run_step test_codex_rtk_bridge_asset
 run_step test_codex_context_bridge_asset
 run_step test_codex_config_default_hooks_survive_profile_use
 run_step test_generated_launcher_entrypoints_and_normal_path
+run_step test_generated_launcher_does_not_start_after_migration_failure
+run_step test_generated_launcher_isolates_parallel_profiles
 run_step test_generated_launcher_first_run_configures_then_runs
 run_step test_update_apply_installs_self_test_script_and_aliases
 run_step test_update_self_test_subcommand_fetches_and_runs_script

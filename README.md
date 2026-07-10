@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.4.0-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.4.0)
+[![Release](https://img.shields.io/badge/release-v2.4.1-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.4.1)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.144.1-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,7 +9,9 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.4.0 更新
+## 重要：2.4.1 热修
+
+2.4.1 修复 2.4.0 的配置与模型回归：配置模式返回或迁移失败后只退出到 shell，不再继续启动 Codex；旧配置迁移不再遍历 SQLite、sessions、FIFO 和插件临时对象；每个配置使用独立 config/auth/session/runtime，SQLite 再按 Codex 版本与二进制 SHA 隔离，避免不同站点并行会话互相覆盖和 SQLx migration checksum mismatch。模型能力固定到 Codex `0.144.1` 对应的 `rust-v0.144.1` 目录；生成目录会隐藏 `codex-auto-*` 辅助模型，使现有 Codex 原生 `/model` 直接进入完整可选模型页，推理等级与该构建的上游目录一致。发布说明见 `docs/codex-for-tui-2.4.1-release-notes.md`。
 
 2.4.0 重构了配置档、模型目录和上下文策略底层，并将随包中文 Codex CLI 升级到 `0.144.1`：配置模式改为扁平 CRUD，配置档使用稳定 ID 和事务写入，TOML 注释与未知字段会保留；旧配置可无损迁移并完整回滚。第三方 `/models` 只决定可用模型 ID，推理等级、上下文窗口和工具能力从 OpenAI Codex 官方目录精确合并，支持 `max` / `ultra`、未知模型保守模式和“跟随模型 / 固定 token”压缩策略。发布说明见 `docs/codex-for-tui-2.4.0-release-notes.md`。
 
@@ -49,7 +51,7 @@ codex-ops resume-hint
 
 `codex-clean scan` 默认只扫描；`apply` 只移动到 `$PREFIX/local/ops/trash/<task_id>/`，不永久删除；误清理可用 `codex-clean restore <apply_task_id>` 恢复。详细说明见 `docs/codex-for-tui-2.3.1-ops.md`，发布说明见 `docs/codex-for-tui-2.3.1-release-notes.md`。
 
-发布安全说明：正式 APK 构建必须使用 GitHub Secrets/离线签名输入，仓库内不再提供正式 keystore fallback；Release 门禁会校验包名、版本号、非 debuggable 和正式签名指纹。Android 不支持普通覆盖安装降级，2.4.0（`versionCode=55`）回滚到更低 `versionCode` 需要前滚回滚包或卸载重装。
+发布安全说明：正式 APK 构建必须使用 GitHub Secrets/离线签名输入，仓库内不再提供正式 keystore fallback；Release 门禁会校验包名、版本号、非 debuggable 和正式签名指纹。Android 不支持普通覆盖安装降级，2.4.1（`versionCode=56`）回滚到更低 `versionCode` 需要前滚回滚包或卸载重装。
 
 2.3.0 是 2.2.9 后的稳定化回归版：补齐 `docs/codex-for-tui-2.3.0-regression.md` 和 `tests/codex-for-tui-installed-device-smoke.sh`，把安装/更新/首启、RTK/context、文件托盘、会话折叠、浏览器后台截图、JS、Auth 状态清理和终端性能状态纳入可重复门禁。真机回归时发现 `codex-browser open` 重复打开当前已加载 URL 可能卡到超时并误报 `Page load timed out before userscript completion`，2.3.0 已修复为直接返回当前页面快照；需要强制刷新时仍使用 `codex-browser reload`。
 
@@ -61,7 +63,7 @@ codex-ops resume-hint
 
 内置 WebView 继续作为 Agent Browser，保留后台打开、DOM 读取、点击、输入、JS、截图、多标签、Cookie/WebStorage 持久化和 userscript；遇到验证码/风控/外部 scheme 时会进入明确的用户协作状态，而不是让 Agent 猜。
 
-已经安装 2.0.x/2.1.x/2.2.x/2.3.x 的用户需要从 Releases 下载并覆盖安装 2.4.0 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context`、`codex-doctor`、`codex-clean`、`codex-ops` 等 APK 内置桥接命令。
+已经安装 2.0.x/2.1.x/2.2.x/2.3.x/2.4.0 的用户需要从 Releases 下载并覆盖安装 2.4.1 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context`、`codex-doctor`、`codex-clean`、`codex-ops` 等 APK 内置桥接命令。
 
 注意：普通启动按设计不会自动联网更新 `~/.local/share/codex-zh/scripts` 下的安装/配置脚本。已安装用户覆盖 APK 后，为确保 `codex 配置模式` 也切到最新配置管理器，请手动执行一次：
 
@@ -82,6 +84,7 @@ codex 配置模式
 
 ## 2.0 新功能
 
+- 2.4.1 热修：配置模式失败/返回不再启动 Codex；配置、会话和 SQLite 按 profile/build 隔离；目录层隐藏 `codex-auto-*`，让原生 `/model` 直达完整模型页；推理等级绑定 `rust-v0.144.1` 目录。
 - 2.4.0 重构：事务型配置档 V2、稳定 ID CRUD、V1 无损迁移/回滚、动态模型能力、真实上下文与压缩策略。
 - 2.3.11 修复：文件托盘/浏览器/会话折叠桥接请求先在非监听临时文件完成，再发布到队列与 legacy request，避免 App 清理队列时触发 shell 端 `mv ... No such file or directory` 竞态。
 - 2.3.10 修复：文件托盘缓存生命周期闭环，重启后恢复有效临时文件并清理孤儿缓存，清空/单删/Agent clear/自动淘汰都会同步删除 App 本地副本。
@@ -156,7 +159,7 @@ codex 配置模式
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.4.0` |
+| Android App | `2.4.1` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug/Test 包名 | `com.gzy3894.codexfortui.test` |
 | Codex CLI | `0.144.1` 中文版 |
@@ -237,7 +240,7 @@ codex 配置模式
 
 `codex 配置模式` 会打开事务型配置档 V2，围绕增、删、改、查和切换工作：新建配置、选择配置、编辑配置、查看配置、删除配置、刷新模型目录、上下文/压缩策略和修复全权限授权。配置档使用稳定 ID；编辑不会变成同名新建，取消确认不会写入。第三方配置会保存 `config.toml`、`auth.json` 和 `model_catalog_json`；切换或退出前若检测到手改配置、登录态或目录变化，会提示同步当前配置、另存或暂不保存。通用配置、注释和未知 TOML 字段会保留；全权限模式会同时写入 `approval_policy = "never"` 和 `sandbox_mode = "danger-full-access"`。
 
-第三方模型目录刷新也可以手动执行。Provider `/models` 只决定可用模型 ID，真实推理等级、上下文窗口和工具能力从随包 OpenAI Codex 官方目录精确合并；未知模型使用保守能力，可通过映射文件补充。刷新会保留当前 `model` 和 `model_reasoning_effort`，如果当前选择已不再受支持会要求用户重新选择：
+第三方模型目录刷新也可以手动执行。Provider `/models` 只决定可用模型 ID，真实推理等级、上下文窗口和工具能力从随包 OpenAI Codex 官方目录精确合并；未知模型使用保守能力，可通过映射文件补充。所有 `codex-auto-*` 辅助模型保留在目录中但标记为隐藏，避免 `/model` 先进入 auto 快捷页；已有 profile 会在本地物化时应用同一策略，不联网刷新。刷新会保留当前 `model` 和 `model_reasoning_effort`，如果当前选择已不再受支持会要求用户重新选择：
 
 ```sh
 codex-local refresh-models

@@ -750,6 +750,10 @@ codex_config_profiles_root() {
   printf '%s/config-profiles\n' "$(codex_home)"
 }
 
+codex_config_v2_profiles_root() {
+  printf '%s/config-profiles-v2\n' "$(codex_home)"
+}
+
 codex_config_profile_valid_name() {
   name="$1"
   [ -n "$name" ] || return 1
@@ -1108,13 +1112,13 @@ codex_config_v2_prepare() {
       case "$v2_prepare_choice" in
         1|"") v2_prepare_policy="follow-model"; break ;;
         2) v2_prepare_policy="fixed"; break ;;
-        b|B|back|BACK|返回) return 1 ;;
+        b|B|back|BACK|返回) return 2 ;;
         0|q|Q|quit|QUIT|退出) codex_config_exit_config_mode ;;
         *) codex_warn "请输入 1、2、b 或 0。" ;;
       esac
     done
   else
-    codex_config_tty_confirm "迁移到事务型配置档结构？（可回滚）" "y" || return 1
+    codex_config_tty_confirm "迁移到事务型配置档结构？（可回滚）" "y" || return 2
   fi
   codex_config_v2_run "$v2_prepare_work/migrate.json" migrate-v1 --compact-policy "$v2_prepare_policy"
 }
@@ -1360,7 +1364,7 @@ codex_config_v2_edit_third_party() {
     codex_warn "API Base URL 无效，必须是不含账号、查询参数或片段的 http(s) URL。"
   done
   v2_edit_new_base="$(codex_config_normalize_api_base "$v2_edit_raw_base")"
-  v2_edit_existing_auth="$(codex_home)/config-profiles/profiles/$v2_edit_id/auth.json"
+  v2_edit_existing_auth="$(codex_config_v2_profiles_root)/profiles/$v2_edit_id/auth.json"
   v2_edit_existing_key="$(codex_config_read_auth_key "$v2_edit_existing_auth" || true)"
   v2_edit_key="$(codex_config_v2_read_secret "API Key（留空保留当前，输入 b 返回，0 退出）")"
   codex_config_is_back_choice "$v2_edit_key" && return 1
@@ -1495,7 +1499,7 @@ codex_config_refresh_models() {
   v2_refresh_base="$(codex_config_v2_json_value "$v2_refresh_profile" profile.base_url)"
   v2_refresh_model="$(codex_config_v2_json_value "$v2_refresh_profile" profile.model)"
   v2_refresh_effort="$(codex_config_v2_json_value "$v2_refresh_profile" profile.reasoning_effort 2>/dev/null || true)"
-  v2_refresh_auth="$(codex_home)/config-profiles/profiles/$v2_refresh_active/auth.json"
+  v2_refresh_auth="$(codex_config_v2_profiles_root)/profiles/$v2_refresh_active/auth.json"
   v2_refresh_key="$(codex_config_read_auth_key "$v2_refresh_auth" || true)"
   [ -n "$v2_refresh_key" ] || {
     codex_warn "当前配置没有 API Key。"
@@ -1622,7 +1626,16 @@ codex_config_profile_new() {
 }
 
 codex_config_menu() {
-  codex_config_v2_prepare || return 0
+  if codex_config_v2_prepare; then
+    :
+  else
+    v2_menu_prepare_rc=$?
+    if [ "$v2_menu_prepare_rc" -eq 2 ]; then
+      codex_info "已返回 shell，未迁移配置。"
+      return 0
+    fi
+    return "$v2_menu_prepare_rc"
+  fi
   while :; do
     v2_menu_work="$(codex_config_v2_work_root)"
     v2_menu_status="$v2_menu_work/menu-status.json"
@@ -1647,7 +1660,7 @@ codex_config_menu() {
     printf '%s\n' "6. 刷新当前模型目录" >&2
     printf '%s\n' "7. 上下文与压缩策略" >&2
     printf '%s\n' "8. 修复全权限授权" >&2
-    printf '%s\n' "9. 返回并启动 Codex" >&2
+    printf '%s\n' "9. 保存并退出配置模式" >&2
     printf '%s\n' "0. 退出，不启动 Codex" >&2
     v2_menu_choice="$(codex_config_tty_read "请输入选项编号" "9")"
     case "$v2_menu_choice" in
@@ -1660,7 +1673,8 @@ codex_config_menu() {
       7) codex_config_v2_compact_menu || true ;;
       8) codex_config_menu_repair_full_permission || true ;;
       9|"")
-        codex_config_v2_dirty_guard "返回启动 Codex" || continue
+        codex_config_v2_dirty_guard "退出配置模式" || continue
+        codex_info "已退出配置模式。"
         return 0
         ;;
       0|q|Q|quit|QUIT|退出)
@@ -1668,7 +1682,8 @@ codex_config_menu() {
         codex_config_exit_config_mode
         ;;
       b|B|back|BACK|返回)
-        codex_config_v2_dirty_guard "返回启动 Codex" || continue
+        codex_config_v2_dirty_guard "退出配置模式" || continue
+        codex_info "已退出配置模式。"
         return 0
         ;;
       *) codex_warn "请输入 0 到 9，或输入 b 返回。" ;;

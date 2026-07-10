@@ -48,7 +48,7 @@ runtime_hash() {
       "$hash_home/config.toml" \
       "$hash_home/auth.json" \
       "$hash_home/model_catalog.json" \
-      "$hash_home/config-profiles/index.json"
+      "$hash_home/config-profiles-v2/index.json"
     do
       if [ -f "$file" ]; then
         sha256sum "$file"
@@ -56,8 +56,8 @@ runtime_hash() {
         printf 'missing  %s\n' "$file"
       fi
     done
-    if [ -d "$hash_home/config-profiles/profiles" ]; then
-      find "$hash_home/config-profiles/profiles" -type f -print |
+    if [ -d "$hash_home/config-profiles-v2/profiles" ]; then
+      find "$hash_home/config-profiles-v2/profiles" -type f -print |
         LC_ALL=C sort |
         while IFS= read -r file; do
           sha256sum "$file"

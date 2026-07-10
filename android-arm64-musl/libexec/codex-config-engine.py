@@ -42,12 +42,11 @@ except ImportError as exc:  # pragma: no cover - exercised by install guards.
 
 
 SCHEMA_VERSION = 2
-OFFICIAL_CATALOG_URL = (
-    "https://raw.githubusercontent.com/openai/codex/main/"
-    "codex-rs/models-manager/models.json"
-)
+OFFICIAL_CATALOG_URL = ""
 PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 PROFILE_ID_RE = re.compile(r"^p-[0-9a-f]{12}$")
+SQLITE_BUILD_KEY_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+MANAGED_PROVIDER_ID_RE = re.compile(r"^codex_tui_[0-9a-f]{12}$")
 MANAGED_ROOT_KEYS = (
     "model_provider",
     "model",
@@ -175,11 +174,13 @@ class Paths:
         self.auth = codex_home / "auth.json"
         self.catalog = codex_home / "model_catalog.json"
         self.official_marker = codex_home / "install-state" / "official-login-mode"
-        self.profiles_root = codex_home / "config-profiles"
+        self.legacy_profiles_root = codex_home / "config-profiles"
+        self.profiles_root = codex_home / "config-profiles-v2"
         self.index = self.profiles_root / "index.json"
         self.profiles = self.profiles_root / "profiles"
         self.drafts = self.profiles_root / "drafts"
         self.transactions = self.profiles_root / "transactions"
+        self.runtimes = codex_home / "config-runtimes"
         self.lock = codex_home / "install-state" / "config-v2.lock"
         self.journal = codex_home / "install-state" / "config-v2-transaction.json"
         self.backups = codex_home / "install-state" / "backups" / "config-v2"
@@ -197,6 +198,7 @@ class Paths:
             self.transactions,
             self.backups,
             self.catalog_cache,
+            self.runtimes,
         ):
             ensure_private_dir(path)
 
@@ -239,6 +241,35 @@ def profile_dir(paths: Paths, profile_id: str) -> Path:
     if not PROFILE_ID_RE.fullmatch(profile_id):
         raise EngineError("配置 ID 无效", 2, profile_id=profile_id)
     return paths.profiles / profile_id
+
+
+def default_runtime_home(paths: Paths, profile_id: str) -> Path:
+    if not PROFILE_ID_RE.fullmatch(profile_id):
+        raise EngineError("配置 ID 无效", 2, profile_id=profile_id)
+    return paths.runtimes / profile_id
+
+
+def runtime_home_for_profile(paths: Paths, meta: dict[str, Any]) -> Path:
+    profile_id = str(meta.get("id", ""))
+    configured = meta.get("runtime_home")
+    runtime_home = (
+        Path(configured)
+        if isinstance(configured, str) and configured.strip()
+        else default_runtime_home(paths, profile_id)
+    )
+    if not runtime_home.is_absolute():
+        runtime_home = paths.home / runtime_home
+    resolved_home = paths.home.resolve()
+    resolved_runtime = runtime_home.resolve(strict=False)
+    try:
+        resolved_runtime.relative_to(resolved_home)
+    except ValueError as exc:
+        raise EngineError(
+            "配置运行目录必须位于 CODEX_HOME 内",
+            7,
+            runtime_home=str(runtime_home),
+        ) from exc
+    return resolved_runtime
 
 
 def profile_meta(paths: Paths, profile_id: str) -> dict[str, Any]:
@@ -509,6 +540,14 @@ def replace_directory(staged: Path, destination: Path) -> None:
     fsync_dir(destination.parent)
 
 
+def write_profile_base_config(source: Path, destination: Path) -> None:
+    if not source.is_file():
+        return
+    doc = read_toml(source)
+    doc.pop("sqlite_home", None)
+    atomic_write_text(destination, tomlkit.dumps(doc), 0o600)
+
+
 def create_profile_directory(
     paths: Paths,
     *,
@@ -522,7 +561,9 @@ def create_profile_directory(
     compatibility_model: str | None,
     auth_file: Path | None,
     catalog_file: Path | None,
+    base_config_file: Path | None = None,
     existing_created_at: str | None = None,
+    runtime_home: Path | None = None,
 ) -> Path:
     staged = paths.profiles_root / f".profile-{profile_id}-{uuid.uuid4().hex}"
     ensure_private_dir(staged)
@@ -533,10 +574,13 @@ def create_profile_directory(
         "name": name,
         "mode": mode,
         "compatibility_model": compatibility_model,
+        "runtime_home": str(runtime_home or default_runtime_home(paths, profile_id)),
         "created_at": existing_created_at or now,
         "updated_at": now,
     }
     atomic_write_json(staged / "profile.json", meta)
+    if base_config_file is not None:
+        write_profile_base_config(base_config_file, staged / "legacy-config.toml")
     if mode == "third_party":
         if not model:
             raise EngineError("默认模型不能为空", 2)
@@ -581,7 +625,7 @@ def apply_compact_policy(doc: TOMLDocument, index: dict[str, Any]) -> None:
             raise EngineError("固定压缩阈值无效", 7)
         doc["model_auto_compact_token_limit"] = value
         owned.add("model_auto_compact_token_limit")
-    elif "model_auto_compact_token_limit" in owned:
+    else:
         doc.pop("model_auto_compact_token_limit", None)
         owned.discard("model_auto_compact_token_limit")
     runtime_managed["root_keys"] = sorted(owned)
@@ -589,13 +633,19 @@ def apply_compact_policy(doc: TOMLDocument, index: dict[str, Any]) -> None:
 
 def materialize_profile(paths: Paths, meta: dict[str, Any], index: dict[str, Any]) -> None:
     directory = profile_dir(paths, str(meta["id"]))
-    doc = read_toml(paths.config)
+    base_config = directory / "legacy-config.toml"
+    doc = read_toml(base_config if base_config.is_file() else paths.config)
     runtime_managed = index.setdefault("runtime_managed", {"provider_id": None, "root_keys": []})
     previous_provider = runtime_managed.get("provider_id")
     previous_keys = set(runtime_managed.get("root_keys") or [])
     providers = doc.get("model_providers")
-    if previous_provider and providers and previous_provider in providers:
-        del providers[previous_provider]
+    if providers:
+        for provider_id in list(providers):
+            if (
+                provider_id == previous_provider
+                or MANAGED_PROVIDER_ID_RE.fullmatch(str(provider_id))
+            ):
+                del providers[provider_id]
         if not providers:
             doc.pop("model_providers", None)
     for key in MANAGED_ROOT_KEYS:
@@ -629,7 +679,7 @@ def materialize_profile(paths: Paths, meta: dict[str, Any], index: dict[str, Any
             paths.auth.unlink(missing_ok=True)
         source_catalog = directory / "model_catalog.json"
         if source_catalog.is_file():
-            safe_copy(source_catalog, paths.catalog, 0o600)
+            write_catalog_with_visibility_policy(source_catalog, paths.catalog)
             doc["model_catalog_json"] = str(paths.catalog)
             new_owned.add("model_catalog_json")
         else:
@@ -763,6 +813,8 @@ def cmd_profile_create(paths: Paths, args: argparse.Namespace) -> None:
                 compatibility_model=args.compatibility_model,
                 auth_file=Path(args.auth_file) if args.auth_file else None,
                 catalog_file=Path(args.catalog_file) if args.catalog_file else None,
+                base_config_file=paths.config if paths.config.is_file() else None,
+                runtime_home=default_runtime_home(paths, profile_id),
             )
             replace_directory(staged, profile_dir(paths, profile_id))
             maybe_failpoint("after-profile-replace")
@@ -805,7 +857,13 @@ def cmd_profile_update(paths: Paths, args: argparse.Namespace) -> None:
                 ),
                 auth_file=auth_file if auth_file.is_file() else None,
                 catalog_file=catalog_file if catalog_file.is_file() else None,
+                base_config_file=(
+                    directory / "legacy-config.toml"
+                    if (directory / "legacy-config.toml").is_file()
+                    else (paths.config if paths.config.is_file() else None)
+                ),
                 existing_created_at=str(current.get("created_at", "")) or None,
+                runtime_home=runtime_home_for_profile(paths, current),
             )
             replace_directory(staged, directory)
             maybe_failpoint("after-profile-replace")
@@ -847,8 +905,16 @@ def cmd_profile_delete(paths: Paths, args: argparse.Namespace) -> None:
         index = load_index(paths, create=True)
         if index.get("active_profile_id") == meta["id"] and not args.allow_active:
             raise EngineError("不能直接删除当前配置，请先切换或显式允许保留运行配置", 5)
+        runtime_home = runtime_home_for_profile(paths, meta)
         with transaction(paths, "profile-delete"):
             shutil.rmtree(profile_dir(paths, str(meta["id"])))
+            for runtime_file in (
+                runtime_home / "config.toml",
+                runtime_home / "auth.json",
+                runtime_home / "model_catalog.json",
+                runtime_home / "install-state" / "official-login-mode",
+            ):
+                runtime_file.unlink(missing_ok=True)
             if index.get("active_profile_id") == meta["id"]:
                 index["active_profile_id"] = None
                 atomic_write_json(paths.index, index)
@@ -862,6 +928,7 @@ def import_runtime_profile(
     source_dir: Path,
     profile_id: str | None = None,
     existing_meta: dict[str, Any] | None = None,
+    runtime_home: Path | None = None,
 ) -> dict[str, Any]:
     config = source_dir / "config.toml"
     auth = source_dir / "auth.json"
@@ -895,10 +962,19 @@ def import_runtime_profile(
         compatibility_model=None,
         auth_file=auth if auth.is_file() else None,
         catalog_file=catalog if catalog.is_file() else None,
+        base_config_file=config if config.is_file() else None,
         existing_created_at=(
             str(existing_meta.get("created_at", "")) or None
             if existing_meta is not None
             else None
+        ),
+        runtime_home=(
+            runtime_home
+            or (
+                runtime_home_for_profile(paths, existing_meta)
+                if existing_meta is not None
+                else default_runtime_home(paths, profile_id)
+            )
         ),
     )
     if existing_meta is not None:
@@ -906,8 +982,6 @@ def import_runtime_profile(
         updated_meta = read_json(meta_path, {})
         updated_meta["compatibility_model"] = existing_meta.get("compatibility_model")
         atomic_write_json(meta_path, updated_meta)
-    if config.is_file():
-        safe_copy(config, staged / "legacy-config.toml", 0o600)
     replace_directory(staged, profile_dir(paths, profile_id))
     return profile_meta(paths, profile_id)
 
@@ -938,6 +1012,125 @@ def cmd_profile_sync_current(paths: Paths, args: argparse.Namespace) -> None:
                 source_dir=paths.home,
                 profile_id=str(current["id"]),
                 existing_meta=current,
+            )
+            index = load_index(paths, create=True)
+            if index.get("active_profile_id") == current["id"]:
+                materialize_profile(paths, meta, index)
+        emit(True, profile=redact_profile(paths, meta))
+
+
+def seed_runtime_links(paths: Paths, runtime_home: Path) -> None:
+    if runtime_home == paths.home:
+        return
+    for name in ("history.jsonl", "sessions", "archived_sessions", "shell_snapshots"):
+        source = paths.home / name
+        destination = runtime_home / name
+        if not destination.is_symlink():
+            continue
+        try:
+            if destination.resolve(strict=False) == source.resolve(strict=False):
+                destination.unlink()
+        except OSError:
+            continue
+    for name in ("AGENTS.md", "skills", "rules"):
+        source = paths.home / name
+        destination = runtime_home / name
+        if destination.exists() or destination.is_symlink() or not source.exists():
+            continue
+        try:
+            destination.symlink_to(source, target_is_directory=source.is_dir())
+        except OSError:
+            continue
+
+
+def materialize_runtime(
+    paths: Paths,
+    meta: dict[str, Any],
+    index: dict[str, Any],
+    sqlite_build_key: str,
+) -> tuple[Path, Path]:
+    if not SQLITE_BUILD_KEY_RE.fullmatch(sqlite_build_key):
+        raise EngineError("Codex 构建标识无效", 2, sqlite_build_key=sqlite_build_key)
+    materialize_profile(paths, meta, index)
+    runtime_home = runtime_home_for_profile(paths, meta)
+    sqlite_home = runtime_home / "sqlite-builds" / sqlite_build_key
+    ensure_private_dir(runtime_home)
+    ensure_private_dir(sqlite_home)
+    seed_runtime_links(paths, runtime_home)
+
+    runtime_config = runtime_home / "config.toml"
+    runtime_auth = runtime_home / "auth.json"
+    runtime_catalog = runtime_home / "model_catalog.json"
+    runtime_marker = runtime_home / "install-state" / "official-login-mode"
+
+    doc = read_toml(paths.config)
+    if paths.catalog.is_file():
+        write_catalog_with_visibility_policy(paths.catalog, runtime_catalog)
+        doc["model_catalog_json"] = str(runtime_catalog)
+    else:
+        runtime_catalog.unlink(missing_ok=True)
+        doc.pop("model_catalog_json", None)
+    doc["sqlite_home"] = str(sqlite_home)
+    atomic_write_text(runtime_config, tomlkit.dumps(doc), 0o600)
+
+    if paths.auth.is_file():
+        safe_copy(paths.auth, runtime_auth, 0o600)
+    else:
+        runtime_auth.unlink(missing_ok=True)
+    if paths.official_marker.is_file():
+        safe_copy(paths.official_marker, runtime_marker, 0o600)
+    else:
+        runtime_marker.unlink(missing_ok=True)
+    return runtime_home, sqlite_home
+
+
+def cmd_profile_launch(paths: Paths, args: argparse.Namespace) -> None:
+    with engine_lock(paths):
+        paths.ensure_v2_dirs()
+        recover_transaction(paths)
+        index = load_index(paths, create=True)
+        profile_ref = args.profile or index.get("active_profile_id")
+        if not profile_ref:
+            raise EngineError("当前没有已激活配置", 4)
+        meta = resolve_profile(paths, str(profile_ref))
+        with transaction(paths, "profile-launch"):
+            runtime_home, sqlite_home = materialize_runtime(
+                paths,
+                meta,
+                index,
+                args.sqlite_build_key,
+            )
+        emit(
+            True,
+            active=True,
+            profile=redact_profile(paths, meta),
+            runtime_home=str(runtime_home),
+            sqlite_home=str(sqlite_home),
+        )
+
+
+def cmd_profile_sync_runtime(paths: Paths, args: argparse.Namespace) -> None:
+    with engine_lock(paths):
+        paths.ensure_v2_dirs()
+        recover_transaction(paths)
+        current = resolve_profile(paths, args.profile)
+        expected_runtime = runtime_home_for_profile(paths, current)
+        source_dir = Path(args.source_dir).expanduser().resolve()
+        if source_dir != expected_runtime:
+            raise EngineError(
+                "运行目录与配置档不匹配",
+                7,
+                expected=str(expected_runtime),
+                actual=str(source_dir),
+            )
+        with transaction(paths, "profile-sync-runtime"):
+            meta = import_runtime_profile(
+                paths,
+                name=str(current["name"]),
+                source_dir=source_dir,
+                profile_id=str(current["id"]),
+                existing_meta=current,
+                runtime_home=expected_runtime,
             )
             index = load_index(paths, create=True)
             if index.get("active_profile_id") == current["id"]:
@@ -988,8 +1181,8 @@ def fetch_official_catalog(paths: Paths, offline: bool = False) -> tuple[dict[st
     cache = paths.catalog_cache / "openai-models.json"
     meta_path = paths.catalog_cache / "openai-models.meta.json"
     meta = verified_file_meta(cache, meta_path)
-    url = os.environ.get("CODEX_CONFIG_OFFICIAL_CATALOG_URL", OFFICIAL_CATALOG_URL)
-    if not offline and os.environ.get("CODEX_CONFIG_CATALOG_OFFLINE") != "1":
+    url = os.environ.get("CODEX_CONFIG_OFFICIAL_CATALOG_URL", OFFICIAL_CATALOG_URL).strip()
+    if url and not offline and os.environ.get("CODEX_CONFIG_CATALOG_OFFLINE") != "1":
         request = urllib.request.Request(url, headers={"User-Agent": "codex-for-tui-config/2"})
         if isinstance(meta.get("etag"), str):
             request.add_header("If-None-Match", meta["etag"])
@@ -1127,6 +1320,23 @@ def conservative_unknown_model(slug: str, base_instructions: str) -> dict[str, A
     }
 
 
+def apply_catalog_visibility_policy(model: dict[str, Any]) -> None:
+    slug = model.get("slug")
+    if isinstance(slug, str) and slug.startswith("codex-auto-"):
+        model["visibility"] = "hide"
+
+
+def write_catalog_with_visibility_policy(source: Path, destination: Path) -> None:
+    value = read_json(source)
+    if not isinstance(value, dict) or not isinstance(value.get("models"), list):
+        raise EngineError("模型目录格式无效", 7, path=str(source))
+    for model in value["models"]:
+        if isinstance(model, dict):
+            apply_catalog_visibility_policy(model)
+    text = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    atomic_write_text(destination, text, 0o600)
+
+
 def cmd_catalog_build(paths: Paths, args: argparse.Namespace) -> None:
     with engine_lock(paths):
         recover_transaction(paths)
@@ -1151,12 +1361,11 @@ def cmd_catalog_build(paths: Paths, args: argparse.Namespace) -> None:
                     model["display_name"] = slug
                     model["description"] = f"{slug} (compatible with {source_slug})"
                     mapped[slug] = source_slug
-                models.append(model)
             else:
-                models.append(
-                    conservative_unknown_model(slug, fallback_instruction_text)
-                )
+                model = conservative_unknown_model(slug, fallback_instruction_text)
                 unknown.append(slug)
+            apply_catalog_visibility_policy(model)
+            models.append(model)
         output = Path(args.output)
         result = {"models": models}
         output_text = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
@@ -1323,8 +1532,26 @@ def backup_v1(paths: Paths) -> Path:
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     backup = paths.v1_backups / stamp
     ensure_private_dir(backup)
-    if paths.profiles_root.is_dir():
-        shutil.copytree(paths.profiles_root, backup / "config-profiles")
+    legacy_backup = backup / "config-profiles"
+    if paths.legacy_profiles_root.is_dir():
+        ensure_private_dir(legacy_backup)
+        current = paths.legacy_profiles_root / "current"
+        if current.is_file():
+            safe_copy(current, legacy_backup / "current", 0o600)
+        for source_dir in legacy_profile_dirs(paths.legacy_profiles_root):
+            destination = legacy_backup / source_dir.name
+            ensure_private_dir(destination)
+            for source, relative in (
+                (source_dir / "config.toml", Path("config.toml")),
+                (source_dir / "auth.json", Path("auth.json")),
+                (source_dir / "model_catalog.json", Path("model_catalog.json")),
+                (
+                    source_dir / "install-state" / "official-login-mode",
+                    Path("install-state") / "official-login-mode",
+                ),
+            ):
+                if source.is_file():
+                    safe_copy(source, destination / relative, 0o600)
     for source, name in (
         (paths.config, "config.toml"),
         (paths.auth, "auth.json"),
@@ -1342,7 +1569,24 @@ def restore_v1_backup(paths: Paths, backup: Path) -> None:
         shutil.rmtree(paths.profiles_root)
     legacy_profiles = backup / "config-profiles"
     if legacy_profiles.is_dir():
-        shutil.copytree(legacy_profiles, paths.profiles_root)
+        ensure_private_dir(paths.legacy_profiles_root)
+        current = legacy_profiles / "current"
+        if current.is_file():
+            safe_copy(current, paths.legacy_profiles_root / "current", 0o600)
+        for source_dir in legacy_profile_dirs(legacy_profiles):
+            destination = paths.legacy_profiles_root / source_dir.name
+            ensure_private_dir(destination)
+            for source, relative in (
+                (source_dir / "config.toml", Path("config.toml")),
+                (source_dir / "auth.json", Path("auth.json")),
+                (source_dir / "model_catalog.json", Path("model_catalog.json")),
+                (
+                    source_dir / "install-state" / "official-login-mode",
+                    Path("install-state") / "official-login-mode",
+                ),
+            ):
+                if source.is_file():
+                    safe_copy(source, destination / relative, 0o600)
     for target, name in (
         (paths.config, "config.toml"),
         (paths.auth, "auth.json"),
@@ -1382,8 +1626,6 @@ def cmd_migrate_v1(paths: Paths, args: argparse.Namespace) -> None:
             current_file = legacy_root / "current"
             if current_file.is_file():
                 old_current = current_file.read_text(encoding="utf-8").strip()
-            if paths.profiles_root.exists():
-                shutil.rmtree(paths.profiles_root)
             paths.ensure_v2_dirs()
             maybe_failpoint("after-v1-profile-reset")
             index = default_index()
@@ -1405,7 +1647,12 @@ def cmd_migrate_v1(paths: Paths, args: argparse.Namespace) -> None:
             for old_dir in legacy_profile_dirs(legacy_root):
                 name = validate_profile_name(old_dir.name)
                 ensure_unique_name(paths, name)
-                meta = import_runtime_profile(paths, name=name, source_dir=old_dir)
+                meta = import_runtime_profile(
+                    paths,
+                    name=name,
+                    source_dir=old_dir,
+                    runtime_home=paths.legacy_profiles_root / name,
+                )
                 imported.append(meta)
                 source_by_name[name] = meta
             if not imported and paths.config.is_file():
@@ -1478,7 +1725,11 @@ def cmd_status(paths: Paths, _args: argparse.Namespace) -> None:
         schema_version=index.get("schema_version") if index else 1,
         active_profile_id=index.get("active_profile_id") if index else None,
         compact_policy=index.get("compact_policy") if index else None,
-        profile_count=len(list_profiles(paths)) if index else len(legacy_profile_dirs(paths.profiles_root)),
+        profile_count=(
+            len(list_profiles(paths))
+            if index
+            else len(legacy_profile_dirs(paths.legacy_profiles_root))
+        ),
         recovered_transaction=recovered,
         runtime_dirty=runtime_dirty,
         runtime_dirty_reasons=runtime_dirty_reasons,
@@ -1546,6 +1797,14 @@ def build_parser() -> argparse.ArgumentParser:
     sync_current = profile_sub.add_parser("sync-current")
     sync_current.add_argument("profile")
     sync_current.set_defaults(handler=cmd_profile_sync_current)
+    launch = profile_sub.add_parser("launch")
+    launch.add_argument("profile", nargs="?")
+    launch.add_argument("--sqlite-build-key", required=True)
+    launch.set_defaults(handler=cmd_profile_launch)
+    sync_runtime = profile_sub.add_parser("sync-runtime")
+    sync_runtime.add_argument("profile")
+    sync_runtime.add_argument("--source-dir", required=True)
+    sync_runtime.set_defaults(handler=cmd_profile_sync_runtime)
 
     catalog = sub.add_parser("catalog")
     catalog_sub = catalog.add_subparsers(dest="catalog_command", required=True)

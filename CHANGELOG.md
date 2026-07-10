@@ -1,5 +1,27 @@
 # Changelog
 
+## Codex for TUI 2.4.1
+
+Codex for TUI 2.4.1 是 2.4.0 的配置、会话隔离和模型目录热修版。
+
+### 修复
+
+- `codex 配置模式` 现在只负责配置：输入 `b` 返回 shell，迁移或配置失败返回非零；两种路径都不会继续进入 Codex。
+- V1 迁移只备份和导入 `config.toml`、`auth.json`、模型目录与官方登录 marker，不再复制 SQLite、sessions、FIFO、插件 Git 临时对象等运行数据；旧配置运行目录保持原位。
+- 每个配置使用独立 runtime home；`config.toml`、`auth.json`、模型目录、sessions、history 和 shell snapshots 不再跨配置共享。切换站点并启动第二个 Codex 时，第一个进程继续使用自己的配置和会话目录。
+- 启动和退出同步使用按启动器 PID 隔离的控制文件，避免两个 Codex 同时启动或退出时互相覆盖 `status/launch/sync` 结果。
+- SQLite 同时按 profile、Codex 版本和二进制 SHA 隔离，并写入运行时 `config.toml` 与 `CODEX_SQLITE_HOME`，避免旧的 `sqlite_home` 配置绕过隔离，也避免同版本不同构建复用旧 SQLx migration 数据库。
+- 配置状态读取、runtime 生成或 V2 引擎解析失败时启动器改为失败关闭，不再静默退回共享 `CODEX_HOME`。
+- 模型能力目录固定到 Codex `rust-v0.144.1` 的 commit 与 SHA，不再从 `openai/codex/main` 刷新；`max` / `ultra`、默认推理等级、上下文窗口和压缩阈值与当前 `0.144.1` 构建一致。
+- 新生成目录和已有 profile 目录在物化时都会把所有 `codex-auto-*` 辅助模型标记为隐藏，复用 Codex `0.144.1` 原生逻辑让 `/model` 直接进入完整可选模型页；该本地规范化不联网、不刷新模型，也不修改或重新编译 Rust 二进制。
+
+### 验证与回滚
+
+- 本地通过 shell 语法、Python 编译、配置 V2、配置 UI、静态启动器、真实 `0.144.1` 模型目录解析和 `git diff --check` 门禁。
+- 新增回归覆盖：迁移错误不启动 Codex；控制目录已有 sessions/history 时也不建立共享软链；两个不同第三方站点并行启动时 runtime/session/SQLite 相互独立；相同版本不同二进制 SHA 使用不同 SQLx 数据库。
+- 2.4.1 继续复用已发布的 `0.144.1-zh.1` 中文 ARM64 musl 二进制及原 SHA；只需由 GitHub Actions 构建、签名和验证新版 APK，并在真机复测 `/model` 与跨站点并行会话。
+- Android 不能普通覆盖降级安装；从 2.4.1（`versionCode=56`）回到更低版本需要前滚回滚包，或卸载重装并承担数据迁移/丢失风险。
+
 ## Codex for TUI 2.4.0
 
 Codex for TUI 2.4.0 重构了配置档、模型目录和上下文策略底层。

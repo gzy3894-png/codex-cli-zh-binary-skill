@@ -21,7 +21,7 @@ fail() {
   fail "Codex binary is unavailable; set CODEX_BIN to the binary under test"
 
 printf '%s\n' \
-  '{"data":[{"id":"gpt-5.4"},{"id":"gpt-5.5"},{"id":"gpt-5.6-sol"},{"id":"gpt-5.6-terra"},{"id":"gpt-5.6-luna"},{"id":"vendor-unknown"}]}' \
+  '{"data":[{"id":"gpt-5.4"},{"id":"gpt-5.5"},{"id":"gpt-5.6-sol"},{"id":"gpt-5.6-terra"},{"id":"gpt-5.6-luna"},{"id":"codex-auto-review"},{"id":"codex-auto-fast"},{"id":"vendor-unknown"}]}' \
   > "$TMP_ROOT/provider.json"
 
 PYTHONNOUSERSITE=1 python3 "$ENGINE" \
@@ -70,6 +70,8 @@ required = [
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
+    "codex-auto-review",
+    "codex-auto-fast",
     "vendor-unknown",
 ]
 missing = [slug for slug in required if slug not in by_slug]
@@ -88,6 +90,12 @@ efforts = [
 ]
 if efforts[-2:] != ["max", "ultra"]:
     raise SystemExit(f"unexpected gpt-5.6-sol reasoning levels: {efforts}")
+
+for slug in ("codex-auto-review", "codex-auto-fast"):
+    if by_slug[slug].get("visibility") != "hide":
+        raise SystemExit(
+            f"auto helper model remains visible in /model: {slug}"
+        )
 
 unknown = by_slug["vendor-unknown"]
 if unknown.get("default_reasoning_level") is not None:
@@ -109,5 +117,6 @@ if 'model_reasoning_effort = "high"' not in config:
 
 print(f"PASS: Codex parsed {len(models)} generated catalog entries")
 print("PASS: gpt-5.6-sol exposes max and ultra")
+print("PASS: codex-auto helper models are hidden from /model")
 print("PASS: unknown models do not invent reasoning levels")
 PY

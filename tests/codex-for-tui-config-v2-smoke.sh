@@ -61,13 +61,18 @@ runtime_hash() {
         printf 'missing  %s\n' "$file"
       fi
     done
-    if [ -d "$home/config-profiles" ]; then
-      find "$home/config-profiles" -type f -print |
+    for directory in \
+      "$home/config-profiles" \
+      "$home/config-profiles-v2" \
+      "$home/config-runtimes"
+    do
+      [ -d "$directory" ] || continue
+      find "$directory" -type f -print |
         LC_ALL=C sort |
         while IFS= read -r file; do
           sha256sum "$file"
         done
-    fi
+    done
   } | sha256sum | awk '{print $1}'
 }
 
@@ -202,7 +207,9 @@ test_transaction_failure_and_crash_recovery() {
 
 test_profile_integrity_routing_and_secret_cleanup() {
   home="$TMP_ROOT/integrity"
-  mkdir -p "$home"
+  mkdir -p "$home/sessions" "$home/archived_sessions" "$home/shell_snapshots"
+  printf '%s\n' '{"session":"control-home-only"}' > "$home/sessions/control.jsonl"
+  printf '%s\n' '{"history":"control-home-only"}' > "$home/history.jsonl"
   printf '%s\n' '{"OPENAI_API_KEY":"secret-backup-check"}' > "$home/auth-input.json"
   printf '%s\n' '{"data":[{"id":"gpt-5.4"}]}' > "$home/provider.json"
   engine "$home" catalog build \
@@ -247,6 +254,19 @@ test_profile_integrity_routing_and_secret_cleanup() {
   assert_dir_empty "$home/install-state/backups/config-v2"
   engine "$home" catalog status > "$home/catalog-status.json"
   assert_json "$home/catalog-status.json" "v['catalog']['integrity'] == 'ok'"
+  engine "$home" profile launch third \
+    --sqlite-build-key codex-cli-0.144.1-test-build > "$home/third-launch.json"
+  third_runtime="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["runtime_home"])' "$home/third-launch.json")"
+  third_sqlite="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sqlite_home"])' "$home/third-launch.json")"
+  [ ! -L "$third_runtime/sessions" ] ||
+    fail "profile runtime reused the control-home sessions symlink"
+  [ ! -L "$third_runtime/history.jsonl" ] ||
+    fail "profile runtime reused the control-home history symlink"
+  [ ! -e "$third_runtime/sessions/control.jsonl" ] ||
+    fail "profile runtime inherited another profile's session rollout"
+  assert_contains "$third_runtime/config.toml" "sqlite_home = \"$third_sqlite\""
+  mkdir -p "$third_runtime/sessions"
+  printf '%s\n' '{"session":"preserve-after-profile-delete"}' > "$third_runtime/sessions/keep.jsonl"
 
   sed -i "s#command = \".*print-openai-api-key.sh\"#command = \"/tmp/rogue-auth\"#" "$home/config.toml"
   engine "$home" status > "$home/dirty-auth.json"
@@ -268,15 +288,18 @@ test_profile_integrity_routing_and_secret_cleanup() {
   assert_dir_empty "$home/install-state/backups/config-v2"
   ! grep -R -F "secret-backup-check" \
     "$home/install-state/backups/config-v2" \
-    "$home/config-profiles" \
+    "$home/config-profiles-v2" \
+    "$home/config-runtimes" \
     "$home/auth.json" >/dev/null 2>&1 ||
     fail "deleted profile secret remains in live or transaction storage"
+  [ -s "$third_runtime/sessions/keep.jsonl" ] ||
+    fail "deleting a profile removed preserved session rollouts"
 
   engine "$home" profile create --name alpha --mode official --model gpt-5.4 > "$home/alpha.json"
   engine "$home" profile create --name beta --mode official --model gpt-5.5 > "$home/beta.json"
   alpha_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["profile"]["id"])' "$home/alpha.json")"
   beta_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["profile"]["id"])' "$home/beta.json")"
-  python3 - "$home/config-profiles/profiles/$alpha_id/profile.json" "$beta_id" <<'PY'
+  python3 - "$home/config-profiles-v2/profiles/$alpha_id/profile.json" "$beta_id" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -291,8 +314,86 @@ PY
   rc=$?
   set -e
   [ "$rc" -eq 7 ] || fail "corrupt profile identity should exit 7, got $rc"
-  [ -d "$home/config-profiles/profiles/$beta_id" ] ||
+  [ -d "$home/config-profiles-v2/profiles/$beta_id" ] ||
     fail "corrupt profile identity deleted another profile"
+}
+
+test_profile_runtime_config_persistence_and_isolation() {
+  home="$TMP_ROOT/runtime-isolation"
+  mkdir -p "$home"
+  printf '%s\n' '{"data":[{"id":"gpt-5.4"},{"id":"gpt-5.5"}]}' > "$home/provider.json"
+  engine "$home" catalog build \
+    --provider-json "$home/provider.json" \
+    --output "$home/catalog.json" \
+    --offline >/dev/null
+  printf '%s\n' '{"OPENAI_API_KEY":"alpha-secret"}' > "$home/alpha-auth.json"
+  printf '%s\n' '{"OPENAI_API_KEY":"beta-secret"}' > "$home/beta-auth.json"
+
+  engine "$home" profile create \
+    --name alpha \
+    --mode third_party \
+    --provider-name Alpha \
+    --base-url https://alpha.example.test/v1 \
+    --model gpt-5.4 \
+    --reasoning-effort high \
+    --auth-file "$home/alpha-auth.json" \
+    --catalog-file "$home/catalog.json" \
+    --activate > "$home/alpha-create.json"
+  engine "$home" profile create \
+    --name beta \
+    --mode third_party \
+    --provider-name Beta \
+    --base-url https://beta.example.test/v1 \
+    --model gpt-5.5 \
+    --reasoning-effort xhigh \
+    --auth-file "$home/beta-auth.json" \
+    --catalog-file "$home/catalog.json" > "$home/beta-create.json"
+
+  engine "$home" profile launch alpha \
+    --sqlite-build-key codex-cli-0.144.1-build-a > "$home/alpha-launch.json"
+  alpha_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["profile"]["id"])' "$home/alpha-launch.json")"
+  alpha_runtime="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["runtime_home"])' "$home/alpha-launch.json")"
+  alpha_sqlite="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sqlite_home"])' "$home/alpha-launch.json")"
+  printf '%s\n' \
+    '' \
+    '[profile_local]' \
+    '# alpha-runtime-only' \
+    'runtime_note = "alpha-only"' >> "$alpha_runtime/config.toml"
+  mkdir -p "$alpha_runtime/sessions"
+  printf '%s\n' '{"session":"alpha-stays-alive"}' > "$alpha_runtime/sessions/alpha.jsonl"
+
+  engine "$home" profile activate beta >/dev/null
+  engine "$home" profile launch beta \
+    --sqlite-build-key codex-cli-0.144.1-build-a > "$home/beta-launch.json"
+  beta_runtime="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["runtime_home"])' "$home/beta-launch.json")"
+  beta_sqlite="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sqlite_home"])' "$home/beta-launch.json")"
+  [ "$alpha_runtime" != "$beta_runtime" ] ||
+    fail "different profiles reused the same runtime home"
+  [ "$alpha_sqlite" != "$beta_sqlite" ] ||
+    fail "different profiles reused the same SQLite home"
+  assert_contains "$alpha_runtime/config.toml" 'base_url = "https://alpha.example.test/v1"'
+  assert_contains "$beta_runtime/config.toml" 'base_url = "https://beta.example.test/v1"'
+  assert_not_contains "$beta_runtime/config.toml" "https://alpha.example.test/v1"
+  assert_not_contains "$beta_runtime/config.toml" "alpha-runtime-only"
+  [ ! -e "$beta_runtime/sessions/alpha.jsonl" ] ||
+    fail "beta inherited alpha session state"
+
+  engine "$home" profile sync-runtime alpha \
+    --source-dir "$alpha_runtime" > "$home/alpha-sync.json"
+  alpha_base="$home/config-profiles-v2/profiles/$alpha_id/legacy-config.toml"
+  assert_contains "$alpha_base" "# alpha-runtime-only"
+  assert_contains "$alpha_base" 'runtime_note = "alpha-only"'
+  assert_not_contains "$alpha_base" "sqlite_home"
+
+  engine "$home" profile launch alpha \
+    --sqlite-build-key codex-cli-0.144.1-build-b > "$home/alpha-relaunch.json"
+  alpha_sqlite_b="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sqlite_home"])' "$home/alpha-relaunch.json")"
+  [ "$alpha_sqlite" != "$alpha_sqlite_b" ] ||
+    fail "different Codex builds reused the same SQLite home"
+  assert_contains "$alpha_runtime/config.toml" "# alpha-runtime-only"
+  assert_contains "$alpha_runtime/config.toml" 'runtime_note = "alpha-only"'
+  assert_contains "$alpha_runtime/sessions/alpha.jsonl" '"session":"alpha-stays-alive"'
+  assert_not_contains "$beta_runtime/config.toml" "alpha-runtime-only"
 }
 
 write_v1_official_fixture() {
@@ -411,20 +512,121 @@ test_v1_migration_retry_and_transactional_rollback() {
     fail "transactional rollback did not restore the complete V1 state"
 }
 
+test_v1_migration_ignores_runtime_pollution() {
+  home="$TMP_ROOT/migrate-polluted"
+  write_v1_official_fixture "$home"
+  legacy="$home/config-profiles/legacy"
+  mkdir -p "$legacy/.tmp/plugins/.git/objects/pack" "$legacy/sessions/2026/07/10"
+  printf '%s\n' 'old-state-db' > "$legacy/state_5.sqlite"
+  printf '%s\n' '{"session":"keep"}' > "$legacy/sessions/2026/07/10/rollout.jsonl"
+  mkfifo "$legacy/.tmp/plugins/.git/objects/pack/transient.pipe"
+
+  engine "$home" migrate-v1 --compact-policy follow-model > "$home/migrate.json"
+  assert_json "$home/migrate.json" "v['migrated'] is True and len(v['imported_profiles']) == 1"
+  [ -p "$legacy/.tmp/plugins/.git/objects/pack/transient.pipe" ] ||
+    fail "V1 migration modified transient runtime files"
+  [ -s "$legacy/state_5.sqlite" ] ||
+    fail "V1 migration removed the legacy SQLite state"
+
+  engine "$home" profile launch legacy \
+    --sqlite-build-key codex-cli-0.144.1-test-build > "$home/launch.json"
+  assert_json "$home/launch.json" "v['runtime_home'].endswith('/config-profiles/legacy')"
+  assert_contains "$legacy/config.toml" 'model = "gpt-5.4"'
+  assert_contains "$legacy/sessions/2026/07/10/rollout.jsonl" '"session":"keep"'
+}
+
+test_existing_profile_catalog_is_normalized_without_refresh() {
+  home="$TMP_ROOT/catalog-upgrade"
+  mkdir -p "$home"
+  printf '%s\n' \
+    '{"data":[{"id":"gpt-5.4"},{"id":"codex-auto-review"},{"id":"codex-auto-fast"}]}' \
+    > "$home/provider.json"
+  engine "$home" catalog build \
+    --provider-json "$home/provider.json" \
+    --output "$home/legacy-catalog.json" \
+    --offline >/dev/null
+  python3 - "$home/legacy-catalog.json" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+value = json.loads(path.read_text(encoding="utf-8"))
+for model in value["models"]:
+    if model["slug"].startswith("codex-auto-"):
+        model["visibility"] = "list"
+text = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+path.write_text(text, encoding="utf-8")
+meta_path = path.with_suffix(path.suffix + ".meta.json")
+meta = json.loads(meta_path.read_text(encoding="utf-8"))
+meta["sha256"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+meta_path.write_text(
+    json.dumps(meta, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    encoding="utf-8",
+)
+PY
+  engine "$home" profile create \
+    --name upgraded \
+    --mode third_party \
+    --base-url https://upgrade.example.test/v1 \
+    --model gpt-5.4 \
+    --catalog-file "$home/legacy-catalog.json" \
+    --activate > "$home/create.json"
+  profile_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["profile"]["id"])' "$home/create.json")"
+  profile_catalog="$home/config-profiles-v2/profiles/$profile_id/model_catalog.json"
+  assert_contains "$profile_catalog" '"visibility": "list"'
+
+  engine "$home" profile launch upgraded \
+    --sqlite-build-key codex-cli-0.144.1-existing-catalog > "$home/launch.json"
+  runtime_home="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["runtime_home"])' "$home/launch.json")"
+  python3 - "$runtime_home/model_catalog.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+models = {
+    item["slug"]: item
+    for item in json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["models"]
+}
+assert models["gpt-5.4"]["visibility"] != "hide"
+assert models["codex-auto-review"]["visibility"] == "hide"
+assert models["codex-auto-fast"]["visibility"] == "hide"
+PY
+
+  engine "$home" profile sync-runtime upgraded \
+    --source-dir "$runtime_home" >/dev/null
+  python3 - "$profile_catalog" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+models = {
+    item["slug"]: item
+    for item in json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["models"]
+}
+assert models["gpt-5.4"]["visibility"] != "hide"
+assert models["codex-auto-review"]["visibility"] == "hide"
+assert models["codex-auto-fast"]["visibility"] == "hide"
+PY
+}
+
 test_model_catalog_merge_and_cache_fallback() {
   home="$TMP_ROOT/catalog"
   mkdir -p "$home"
   printf '%s\n' \
-    '{"data":[{"id":"gpt-5.4"},{"id":"gpt-5.5"},{"id":"gpt-5.6-sol"},{"id":"gpt-5.6-terra"},{"id":"gpt-5.6-luna"},{"id":"vendor-sol"},{"id":"vendor-unknown"}]}' \
+    '{"data":[{"id":"gpt-5.4"},{"id":"gpt-5.5"},{"id":"gpt-5.6-sol"},{"id":"gpt-5.6-terra"},{"id":"gpt-5.6-luna"},{"id":"codex-auto-review"},{"id":"codex-auto-sol"},{"id":"codex-auto-fast"},{"id":"vendor-sol"},{"id":"vendor-unknown"}]}' \
     > "$home/provider.json"
-  printf '%s\n' '{"vendor-sol":"gpt-5.6-sol"}' > "$home/mapping.json"
+  printf '%s\n' \
+    '{"codex-auto-sol":"gpt-5.6-sol","vendor-sol":"gpt-5.6-sol"}' \
+    > "$home/mapping.json"
 
   engine "$home" catalog build \
     --provider-json "$home/provider.json" \
     --output "$home/catalog.json" \
     --mapping-file "$home/mapping.json" \
     --offline > "$home/build.json"
-  assert_json "$home/build.json" "v['known_model_count'] == 6 and v['unknown_models'] == ['vendor-unknown']"
+  assert_json "$home/build.json" "v['known_model_count'] == 8 and v['unknown_models'] == ['codex-auto-fast', 'vendor-unknown']"
   printf '%s\n' '{"data":[{"id":"gpt-5.4"}]}' > "$home/provider-changed.json"
   set +e
   CODEX_CONFIG_FAILPOINT=after-catalog-meta-write \
@@ -480,6 +682,12 @@ assert models["gpt-5.6-luna"]["context_window"] == 372000
 assert [item["effort"] for item in models["gpt-5.6-sol"]["supported_reasoning_levels"]][-2:] == ["max", "ultra"]
 assert [item["effort"] for item in models["gpt-5.6-terra"]["supported_reasoning_levels"]][-2:] == ["max", "ultra"]
 assert [item["effort"] for item in models["gpt-5.6-luna"]["supported_reasoning_levels"]][-1:] == ["max"]
+assert models["gpt-5.4"]["visibility"] != "hide"
+assert models["codex-auto-review"]["visibility"] == "hide"
+assert models["codex-auto-sol"]["visibility"] == "hide"
+assert models["codex-auto-fast"]["visibility"] == "hide"
+assert [item["effort"] for item in models["codex-auto-sol"]["supported_reasoning_levels"]][-2:] == ["max", "ultra"]
+assert models["codex-auto-fast"]["supported_reasoning_levels"] == []
 assert models["vendor-sol"]["context_window"] == 372000
 assert models["vendor-unknown"]["context_window"] is None
 assert models["vendor-unknown"]["default_reasoning_level"] is None
@@ -523,12 +731,18 @@ printf 'RUN transaction failure and crash recovery\n'
 test_transaction_failure_and_crash_recovery
 printf 'RUN profile integrity, routing and secret cleanup\n'
 test_profile_integrity_routing_and_secret_cleanup
+printf 'RUN profile runtime config persistence and isolation\n'
+test_profile_runtime_config_persistence_and_isolation
 printf 'RUN V1 migration policies and rollback\n'
 test_v1_migration_policies_and_rollback
 printf 'RUN V1 migration crash recovery\n'
 test_v1_migration_crash_recovery
 printf 'RUN V1 migration retry and transactional rollback\n'
 test_v1_migration_retry_and_transactional_rollback
+printf 'RUN V1 migration ignores runtime pollution\n'
+test_v1_migration_ignores_runtime_pollution
+printf 'RUN existing profile catalog normalization without refresh\n'
+test_existing_profile_catalog_is_normalized_without_refresh
 printf 'RUN model catalog merge and cache fallback\n'
 test_model_catalog_merge_and_cache_fallback
 printf 'OK: Codex for TUI config V2 smoke tests passed\n'

@@ -26,7 +26,7 @@
 
 普通启动不会自动联网更新脚本，不会请求 `/models`，不会覆盖 `~/.codex/config.toml`。
 
-已经安装 2.0.x/2.1.x/2.2.x/2.3.x 的用户建议覆盖安装 2.4.0 APK。2.4.0 新增事务型配置档 V2、稳定 ID CRUD、V1 无损迁移/回滚、动态模型能力和上下文/压缩策略；此前版本的终端、托盘、浏览器、运维与稳定性修复继续保留，普通启动规则不变。已经完成首次安装但只需要更新脚本时，可以手动运行：
+已经安装 2.0.x/2.1.x/2.2.x/2.3.x/2.4.0 的用户建议覆盖安装 2.4.1 APK。2.4.1 修复配置模式错误落入 Codex、V1 迁移遍历运行数据、不同站点会话互相污染、旧 SQLite 与新构建校验和冲突，以及 `/model` 和推理等级未绑定当前 Codex 构建的问题；`/model` 通过目录层隐藏 `codex-auto-*` 辅助模型修复，继续复用现有 `0.144.1-zh.1` 二进制。此前版本的终端、托盘、浏览器、运维与稳定性修复继续保留，普通启动规则不变。已经完成首次安装但只需要更新脚本时，可以手动运行：
 
 ```sh
 codex 更新
@@ -79,7 +79,7 @@ codex-for-tui-bootstrap --update-scripts
 codex-local refresh-models
 ```
 
-Provider `/models` 只提供可用模型 ID；配置引擎会与随包 OpenAI Codex 官方目录精确合并真实推理等级、上下文窗口和工具能力。未知模型不会模糊猜测，默认使用保守能力并支持显式映射。刷新会保留当前 `model` 和 `model_reasoning_effort`；如果当前选择不再受支持，会要求重新选择。
+Provider `/models` 只提供可用模型 ID；配置引擎会与随包 OpenAI Codex 官方目录精确合并真实推理等级、上下文窗口和工具能力。未知模型不会模糊猜测，默认使用保守能力并支持显式映射。所有 `codex-auto-*` 辅助模型会保留但标记为隐藏，使 Codex 原生 `/model` 直接进入完整普通模型页；已有 profile 会在启动物化时做同样的纯本地规范化，不请求 `/models`。刷新会保留当前 `model` 和 `model_reasoning_effort`；如果当前选择不再受支持，会要求重新选择。
 
 新建、编辑、切换或保存第三方 API 配置时运行：
 
@@ -222,7 +222,7 @@ cwd = "/root/.codex"
 
 配置引擎只管理当前配置档拥有的 model/provider 字段，用户已有的 `[features]`、`[tui]`、MCP、hooks、注释和其他未知字段会保留。默认压缩策略为 `follow-model`，不会硬写固定 `model_auto_compact_token_limit`；只有用户选择固定策略时才写入该字段。
 
-`/model` 菜单的模型目录来自 `model_catalog_json`。后续服务端模型变化时，手动执行：
+`/model` 菜单的模型目录来自 `model_catalog_json`；其中 `codex-auto-*` 辅助模型会隐藏，不占用首层 auto 快捷页。后续服务端模型变化时，手动执行：
 
 ```sh
 codex-local refresh-models

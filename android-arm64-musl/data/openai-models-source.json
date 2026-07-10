@@ -2,8 +2,8 @@
   "schema_version": 1,
   "source_repository": "openai/codex",
   "source_path": "codex-rs/models-manager/models.json",
-  "source_ref": "main",
-  "source_commit": "b45fef0774a02f4107ccab9eb22d81f8c866c474",
+  "source_ref": "rust-v0.144.1",
+  "source_commit": "44918ea10c0f99151c6710411b4322c2f5c96bea",
   "fetched_at": "2026-07-10T00:05:37Z",
   "sha256": "dcab00231a5178a9c84b7aef4cc06a1e1359e37ee0dd7e69d5822c4b1de723b1"
 }

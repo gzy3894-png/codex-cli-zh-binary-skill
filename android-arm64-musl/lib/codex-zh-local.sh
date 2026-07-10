@@ -175,6 +175,147 @@ codex_for_tui_force_configure() {
   codex_config_menu
 }
 
+codex_for_tui_binary_build_key() {
+  version="$("$real_bin" --version 2>/dev/null | sed -n '1p' | cut -c1-48 | tr -c 'A-Za-z0-9._-' '_' || true)"
+  [ -n "$version" ] || version="codex"
+  if command -v sha256sum >/dev/null 2>&1; then
+    digest="$(sha256sum "$real_bin" 2>/dev/null | awk '{print substr($1, 1, 16)}')"
+  elif command -v openssl >/dev/null 2>&1; then
+    digest="$(openssl dgst -sha256 "$real_bin" 2>/dev/null | sed 's/^.*= //' | cut -c1-16)"
+  else
+    digest=""
+  fi
+  case "$digest" in
+    [0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]) ;;
+    *) return 1 ;;
+  esac
+  printf '%s-%s\n' "$version" "$digest"
+}
+
+codex_for_tui_prepare_runtime() {
+  control_home="$CODEX_HOME"
+  runtime_home="$control_home"
+  sqlite_home=""
+  profile_id=""
+  if ! build_key="$(codex_for_tui_binary_build_key)"; then
+    printf '%s\n' "错误: 无法计算 Codex 二进制 SHA-256；未启动 Codex。" >&2
+    return 1
+  fi
+
+  codex_for_tui_load_config_libs
+  codex_init_env
+  if engine_root="$(codex_config_engine_find_root 2>/dev/null)"; then
+    CODEX_CONFIG_ENGINE_RESOLVED_ROOT="$engine_root"
+    runtime_work="$control_home/install-state/config-v2-launch/$$"
+    runtime_status="$runtime_work/status.json"
+    mkdir -p "$runtime_work"
+    if ! PYTHONNOUSERSITE=1 python3 \
+      "$engine_root/libexec/codex-config-engine.py" \
+      --codex-home "$control_home" status > "$runtime_status"
+    then
+      runtime_error="$(codex_config_v2_json_value "$runtime_status" error 2>/dev/null || true)"
+      printf '%s\n' "错误: ${runtime_error:-无法读取配置状态}；未启动 Codex。" >&2
+      return 1
+    fi
+    runtime_schema="$(codex_config_v2_json_value "$runtime_status" schema_version 2>/dev/null || true)"
+    case "$runtime_schema" in
+      2)
+        runtime_launch="$runtime_work/launch.json"
+        if PYTHONNOUSERSITE=1 python3 \
+          "$engine_root/libexec/codex-config-engine.py" \
+          --codex-home "$control_home" \
+          profile launch --sqlite-build-key "$build_key" > "$runtime_launch"
+        then
+          runtime_home="$(codex_config_v2_json_value "$runtime_launch" runtime_home 2>/dev/null || true)"
+          sqlite_home="$(codex_config_v2_json_value "$runtime_launch" sqlite_home 2>/dev/null || true)"
+          profile_id="$(codex_config_v2_json_value "$runtime_launch" profile.id 2>/dev/null || true)"
+        else
+          runtime_error="$(codex_config_v2_json_value "$runtime_launch" error 2>/dev/null || true)"
+          printf '%s\n' "错误: ${runtime_error:-无法准备独立配置运行目录}；未启动 Codex。" >&2
+          return 1
+        fi
+        case "$runtime_home:$sqlite_home:$profile_id" in
+          /*:/*:p-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+          *)
+            printf '%s\n' "错误: 配置引擎返回了无效的独立运行目录；未启动 Codex。" >&2
+            return 1
+            ;;
+        esac
+        ;;
+      1) ;;
+      *)
+        printf '%s\n' "错误: 配置引擎返回了未知结构版本；未启动 Codex。" >&2
+        return 1
+        ;;
+    esac
+  elif [ -s "$control_home/config-profiles-v2/index.json" ]; then
+    printf '%s\n' "错误: 配置档 V2 引擎缺失；请先显式运行 codex-update apply，未启动 Codex。" >&2
+    return 1
+  fi
+
+  if [ "$runtime_home" = "$control_home" ]; then
+    current_file="$control_home/config-profiles/current"
+    if [ -s "$current_file" ]; then
+      current_name="$(sed -n '1p' "$current_file" 2>/dev/null | tr -d '\r')"
+      case "$current_name" in
+        ""|"."|".."|*/*|*\\*|*[!A-Za-z0-9._-]*) current_name="" ;;
+      esac
+      if [ -n "$current_name" ] &&
+        [ -s "$control_home/config-profiles/$current_name/config.toml" ]
+      then
+        runtime_home="$control_home/config-profiles/$current_name"
+      fi
+    fi
+  fi
+
+  mkdir -p "$runtime_home"
+  [ -n "$sqlite_home" ] || sqlite_home="$runtime_home/sqlite-builds/$build_key"
+  mkdir -p "$sqlite_home"
+  chmod 700 "$runtime_home" "$runtime_home/sqlite-builds" "$sqlite_home" 2>/dev/null || true
+
+  if [ -z "$profile_id" ] && [ -n "${runtime_work:-}" ]; then
+    rm -f "$runtime_work/status.json" "$runtime_work/launch.json" 2>/dev/null || true
+    rmdir "$runtime_work" 2>/dev/null || true
+    runtime_work=""
+  fi
+
+  export CODEX_FOR_TUI_CONTROL_HOME="$control_home"
+  export CODEX_FOR_TUI_RUNTIME_HOME="$runtime_home"
+  export CODEX_FOR_TUI_PROFILE_ID="$profile_id"
+  export CODEX_FOR_TUI_RUNTIME_WORK="${runtime_work:-}"
+  export CODEX_HOME="$runtime_home"
+  export CODEX_SQLITE_HOME="$sqlite_home"
+}
+
+codex_for_tui_sync_runtime() {
+  control_home="${CODEX_FOR_TUI_CONTROL_HOME:-}"
+  runtime_home="${CODEX_FOR_TUI_RUNTIME_HOME:-}"
+  profile_id="${CODEX_FOR_TUI_PROFILE_ID:-}"
+  [ -n "$control_home" ] && [ -n "$runtime_home" ] && [ -n "$profile_id" ] || return 0
+  engine_root="$(codex_config_engine_find_root 2>/dev/null || true)"
+  [ -n "$engine_root" ] || return 0
+  sync_work="${CODEX_FOR_TUI_RUNTIME_WORK:-$control_home/install-state/config-v2-launch/$$}"
+  sync_output="$sync_work/sync-runtime.json"
+  mkdir -p "$sync_work"
+  if ! PYTHONNOUSERSITE=1 python3 \
+    "$engine_root/libexec/codex-config-engine.py" \
+    --codex-home "$control_home" \
+    profile sync-runtime "$profile_id" --source-dir "$runtime_home" > "$sync_output"
+  then
+    sync_error="$(codex_config_v2_json_value "$sync_output" error 2>/dev/null || true)"
+    printf '%s\n' "警告: ${sync_error:-运行配置同步失败；会话文件仍保留在独立运行目录。}" >&2
+  fi
+  rm -f "$sync_work/status.json" "$sync_work/launch.json" "$sync_output" 2>/dev/null || true
+  rmdir "$sync_work" 2>/dev/null || true
+}
+
+codex_for_tui_run_real() {
+  run_rc=0
+  "$real_bin" "$@" || run_rc=$?
+  codex_for_tui_sync_runtime
+  return "$run_rc"
+}
+
 codex_for_tui_update() {
   if command -v codex-update >/dev/null 2>&1; then
     [ "$#" -gt 0 ] || set -- apply
@@ -387,15 +528,22 @@ EOM
 case "${1:-}" in
   官方登录|official-login|login-official)
     shift
+    codex_for_tui_configure_if_missing
+    codex_for_tui_prepare_runtime || exit $?
     codex_for_tui_device_auth_login
-    exit $?
+    login_rc=$?
+    codex_for_tui_sync_runtime
+    exit "$login_rc"
     ;;
   配置模式|configure|config)
     shift
-    codex_for_tui_force_configure
-    codex_for_tui_offer_hook_auth "$@"
-    codex_for_tui_offer_official_login "$@"
-    exec "$real_bin" "$@"
+    if codex_for_tui_force_configure; then
+      exit 0
+    else
+      config_rc=$?
+      printf '%s\n' "错误: 配置模式未完成，未启动 Codex。" >&2
+      exit "$config_rc"
+    fi
     ;;
   更新|update)
     shift
@@ -408,9 +556,11 @@ case "${1:-}" in
 esac
 
 codex_for_tui_configure_if_missing
+codex_for_tui_prepare_runtime || exit $?
 codex_for_tui_offer_hook_auth "$@"
 codex_for_tui_offer_official_login "$@"
-exec "$real_bin" "$@"
+codex_for_tui_run_real "$@"
+exit $?
 EOF
   } > "$launcher"
   chmod 755 "$launcher"
