@@ -23,7 +23,7 @@ concurrency:
 
 env:
   CODEX_REPO_REF: ${{ inputs.codex_ref || 'rust-v0.144.1' }}
-  CODEX_SKILLS_COMMIT: dbd148713b2e34b6ea0576fc4038851e7c52f368
+  CODEX_SKILLS_COMMIT: 18487b9553622f4449c575ad9f0e6cac4437700d
   CODEX_TARGET: aarch64-unknown-linux-musl
 
 jobs:
@@ -210,6 +210,18 @@ jobs:
           git -C codex-src diff --stat | tee build-evidence/source-patch-stat.txt
           git -C codex-src diff --binary > build-evidence/source-localization.patch
 
+          session_trait=codex-src/codex-rs/code-mode-protocol/src/session.rs
+          session_stub=codex-src/codex-rs/code-mode/src/service_stub.rs
+          test -s "$session_trait"
+          test -s "$session_stub"
+          ! grep -Fq '__CODE_MODE_SESSION_COMPAT_METHODS__' "$session_stub"
+          if grep -Fq 'fn is_alive(&self) -> bool;' "$session_trait"; then
+            grep -Fq 'fn is_alive(&self) -> bool {' "$session_stub"
+          elif grep -Fq 'fn is_alive(&self) -> bool {' "$session_stub"; then
+            echo "Generated musl stub implements is_alive but the upstream trait does not." >&2
+            exit 1
+          fi
+
           pwsh -NoLogo -NoProfile \
             -File build-skills/codex-cli-zh/scripts/scan-codex-cli-zh-coverage.ps1 \
             -SourceRoot codex-src \
@@ -221,6 +233,18 @@ jobs:
             cd codex-src/codex-rs
             cargo fmt --all -- --check
           ) 2>&1 | tee build-evidence/cargo-fmt.log
+
+      - name: Compile musl code-mode compatibility gate
+        shell: bash
+        working-directory: codex-src/codex-rs
+        run: |
+          set -euo pipefail
+          cargo build \
+            --locked \
+            --release \
+            --target "$CODEX_TARGET" \
+            -p codex-code-mode \
+            2>&1 | tee "${GITHUB_WORKSPACE}/build-evidence/cargo-code-mode-build.log"
 
       - name: Build localized Codex
         shell: bash
