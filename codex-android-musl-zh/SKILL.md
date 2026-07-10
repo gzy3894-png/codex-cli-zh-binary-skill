@@ -120,6 +120,14 @@ omits it for newer upstream versions, and fails during source preparation if
 an unknown required trait method appears instead of discovering the mismatch
 late in the release build.
 
+The generated stub also preserves the public session/provider API used by
+newer Codex releases, including `InProcessCodeModeSession`,
+`ProcessOwnedCodeModeSession`, and
+`ProcessOwnedCodeModeSessionProvider::with_host_program(PathBuf)`. These names
+all resolve to the unavailable-session stub on ARM64 musl; they preserve
+compile-time compatibility without claiming that the V8-backed code-mode
+runtime works on this target.
+
 ## Supported Versions
 
 - Verified artifact baseline: Codex CLI `0.142.4` for `aarch64-unknown-linux-musl`.

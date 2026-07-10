@@ -744,6 +744,35 @@ function Apply-CodeModeMuslStub {
         throw "codex-code-mode lib.rs was not found: $libRs"
     }
 
+    $currentLib = Get-Content -LiteralPath $libRs -Raw
+    $publicSessionExports = @(
+        [regex]::Matches(
+            $currentLib,
+            '(?m)^\s*pub use (?:remote_session|service)::([A-Za-z_][A-Za-z0-9_]*);'
+        ) |
+            ForEach-Object { $_.Groups[1].Value } |
+            Where-Object {
+                $_ -match 'Session(?:Provider)?$' -or
+                $_ -eq "NoopCodeModeSessionDelegate"
+            } |
+            Select-Object -Unique
+    )
+    $supportedPublicSessionExports = @(
+        "InProcessCodeModeSession",
+        "InProcessCodeModeSessionProvider",
+        "NoopCodeModeSessionDelegate",
+        "ProcessOwnedCodeModeSession",
+        "ProcessOwnedCodeModeSessionProvider"
+    )
+    $unknownPublicSessionExports = @(
+        $publicSessionExports |
+            Where-Object { $supportedPublicSessionExports -notcontains $_ }
+    )
+    if ($unknownPublicSessionExports.Count -gt 0) {
+        throw "Unsupported codex-code-mode public session exports: $($unknownPublicSessionExports -join ', ')"
+    }
+    Write-Host "Code-mode public session exports: $($publicSessionExports -join ', ')"
+
     $sessionProtocol = Get-Content -LiteralPath $codeModeSessionRs -Raw
     $sessionTrait = [regex]::Match(
         $sessionProtocol,
@@ -831,11 +860,16 @@ pub use service::NoopCodeModeSessionDelegate;
 #[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "musl"))]
 pub use service_stub::CodeModeService;
 #[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "musl"))]
+pub use service_stub::InProcessCodeModeSession;
+#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "musl"))]
 pub use service_stub::InProcessCodeModeSessionProvider;
 #[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "musl"))]
 pub use service_stub::NoopCodeModeSessionDelegate;
+#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "musl"))]
+pub use service_stub::ProcessOwnedCodeModeSession;
+#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "musl"))]
+pub use service_stub::ProcessOwnedCodeModeSessionProvider;
 '@
-    $currentLib = Get-Content -LiteralPath $libRs -Raw
     $libLineEnding = Get-SourceLineEnding -Text $currentLib
     $libSource = Format-SourceText -Text $libSource -LineEnding $libLineEnding
     if ($currentLib -ne $libSource) {
@@ -844,6 +878,7 @@ pub use service_stub::NoopCodeModeSessionDelegate;
 
     $stubSource = @'
 use std::sync::Arc;
+use std::path::PathBuf;
 
 use codex_code_mode_protocol::CellId;
 use codex_code_mode_protocol::CodeModeNestedToolCall;
@@ -911,6 +946,30 @@ impl CodeModeSessionProvider for InProcessCodeModeSessionProvider {
 }
 
 pub struct CodeModeService;
+pub type InProcessCodeModeSession = CodeModeService;
+pub type ProcessOwnedCodeModeSession = CodeModeService;
+
+#[derive(Default)]
+pub struct ProcessOwnedCodeModeSessionProvider;
+
+impl ProcessOwnedCodeModeSessionProvider {
+    pub fn with_host_program(_host_program: PathBuf) -> Self {
+        Self
+    }
+}
+
+impl CodeModeSessionProvider for ProcessOwnedCodeModeSessionProvider {
+    fn create_session<'a>(
+        &'a self,
+        delegate: Arc<dyn CodeModeSessionDelegate>,
+    ) -> CodeModeSessionProviderFuture<'a> {
+        Box::pin(async move {
+            let session: Arc<dyn CodeModeSession> =
+                Arc::new(CodeModeService::with_delegate(delegate));
+            Ok(session)
+        })
+    }
+}
 
 impl CodeModeService {
     pub fn new() -> Self {
