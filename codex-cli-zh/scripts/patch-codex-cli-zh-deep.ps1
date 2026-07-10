@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [switch]$DryRun,
     [switch]$Install,
@@ -7,7 +7,11 @@ param(
     [string]$MapFile = "",
     [string]$CargoTargetDir = "E:\cz\target-zh-deep",
     [string]$CargoHome = "E:\cz\cargo-home",
-    [string]$PythonExe = "E:\tools\python\python.exe",
+    [string]$PythonExe = "",
+    [ValidateRange(0, 64)][int]$BuildJobs = 0,
+    [switch]$LowMemoryBuild,
+    [switch]$AllowConcurrentBuild,
+    [string]$BuildLog = "",
     [string]$BuiltExe = "",
     [string]$TargetExe = "",
     [switch]$SkipBuild
@@ -15,6 +19,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2.0
+
+$script:BuildMutex = $null
 
 if (-not $MapFile) {
     $MapFile = Join-Path $PSScriptRoot "deep-translations.zh.json"
@@ -72,6 +78,198 @@ function Invoke-Checked {
             throw "Command failed with exit code ${LASTEXITCODE}: $display"
         }
     }
+}
+
+function Get-BuildPolicy {
+    param(
+        [int]$RequestedJobs,
+        [switch]$ForceLowMemory
+    )
+
+    $memoryGiB = 0.0
+    try {
+        $computer = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+        $memoryGiB = [math]::Round($computer.TotalPhysicalMemory / 1GB, 2)
+    }
+    catch {
+        $memoryGiB = 0.0
+    }
+
+    $useLowMemory = [bool]$ForceLowMemory -or ($memoryGiB -gt 0 -and $memoryGiB -le 24)
+    if ($RequestedJobs -gt 0) {
+        $jobs = $RequestedJobs
+    }
+    elseif ($useLowMemory -or $memoryGiB -eq 0) {
+        $jobs = 1
+    }
+    elseif ($memoryGiB -le 48) {
+        $jobs = 2
+    }
+    else {
+        $jobs = 4
+    }
+
+    return [pscustomobject]@{
+        Jobs = $jobs
+        LowMemory = $useLowMemory
+        MemoryGiB = $memoryGiB
+        Lto = $(if ($useLowMemory) { "disabled" } else { "workspace default" })
+    }
+}
+
+function Get-ActiveCargoBuilds {
+    try {
+        return @(
+            Get-CimInstance Win32_Process -Filter "Name = 'cargo.exe'" -ErrorAction Stop |
+                Where-Object { $_.CommandLine -match "(^|\s)build(\s|$)" } |
+                Select-Object ProcessId, ParentProcessId, CreationDate, CommandLine
+        )
+    }
+    catch {
+        return @()
+    }
+}
+
+function Get-FreeDiskGiB {
+    param([string]$Path)
+
+    try {
+        $root = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($Path))
+        if (-not $root) {
+            return -1
+        }
+        $drive = [System.IO.DriveInfo]::new($root)
+        return [math]::Round($drive.AvailableFreeSpace / 1GB, 2)
+    }
+    catch {
+        return -1
+    }
+}
+
+function Enter-BuildMutex {
+    param([string]$TargetDirectory)
+
+    $normalized = [System.IO.Path]::GetFullPath($TargetDirectory).ToLowerInvariant()
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hashBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($normalized))
+    }
+    finally {
+        $sha.Dispose()
+    }
+    $hash = ([System.BitConverter]::ToString($hashBytes) -replace "-", "").Substring(0, 20)
+    $mutex = [System.Threading.Mutex]::new($false, "CodexCliZhBuild_$hash")
+    try {
+        $acquired = $mutex.WaitOne(0)
+    }
+    catch [System.Threading.AbandonedMutexException] {
+        $acquired = $true
+    }
+    if (-not $acquired) {
+        $mutex.Dispose()
+        throw "Another codex-cli-zh process is already using Cargo target: $TargetDirectory"
+    }
+    $script:BuildMutex = $mutex
+}
+
+function Resolve-BuildPython {
+    param([string]$RequestedPython)
+
+    $candidates = @($RequestedPython, $env:PYTHON, "E:\tools\python\python.exe", "python.exe", "py.exe")
+    foreach ($candidate in $candidates) {
+        if (-not $candidate) {
+            continue
+        }
+        $path = ""
+        if (Test-Path -LiteralPath $candidate) {
+            $path = (Resolve-Path -LiteralPath $candidate -ErrorAction Stop).Path
+        }
+        else {
+            $command = Get-Command $candidate -ErrorAction SilentlyContinue
+            if ($command -and $command.Source) {
+                $path = $command.Source
+            }
+        }
+        if (-not $path -or $path -like "*\WindowsApps\*") {
+            continue
+        }
+        try {
+            $version = (& $path --version 2>$null | Select-Object -First 1)
+            if ($LASTEXITCODE -eq 0 -and $version) {
+                return [pscustomobject]@{ Path = $path; Version = $version }
+            }
+        }
+        catch {
+            continue
+        }
+    }
+    return $null
+}
+
+function Test-RustFormatting {
+    param([string]$WorkingDirectory)
+
+    Push-Location -LiteralPath $WorkingDirectory
+    try {
+        $output = @(& cargo fmt --all -- --check 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+    }
+    if ($exitCode -ne 0) {
+        foreach ($line in @($output | Select-Object -Last 80)) {
+            Write-Host $line
+        }
+        throw "Rust formatting/parser gate failed before release compilation. This usually means a translation produced invalid Rust source."
+    }
+    Write-Host "Rust formatting/parser gate passed."
+}
+
+function Invoke-CargoBuild {
+    param(
+        [string]$WorkingDirectory,
+        [string]$LogPath
+    )
+
+    $logDirectory = Split-Path -Parent $LogPath
+    if ($logDirectory) {
+        New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
+    }
+    $resolvedLog = [System.IO.Path]::GetFullPath($LogPath)
+    $writer = [System.IO.StreamWriter]::new(
+        $resolvedLog,
+        $false,
+        [System.Text.UTF8Encoding]::new($false)
+    )
+    $writer.AutoFlush = $true
+    $writer.WriteLine("Started: {0:o}" -f (Get-Date))
+    $writer.WriteLine("Command: cargo build --release -p codex-cli")
+    $writer.WriteLine("Working directory: $WorkingDirectory")
+
+    Push-Location -LiteralPath $WorkingDirectory
+    try {
+        & cargo build --release -p codex-cli 2>&1 | ForEach-Object {
+            $line = $_.ToString()
+            $writer.WriteLine($line)
+            Write-Host $line
+        }
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+        $writer.WriteLine("Finished: {0:o}" -f (Get-Date))
+        $writer.Dispose()
+    }
+
+    if ($exitCode -ne 0) {
+        $logText = Get-Content -LiteralPath $resolvedLog -Raw -Encoding UTF8
+        if ($logText -match "rustc-LLVM ERROR: out of memory|Allocation failed|STATUS_NO_MEMORY|not enough memory") {
+            throw "Cargo exhausted memory. Re-run with -LowMemoryBuild -BuildJobs 1, close other large programs, or increase the page file. Full log: $resolvedLog"
+        }
+        throw "Cargo build failed with exit code $exitCode. Full log: $resolvedLog"
+    }
+    Write-Host "Build log:     $resolvedLog"
 }
 
 function Resolve-SourceLayout {
@@ -566,7 +764,7 @@ function Install-CodexNodeWrapperOverride {
     }
 
     New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null
-    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss-fff"
     $wrapperBackup = Join-Path $BackupDir ("codex.js.$timestamp.bak")
     Copy-Item -LiteralPath $codexJs -Destination $wrapperBackup -Force
 
@@ -599,7 +797,30 @@ const binaryPath =
         throw "Could not find binaryPath assignment in codex.js; wrapper override was not installed."
     }
 
-    [System.IO.File]::WriteAllText($codexJs, $content, [System.Text.UTF8Encoding]::new($false))
+    $tempWrapper = Join-Path (Split-Path -Parent $codexJs) "codex.tmp-$PID.js"
+    try {
+        [System.IO.File]::WriteAllText($tempWrapper, $content, [System.Text.UTF8Encoding]::new($false))
+        $node = Get-Command node -ErrorAction Stop
+        & $node.Source --check $tempWrapper
+        if ($LASTEXITCODE -ne 0) {
+            throw "Generated codex.js wrapper did not pass node --check."
+        }
+        [System.IO.File]::Replace($tempWrapper, $codexJs, $null)
+
+        $versionLine = (& codex --version 2>$null | Select-Object -First 1)
+        if ($LASTEXITCODE -ne 0 -or $versionLine -notmatch "codex-cli\s+") {
+            throw "Updated wrapper could not launch the localized Codex binary."
+        }
+    }
+    catch {
+        Copy-Item -LiteralPath $wrapperBackup -Destination $codexJs -Force
+        throw "Wrapper update failed and the backup was restored: $($_.Exception.Message)"
+    }
+    finally {
+        if (Test-Path -LiteralPath $tempWrapper) {
+            Remove-Item -LiteralPath $tempWrapper -Force
+        }
+    }
 
     return [pscustomobject]@{
         WrapperPath = $codexJs
@@ -608,12 +829,27 @@ const binaryPath =
     }
 }
 
+$buildPolicy = Get-BuildPolicy -RequestedJobs $BuildJobs -ForceLowMemory:$LowMemoryBuild
+if (-not $BuildLog) {
+    $logParent = Split-Path -Parent ([System.IO.Path]::GetFullPath($CargoTargetDir))
+    $logStamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $BuildLog = Join-Path $logParent ("logs\codex-cli-zh-build-$logStamp.log")
+}
+$freeDiskGiB = Get-FreeDiskGiB -Path $CargoTargetDir
+$activeCargoBuilds = @(Get-ActiveCargoBuilds)
+
 Write-Step "Plan"
 $version = Get-CodexVersion
 Write-Host "Codex version: $(if ($version) { $version } else { 'unknown' })"
 Write-Host "Source root:   $(if ($SourceRoot) { $SourceRoot } else { '<required>' })"
 Write-Host "Map file:      $MapFile"
 Write-Host "Cargo target:  $CargoTargetDir"
+Write-Host "Build log:     $BuildLog"
+Write-Host "Build jobs:    $($buildPolicy.Jobs)"
+Write-Host "Physical RAM:  $(if ($buildPolicy.MemoryGiB -gt 0) { "$($buildPolicy.MemoryGiB) GiB" } else { 'unknown' })"
+Write-Host "Low memory:    $($buildPolicy.LowMemory) (LTO: $($buildPolicy.Lto))"
+Write-Host "Free disk:     $(if ($freeDiskGiB -ge 0) { "$freeDiskGiB GiB" } else { 'unknown' })"
+Write-Host "Cargo builds:  $($activeCargoBuilds.Count) active process(es)"
 Write-Host "Python:        $(if ($PythonExe) { $PythonExe } else { '<unchanged>' })"
 Write-Host "Install:       $Install"
 Write-Host "Wrapper mode:  $UseWrapperOverride"
@@ -638,6 +874,32 @@ $map = Read-TranslationMap -Path $MapFile
 $layout = Resolve-SourceLayout -Root $SourceRoot
 Write-Host "Cargo root:    $($layout.CodexRsRoot)"
 Write-Host "Targets:       $(@($map.targets).Count)"
+
+if (-not $SkipBuild) {
+    if ($activeCargoBuilds.Count -gt 0 -and -not $AllowConcurrentBuild) {
+        $pids = ($activeCargoBuilds | ForEach-Object { $_.ProcessId }) -join ", "
+        if ($DryRun) {
+            Write-Host "Warning: a real build would stop because Cargo build process(es) are already active: $pids"
+        }
+        else {
+            throw "Cargo build process(es) are already active (PIDs: $pids). Refusing a concurrent release build. Wait for them to finish or explicitly pass -AllowConcurrentBuild."
+        }
+    }
+    if ($freeDiskGiB -ge 0 -and $freeDiskGiB -lt 8) {
+        if ($DryRun) {
+            Write-Host "Warning: a real build would stop because less than 8 GiB is free on the target drive."
+        }
+        else {
+            throw "Only $freeDiskGiB GiB is free on the Cargo target drive; at least 8 GiB is required before starting."
+        }
+    }
+    elseif ($freeDiskGiB -ge 0 -and $freeDiskGiB -lt 15) {
+        Write-Host "Warning: less than 15 GiB is free; a clean Codex release build may exhaust the target drive."
+    }
+    if (-not $DryRun) {
+        Enter-BuildMutex -TargetDirectory $CargoTargetDir
+    }
+}
 
 Write-Step "Patch analysis"
 $totalPlanned = 0
@@ -700,17 +962,25 @@ New-Item -ItemType Directory -Force -Path $CargoHome | Out-Null
 New-Item -ItemType Directory -Force -Path $CargoTargetDir | Out-Null
 $env:CARGO_HOME = (Resolve-Path -LiteralPath $CargoHome -ErrorAction Stop).Path
 $env:CARGO_TARGET_DIR = (Resolve-Path -LiteralPath $CargoTargetDir -ErrorAction Stop).Path
-if ($PythonExe) {
-    if (-not (Test-Path -LiteralPath $PythonExe)) {
-        throw "Configured Python executable not found: $PythonExe"
-    }
-    $env:PYTHON = (Resolve-Path -LiteralPath $PythonExe -ErrorAction Stop).Path
+$env:CARGO_BUILD_JOBS = "$($buildPolicy.Jobs)"
+$env:CARGO_INCREMENTAL = "0"
+if ($buildPolicy.LowMemory) {
+    $env:CARGO_PROFILE_RELEASE_LTO = "false"
+}
+$python = Resolve-BuildPython -RequestedPython $PythonExe
+if ($python) {
+    $env:PYTHON = $python.Path
+    Write-Host "Python:        $($python.Path) ($($python.Version))"
+}
+else {
+    Write-Host "Python:        not resolved; dependency build scripts may use their own fallback"
 }
 $candidateBuiltExe = Join-Path $env:CARGO_TARGET_DIR "release\codex.exe"
 if (Test-ExecutableLockedByProcess -ExePath $candidateBuiltExe) {
     throw "Target codex.exe is currently running and Windows will not let Cargo replace it: $candidateBuiltExe. Use a different -CargoTargetDir, for example E:\cz\target-zh-deep-next."
 }
-Invoke-Checked -FilePath "cargo" -Arguments @("build", "--release", "-p", "codex-cli") -WorkingDirectory $layout.CodexRsRoot
+Test-RustFormatting -WorkingDirectory $layout.CodexRsRoot
+Invoke-CargoBuild -WorkingDirectory $layout.CodexRsRoot -LogPath $BuildLog
 
 if (-not $BuiltExe) {
     $BuiltExe = Join-Path $env:CARGO_TARGET_DIR "release\codex.exe"
@@ -751,11 +1021,24 @@ $target = Resolve-CodexNativeExe -RequestedTarget $TargetExe
 if (-not $target) {
     throw "Could not locate installed native codex.exe. Pass -TargetExe or use -UseWrapperOverride."
 }
+if (Test-ExecutableLockedByProcess -ExePath $target) {
+    throw "Installed codex.exe is currently running and cannot be replaced safely: $target. Use -UseWrapperOverride instead."
+}
 
-$timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$timestamp = Get-Date -Format "yyyyMMdd-HHmmss-fff"
 $backup = Join-Path $backupDir ("codex.exe.$timestamp.bak")
 Copy-Item -LiteralPath $target -Destination $backup -Force
-Copy-Item -LiteralPath $BuiltExe -Destination $target -Force
+try {
+    Copy-Item -LiteralPath $BuiltExe -Destination $target -Force
+    $installedVersion = (& $target --version 2>$null | Select-Object -First 1)
+    if ($LASTEXITCODE -ne 0 -or $installedVersion -notmatch "codex-cli\s+") {
+        throw "Installed binary did not pass the version smoke test."
+    }
+}
+catch {
+    Copy-Item -LiteralPath $backup -Destination $target -Force
+    throw "Native binary update failed and the backup was restored: $($_.Exception.Message)"
+}
 Write-Host "Backup:        $backup"
 Write-Host "Installed:     $target"
 Write-Host "Restart Codex CLI before checking localized prompts."

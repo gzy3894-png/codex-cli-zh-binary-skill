@@ -38,6 +38,12 @@ Patch and build once:
 powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\codex-cli-zh\scripts\apply-codex-cli-zh.ps1"
 ```
 
+Force the conservative build policy on a memory-constrained Windows host:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\codex-cli-zh\scripts\apply-codex-cli-zh.ps1" -LowMemoryBuild -BuildJobs 1
+```
+
 Patch, build, and switch the active npm `codex` command through wrapper override:
 
 ```powershell
@@ -83,6 +89,20 @@ bash "$HOME/.codex/skills/codex-cli-zh/scripts/build-codex-cli-zh-macos.sh" --re
 - Do not build into the target directory of a currently running `codex.exe`. Windows locks live executables and Cargo can fail at the final replace step. Use an inactive target such as `E:\cz\target-zh-0.142.2` or `E:\cz\target-zh-0.142.2-next`.
 - `npm update -g @openai/codex` updates the npm global package and may overwrite the wrapper override. Re-run this skill after npm updates before expecting Chinese UI to remain active.
 - Keep old E-drive targets as rollback unless the user explicitly asks to delete them.
+- Refuse to start while another Cargo build is active unless the caller explicitly passes `-AllowConcurrentBuild`.
+- On hosts with 24 GiB RAM or less, automatically use one Cargo job and disable release LTO to avoid LLVM allocation failures.
+- Run `cargo fmt --all -- --check` before the expensive release build so encoding damage or invalid Rust fails quickly.
+- Stream every build line into the timestamped log printed by the script. On failure, report that path rather than relying on stale terminal output.
+- Prefer PowerShell 7 for bundled patch scripts. Keep the deep patch script UTF-8 BOM encoded for Windows PowerShell 5.1 fallback compatibility.
+
+## Build Failure Rules
+
+- Never launch a hidden concurrent retry after an out-of-memory failure.
+- Preserve the target directory so a deliberate retry can reuse completed artifacts.
+- Treat `rustc-LLVM ERROR: out of memory`, `Allocation failed`, and related statuses as resource failures, not translation failures.
+- Verify an existing source checkout resolves to the requested Git ref before patching it.
+- Verify the built binary version matches `rust-vX.Y.Z` before installation.
+- Validate wrapper syntax and CLI startup before keeping an install; restore the timestamped backup on failure.
 
 ## Coverage Workflow
 
