@@ -4123,6 +4123,18 @@
           "to": "面向复杂编码、研究和真实工作的前沿模型。"
         },
         {
+          "from": "Latest frontier agentic coding model.",
+          "to": "最新的前沿代理式编码模型。"
+        },
+        {
+          "from": "Balanced agentic coding model for everyday work.",
+          "to": "适合日常工作的均衡型代理式编码模型。"
+        },
+        {
+          "from": "Fast and affordable agentic coding model.",
+          "to": "快速且经济的代理式编码模型。"
+        },
+        {
           "from": "Fast responses with lighter reasoning",
           "to": "响应更快，推理较轻"
         },
@@ -4137,6 +4149,14 @@
         {
           "from": "Extra high reasoning depth for complex problems",
           "to": "为复杂问题提供极高推理深度"
+        },
+        {
+          "from": "Maximum reasoning depth for the hardest problems",
+          "to": "为最困难的问题提供最大推理深度"
+        },
+        {
+          "from": "Maximum reasoning with automatic task delegation",
+          "to": "最强推理，并自动委派任务"
         },
         {
           "from": "GPT-5.5 is now available in Codex. It's our strongest agentic coding model yet, built to reason through large codebases, check assumptions with tools, and keep going until the work is done.\\n\\nLearn more: https://openai.com/index/introducing-gpt-5-5/\\n\\n",

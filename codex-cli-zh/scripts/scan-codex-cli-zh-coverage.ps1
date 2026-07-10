@@ -2,6 +2,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$SourceRoot,
+    [string]$ModelCatalogPath = "",
     [switch]$IncludeTests,
     [switch]$FailOnFindings
 )
@@ -212,6 +213,11 @@ $sentinels = @(
     "To get started",
     "choose what model and reasoning effort to use",
     "Frontier model for complex coding",
+    "Latest frontier agentic coding model.",
+    "Balanced agentic coding model for everyday work.",
+    "Fast and affordable agentic coding model.",
+    "Maximum reasoning depth for the hardest problems",
+    "Maximum reasoning with automatic task delegation",
     "Reasoning Effort",
     "Current model",
     "Working directory",
@@ -325,6 +331,35 @@ foreach ($finding in ($mappedFindings | Select-Object -First 20)) {
     Write-Host ("MAPPED {0}x {1} :: {2}" -f $finding.count, $finding.path, $finding.text)
 }
 
-if ($FailOnFindings -and ($findings.Count -gt 0 -or $mappedEnglishStillPresent -gt 0)) {
+$modelCatalogEnglishStillPresent = 0
+if ($ModelCatalogPath) {
+    $resolvedModelCatalog = (Resolve-Path -LiteralPath $ModelCatalogPath -ErrorAction Stop).Path
+    $modelCatalogText = [System.IO.File]::ReadAllText($resolvedModelCatalog)
+    $null = $modelCatalogText | ConvertFrom-Json
+    $modelTargets = @(
+        $deepMap.targets |
+            Where-Object { ([string]$_.path -replace "\\", "/") -eq "codex-rs/models-manager/models.json" }
+    )
+    if ($modelTargets.Count -ne 1) {
+        throw "Expected exactly one models.json target in the deep translation map."
+    }
+
+    Write-Host ""
+    Write-Host "== External model catalog =="
+    Write-Host "Catalog: $resolvedModelCatalog"
+    foreach ($item in @($modelTargets[0].replacements)) {
+        $count = Count-QuotedLiteralOccurrences -Text $modelCatalogText -Needle ([string]$item.from)
+        if ($count -gt 0) {
+            $modelCatalogEnglishStillPresent += $count
+            Write-Host ("CATALOG {0}x :: {1}" -f $count, [string]$item.from)
+        }
+    }
+    Write-Host "Mapped English catalog occurrences still present: $modelCatalogEnglishStillPresent"
+}
+
+if (
+    $FailOnFindings -and
+    ($findings.Count -gt 0 -or $mappedEnglishStillPresent -gt 0 -or $modelCatalogEnglishStillPresent -gt 0)
+) {
     throw "Coverage scan found visible English or mapped English still present."
 }

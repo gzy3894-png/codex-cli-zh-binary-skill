@@ -3,6 +3,10 @@ param(
     [switch]$DryRun,
     [switch]$Install,
     [switch]$UseWrapperOverride,
+    [switch]$PatchModelCatalog,
+    [string]$ModelCatalogPath = "",
+    [string]$CodexConfigPath = "",
+    [string]$ModelCatalogBackupDirectory = "",
     [string]$SourceRoot = "",
     [string]$RepoRef = "",
     [string]$RepoUrl = "https://github.com/openai/codex.git",
@@ -21,6 +25,10 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2.0
 
 $script:PatchPowerShell = ""
+
+if ($ModelCatalogPath -or $CodexConfigPath) {
+    $PatchModelCatalog = $true
+}
 
 function Write-Step {
     param([string]$Name)
@@ -207,15 +215,36 @@ if (-not $BuildLog) {
 
 $slashScript = Join-Path $PSScriptRoot "patch-codex-slash-zh.ps1"
 $deepScript = Join-Path $PSScriptRoot "patch-codex-cli-zh-deep.ps1"
+$modelCatalogScript = Join-Path $PSScriptRoot "patch-codex-model-catalog-zh.ps1"
 $slashMap = Join-Path $PSScriptRoot "slash-command-translations.zh.json"
 $deepMap = Join-Path $PSScriptRoot "deep-translations.zh.json"
 
-foreach ($required in @($slashScript, $deepScript, $slashMap, $deepMap)) {
+foreach ($required in @($slashScript, $deepScript, $modelCatalogScript, $slashMap, $deepMap)) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "Missing required bundled resource: $required"
     }
 }
 $script:PatchPowerShell = Resolve-PatchPowerShell
+
+function Invoke-ConfiguredModelCatalogPatch {
+    param([switch]$WhatIf)
+
+    $catalogArgs = @("-MapFile", $deepMap)
+    if ($ModelCatalogPath) {
+        $catalogArgs += @("-CatalogPath", $ModelCatalogPath)
+    }
+    if ($CodexConfigPath) {
+        $catalogArgs += @("-ConfigPath", $CodexConfigPath)
+    }
+    if ($ModelCatalogBackupDirectory) {
+        $catalogArgs += @("-BackupDirectory", $ModelCatalogBackupDirectory)
+    }
+    if ($WhatIf) {
+        $catalogArgs += "-DryRun"
+    }
+
+    Invoke-PatchScript -ScriptPath $modelCatalogScript -Arguments $catalogArgs
+}
 
 Write-Step "Plan"
 Write-Host "Codex version: $(if ($version) { $version } else { 'unknown' })"
@@ -231,16 +260,23 @@ Write-Host "Concurrent:    $AllowConcurrentBuild"
 Write-Host "Patch host:    $script:PatchPowerShell"
 Write-Host "Install:       $Install"
 Write-Host "Wrapper mode:  $UseWrapperOverride"
+Write-Host "Patch catalog: $PatchModelCatalog"
+Write-Host "Catalog path:  $(if ($ModelCatalogPath) { $ModelCatalogPath } else { '<from config.toml>' })"
 Write-Host "Skip build:    $SkipBuild"
 
 if ($Install -and -not $UseWrapperOverride -and $env:OS -eq "Windows_NT") {
     Write-Host "Warning: on Windows, -UseWrapperOverride is safer because running codex.exe files are often locked."
 }
 
+if ($PatchModelCatalog) {
+    Write-Step "Model catalog preflight"
+    Invoke-ConfiguredModelCatalogPatch -WhatIf
+}
+
 if ($DryRun) {
     $plannedSource = Resolve-SourceRoot -RequestedSourceRoot $SourceRoot -Root $WorkRoot -Ref $RepoRef -Url $RepoUrl -NoClone
     Write-Step "Dry run"
-    Write-Host "No source files, build artifacts, npm packages, or wrapper files were changed."
+    Write-Host "No source files, model catalogs, build artifacts, npm packages, or wrapper files were changed."
     Write-Host "Planned source: $plannedSource"
     if (Test-Path -LiteralPath $plannedSource) {
         Assert-SourceMatchesRef -Path $plannedSource -Ref $RepoRef
@@ -296,6 +332,11 @@ if ($AllowConcurrentBuild) {
 }
 
 Invoke-PatchScript -ScriptPath $deepScript -Arguments $deepArgs
+
+if ($PatchModelCatalog) {
+    Write-Step "Patch configured model catalog"
+    Invoke-ConfiguredModelCatalogPatch
+}
 
 Write-Step "Done"
 if ($SkipBuild) {
