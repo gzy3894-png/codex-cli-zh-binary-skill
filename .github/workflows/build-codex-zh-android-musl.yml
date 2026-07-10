@@ -64,7 +64,8 @@ jobs:
             ${{ runner.temp }}\codex-zh\cargo-home\git
             ${{ runner.temp }}\codex-zh\cargo-tools
             ${{ runner.temp }}\codex-zh\zig
-            ${{ runner.temp }}\codex-zh\strawberry-perl
+            ${{ runner.temp }}\codex-zh\strawberry-perl-5.42.2.1-64bit-portable
+            ${{ runner.temp }}\codex-zh\downloads
           key: codex-zh-android-musl-v1-${{ runner.os }}-${{ env.CODEX_REPO_REF }}-${{ hashFiles('build-skills/codex-cli-zh/scripts/**', 'build-skills/codex-android-musl-zh/scripts/**') }}
           restore-keys: |
             codex-zh-android-musl-v1-${{ runner.os }}-${{ env.CODEX_REPO_REF }}-
@@ -92,7 +93,7 @@ jobs:
             -CargoTargetDir (Join-Path $workRoot "target-aarch64-musl") `
             -CargoToolsRoot (Join-Path $workRoot "cargo-tools") `
             -ZigDir (Join-Path $workRoot "zig\zig-x86_64-windows-0.16.0") `
-            -StrawberryPerlRoot (Join-Path $workRoot "strawberry-perl") `
+            -StrawberryPerlRoot (Join-Path $workRoot "strawberry-perl-5.42.2.1-64bit-portable") `
             -DistDir $distDir `
             -PythonExe $python `
             -CodexZhSkillRoot (Join-Path $env:GITHUB_WORKSPACE "build-skills\codex-cli-zh") `
