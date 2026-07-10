@@ -14,6 +14,8 @@ Codex for TUI 2.4.0 重构了配置档、模型目录和上下文策略底层。
 
 ### 修复与兼容
 
+- 随包 Codex CLI 中文 ARM64 musl 二进制升级到 `0.144.1`；二进制、压缩包和中文模型目录均固定到独立非 Latest Release `v0.144.1-zh.1` 并校验 SHA256。
+- 新版 code-mode 公共 provider/session API 在 musl stub 中保持编译兼容；因上游 `rusty_v8` 没有该目标的预编译归档，Code Mode 继续明确报告 unavailable，不伪装成可用。
 - 配置模式改为扁平 CRUD，每层支持返回和退出；编辑保持原配置 ID，切换前会处理 `runtime_dirty`。
 - TOML 写入保留用户注释和未知字段；API Key 不进入命令行参数或 JSON 输出。
 - 普通启动不联网、不迁移、不覆盖用户配置；旧更新器只在用户显式进入配置模式时按需补齐引擎资源。
@@ -21,7 +23,7 @@ Codex for TUI 2.4.0 重构了配置档、模型目录和上下文策略底层。
 
 ### 验证与回滚
 
-- 本地通过配置 V2、配置 UI、安装器、静态、真实 Codex 目录解析和 `git diff --check` 门禁；APK 仍只由 GitHub Actions 构建。
+- 本地通过配置 V2、配置 UI、安装器、静态、真实 Codex 目录解析和 `git diff --check` 门禁；Codex CLI `0.144.1` 由 GitHub Actions 原生 ARM64 runner 构建，并通过静态链接、版本、归档、哈希、汉化和模型目录门禁；APK 仍只由 GitHub Actions 构建。
 - Android 不能普通覆盖降级安装；从 2.4.0（`versionCode=55`）回到更低版本需要前滚回滚包，或卸载重装并承担数据迁移/丢失风险。
 
 ## Codex for TUI 2.3.11

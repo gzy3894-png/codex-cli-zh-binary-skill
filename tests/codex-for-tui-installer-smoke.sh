@@ -587,7 +587,7 @@ EOF
 
   cat > "$tmp/bin/codex-zh-bin" <<'EOF'
 #!/usr/bin/env sh
-printf 'codex-zh 0.142.4\n'
+printf 'codex-zh 0.144.1\n'
 EOF
   chmod +x "$tmp/bin/codex-zh-bin"
 

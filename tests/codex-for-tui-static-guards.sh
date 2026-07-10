@@ -4,6 +4,9 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 SCRIPT_DIR="$ROOT_DIR/android-arm64-musl"
 BUILD_WORKFLOW="$ROOT_DIR/.github/workflows/build-codex-for-tui.yml"
+CODEX_COMMON="$SCRIPT_DIR/lib/codex-zh-common.sh"
+CODEX_SHA256SUMS="$SCRIPT_DIR/SHA256SUMS"
+MODEL_CATALOG="$SCRIPT_DIR/data/openai-models.json"
 MKSESSION="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MkSession.kt"
 INIT_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/init.sh"
 INIT_HOST_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/init-host.sh"
@@ -203,6 +206,16 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_BIN="$wrapper"'
   assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-config-v2-codex-parser-smoke.sh'
   assert_file_not_contains "$BUILD_WORKFLOW" '0.142.4'
+  assert_file_contains "$CODEX_COMMON" ': "${CODEX_ZH_VERSION:=0.144.1}"'
+  assert_file_contains "$CODEX_COMMON" 'releases/download/v0.144.1-zh.1'
+  assert_file_contains "$CODEX_COMMON" 'CODEX_ZH_ARCHIVE_SHA256="${CODEX_ZH_ARCHIVE_SHA256:-1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61}"'
+  assert_file_contains "$CODEX_COMMON" 'CODEX_ZH_BIN_SHA256="${CODEX_ZH_BIN_SHA256:-0cde6d6bad02855732ee0ee2867005408d169c46753d414e6a487884d49e0767}"'
+  assert_file_not_contains "$CODEX_COMMON" '0.142.4'
+  assert_file_contains "$CODEX_SHA256SUMS" '1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61  codex-0.144.1-zh-aarch64-unknown-linux-musl.tar.gz'
+  assert_file_contains "$CODEX_SHA256SUMS" '0cde6d6bad02855732ee0ee2867005408d169c46753d414e6a487884d49e0767  codex-0.144.1-zh-aarch64-unknown-linux-musl'
+  model_catalog_sha="$(sha256sum "$MODEL_CATALOG" | awk '{print $1}')"
+  [ "$model_catalog_sha" = "5d84d2bcb233be57b99c61eeb2b6181c9899f870005d3d90b0b679f66bed204d" ] ||
+    fail "unexpected localized model catalog SHA256: $model_catalog_sha"
   assert_file_contains "$BUILD_WORKFLOW" 'cp /tmp/codex-for-tui-rtk/rtk core/main/src/main/assets/rtk'
   assert_file_contains "$BUILD_WORKFLOW" 'promote-installer-channel:'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Promote verified tag to installer channel'

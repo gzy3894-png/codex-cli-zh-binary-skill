@@ -29,32 +29,32 @@
       "reasoning_summary_format": "experimental",
       "default_reasoning_summary": "none",
       "display_name": "GPT-5.6-Sol",
-      "description": "Latest frontier agentic coding model.",
+      "description": "最新的前沿代理式编码模型。",
       "default_reasoning_level": "low",
       "supported_reasoning_levels": [
         {
           "effort": "low",
-          "description": "Fast responses with lighter reasoning"
+          "description": "响应更快，推理较轻"
         },
         {
           "effort": "medium",
-          "description": "Balances speed and reasoning depth for everyday tasks"
+          "description": "在日常任务中平衡速度和推理深度"
         },
         {
           "effort": "high",
-          "description": "Greater reasoning depth for complex problems"
+          "description": "为复杂问题提供更深推理"
         },
         {
           "effort": "xhigh",
-          "description": "Extra high reasoning depth for complex problems"
+          "description": "为复杂问题提供极高推理深度"
         },
         {
           "effort": "max",
-          "description": "Maximum reasoning depth for the hardest problems"
+          "description": "为最困难的问题提供最大推理深度"
         },
         {
           "effort": "ultra",
-          "description": "Maximum reasoning with automatic task delegation"
+          "description": "最强推理，并自动委派任务"
         }
       ],
       "shell_type": "shell_command",
@@ -104,8 +104,8 @@
       "service_tiers": [
         {
           "id": "priority",
-          "name": "Fast",
-          "description": "1.5x speed, increased usage"
+          "name": "快速",
+          "description": "1.5 倍速度，增加用量"
         }
       ],
       "additional_speed_tiers": [
@@ -143,32 +143,32 @@
       "reasoning_summary_format": "experimental",
       "default_reasoning_summary": "none",
       "display_name": "GPT-5.6-Terra",
-      "description": "Balanced agentic coding model for everyday work.",
+      "description": "适合日常工作的均衡型代理式编码模型。",
       "default_reasoning_level": "medium",
       "supported_reasoning_levels": [
         {
           "effort": "low",
-          "description": "Fast responses with lighter reasoning"
+          "description": "响应更快，推理较轻"
         },
         {
           "effort": "medium",
-          "description": "Balances speed and reasoning depth for everyday tasks"
+          "description": "在日常任务中平衡速度和推理深度"
         },
         {
           "effort": "high",
-          "description": "Greater reasoning depth for complex problems"
+          "description": "为复杂问题提供更深推理"
         },
         {
           "effort": "xhigh",
-          "description": "Extra high reasoning depth for complex problems"
+          "description": "为复杂问题提供极高推理深度"
         },
         {
           "effort": "max",
-          "description": "Maximum reasoning depth for the hardest problems"
+          "description": "为最困难的问题提供最大推理深度"
         },
         {
           "effort": "ultra",
-          "description": "Maximum reasoning with automatic task delegation"
+          "description": "最强推理，并自动委派任务"
         }
       ],
       "shell_type": "shell_command",
@@ -216,8 +216,8 @@
       "service_tiers": [
         {
           "id": "priority",
-          "name": "Fast",
-          "description": "1.5x speed, increased usage"
+          "name": "快速",
+          "description": "1.5 倍速度，增加用量"
         }
       ],
       "additional_speed_tiers": [
@@ -255,28 +255,28 @@
       "reasoning_summary_format": "experimental",
       "default_reasoning_summary": "none",
       "display_name": "GPT-5.6-Luna",
-      "description": "Fast and affordable agentic coding model.",
+      "description": "快速且经济的代理式编码模型。",
       "default_reasoning_level": "medium",
       "supported_reasoning_levels": [
         {
           "effort": "low",
-          "description": "Fast responses with lighter reasoning"
+          "description": "响应更快，推理较轻"
         },
         {
           "effort": "medium",
-          "description": "Balances speed and reasoning depth for everyday tasks"
+          "description": "在日常任务中平衡速度和推理深度"
         },
         {
           "effort": "high",
-          "description": "Greater reasoning depth for complex problems"
+          "description": "为复杂问题提供更深推理"
         },
         {
           "effort": "xhigh",
-          "description": "Extra high reasoning depth for complex problems"
+          "description": "为复杂问题提供极高推理深度"
         },
         {
           "effort": "max",
-          "description": "Maximum reasoning depth for the hardest problems"
+          "description": "为最困难的问题提供最大推理深度"
         }
       ],
       "shell_type": "shell_command",
@@ -324,8 +324,8 @@
       "service_tiers": [
         {
           "id": "priority",
-          "name": "Fast",
-          "description": "1.5x speed, increased usage"
+          "name": "快速",
+          "description": "1.5 倍速度，增加用量"
         }
       ],
       "additional_speed_tiers": [
@@ -363,24 +363,24 @@
       "reasoning_summary_format": "experimental",
       "default_reasoning_summary": "none",
       "display_name": "GPT-5.5",
-      "description": "Frontier model for complex coding, research, and real-world work.",
+      "description": "面向复杂编码、研究和真实工作的前沿模型。",
       "default_reasoning_level": "medium",
       "supported_reasoning_levels": [
         {
           "effort": "low",
-          "description": "Fast responses with lighter reasoning"
+          "description": "响应更快，推理较轻"
         },
         {
           "effort": "medium",
-          "description": "Balances speed and reasoning depth for everyday tasks"
+          "description": "在日常任务中平衡速度和推理深度"
         },
         {
           "effort": "high",
-          "description": "Greater reasoning depth for complex problems"
+          "description": "为复杂问题提供更深推理"
         },
         {
           "effort": "xhigh",
-          "description": "Extra high reasoning depth for complex problems"
+          "description": "为复杂问题提供极高推理深度"
         }
       ],
       "shell_type": "shell_command",
@@ -388,7 +388,7 @@
       "minimal_client_version": "0.124.0",
       "supported_in_api": true,
       "availability_nux": {
-        "message": "GPT-5.5 is now available in Codex. It's our strongest agentic coding model yet, built to reason through large codebases, check assumptions with tools, and keep going until the work is done.\n\nLearn more: https://openai.com/index/introducing-gpt-5-5/\n\n"
+        "message": "GPT-5.5 现已在 Codex 中可用。这是目前最强的代理式编码模型，适合理解大型代码库、用工具核查假设，并持续推进直到任务完成。\n\n了解更多：https://openai.com/index/introducing-gpt-5-5/\n\n"
       },
       "upgrade": null,
       "priority": 7,
@@ -430,8 +430,8 @@
       "service_tiers": [
         {
           "id": "priority",
-          "name": "Fast",
-          "description": "1.5x speed, increased usage"
+          "name": "快速",
+          "description": "1.5 倍速度，增加用量"
         }
       ],
       "additional_speed_tiers": [
@@ -469,24 +469,24 @@
       "reasoning_summary_format": "experimental",
       "default_reasoning_summary": "none",
       "display_name": "GPT-5.4",
-      "description": "Strong model for everyday coding.",
+      "description": "适合日常编码的强模型。",
       "default_reasoning_level": "medium",
       "supported_reasoning_levels": [
         {
           "effort": "low",
-          "description": "Fast responses with lighter reasoning"
+          "description": "响应更快，推理较轻"
         },
         {
           "effort": "medium",
-          "description": "Balances speed and reasoning depth for everyday tasks"
+          "description": "在日常任务中平衡速度和推理深度"
         },
         {
           "effort": "high",
-          "description": "Greater reasoning depth for complex problems"
+          "description": "为复杂问题提供更深推理"
         },
         {
           "effort": "xhigh",
-          "description": "Extra high reasoning depth for complex problems"
+          "description": "为复杂问题提供极高推理深度"
         }
       ],
       "shell_type": "shell_command",
@@ -531,8 +531,8 @@
       "service_tiers": [
         {
           "id": "priority",
-          "name": "Fast",
-          "description": "1.5x speed, increased usage"
+          "name": "快速",
+          "description": "1.5 倍速度，增加用量"
         }
       ],
       "additional_speed_tiers": [
@@ -570,24 +570,24 @@
       "reasoning_summary_format": "experimental",
       "default_reasoning_summary": "none",
       "display_name": "GPT-5.4-Mini",
-      "description": "Small, fast, and cost-efficient model for simpler coding tasks.",
+      "description": "小型、快速、成本高效，适合较简单的编码任务。",
       "default_reasoning_level": "medium",
       "supported_reasoning_levels": [
         {
           "effort": "low",
-          "description": "Fast responses with lighter reasoning"
+          "description": "响应更快，推理较轻"
         },
         {
           "effort": "medium",
-          "description": "Balances speed and reasoning depth for everyday tasks"
+          "description": "在日常任务中平衡速度和推理深度"
         },
         {
           "effort": "high",
-          "description": "Greater reasoning depth for complex problems"
+          "description": "为复杂问题提供更深推理"
         },
         {
           "effort": "xhigh",
-          "description": "Extra high reasoning depth for complex problems"
+          "description": "为复杂问题提供极高推理深度"
         }
       ],
       "shell_type": "shell_command",
@@ -666,24 +666,24 @@
       "reasoning_summary_format": "none",
       "default_reasoning_summary": "auto",
       "display_name": "GPT-5.2",
-      "description": "Optimized for professional work and long-running agents.",
+      "description": "针对专业工作和长时间运行的代理任务优化。",
       "default_reasoning_level": "medium",
       "supported_reasoning_levels": [
         {
           "effort": "low",
-          "description": "Balances speed with some reasoning; useful for straightforward queries and short explanations"
+          "description": "在速度和一定推理之间取得平衡，适合直接查询和简短解释"
         },
         {
           "effort": "medium",
-          "description": "Provides a solid balance of reasoning depth and latency for general-purpose tasks"
+          "description": "为通用任务提供推理深度和延迟之间的稳健平衡"
         },
         {
           "effort": "high",
-          "description": "Maximizes reasoning depth for complex or ambiguous problems"
+          "description": "为复杂或模糊问题最大化推理深度"
         },
         {
           "effort": "xhigh",
-          "description": "Extra high reasoning for complex problems"
+          "description": "为复杂问题提供极高推理"
         }
       ],
       "shell_type": "shell_command",
@@ -762,24 +762,24 @@
       "reasoning_summary_format": "experimental",
       "default_reasoning_summary": "none",
       "display_name": "Codex Auto Review",
-      "description": "Automatic approval review model for Codex.",
+      "description": "Codex 自动批准审查模型。",
       "default_reasoning_level": "medium",
       "supported_reasoning_levels": [
         {
           "effort": "low",
-          "description": "Fast responses with lighter reasoning"
+          "description": "响应更快，推理较轻"
         },
         {
           "effort": "medium",
-          "description": "Balances speed and reasoning depth for everyday tasks"
+          "description": "在日常任务中平衡速度和推理深度"
         },
         {
           "effort": "high",
-          "description": "Greater reasoning depth for complex problems"
+          "description": "为复杂问题提供更深推理"
         },
         {
           "effort": "xhigh",
-          "description": "Extra high reasoning depth for complex problems"
+          "description": "为复杂问题提供极高推理深度"
         }
       ],
       "shell_type": "shell_command",

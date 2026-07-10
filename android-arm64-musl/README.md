@@ -1,6 +1,6 @@
 # Codex CLI 中文版 Android ARM64 安装包
 
-这个目录发布 Codex CLI `0.142.4` 中文版的 ARM64 musl 构建和 Android/Alpine 安装脚本。
+这个目录发布 Codex CLI `0.144.1` 中文版的 ARM64 musl 构建和 Android/Alpine 安装脚本。
 
 - 目标：`aarch64-unknown-linux-musl`
 - 推荐环境：Codex for TUI APK 内置 Alpine/proot，或 ReTerminal Alpine
@@ -353,8 +353,8 @@ codex 上下文监测
 ## 文件校验
 
 ```text
-7BEC4F162DDE06C8B14F2D50309E4999D8239C5AD9E7A138509B0E758007CB29  codex-0.142.4-zh-aarch64-unknown-linux-musl.tar.gz
-40626C9FF0A63A04DD6BC5D2120CD418E07C5306202BD955F34EFE761B05E423  codex-0.142.4-zh-aarch64-unknown-linux-musl
+1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61  codex-0.144.1-zh-aarch64-unknown-linux-musl.tar.gz
+0cde6d6bad02855732ee0ee2867005408d169c46753d414e6a487884d49e0767  codex-0.144.1-zh-aarch64-unknown-linux-musl
 F55A90F69052C5BD6F92CB09A8F47065970830B194C917A006FB94028E721259  alpine-minirootfs-3.24.1-aarch64.tar.gz
 ```
 

@@ -1,7 +1,7 @@
 # Codex for TUI
 
 [![Release](https://img.shields.io/badge/release-v2.4.0-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.4.0)
-[![Codex](https://img.shields.io/badge/Codex%20CLI-0.142.4-111827)](./android-arm64-musl/README.md)
+[![Codex](https://img.shields.io/badge/Codex%20CLI-0.144.1-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
 
@@ -11,7 +11,7 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 ## 重要：2.4.0 更新
 
-2.4.0 重构了配置档、模型目录和上下文策略底层：配置模式改为扁平 CRUD，配置档使用稳定 ID 和事务写入，TOML 注释与未知字段会保留；旧配置可无损迁移并完整回滚。第三方 `/models` 只决定可用模型 ID，推理等级、上下文窗口和工具能力从 OpenAI Codex 官方目录精确合并，支持 `max` / `ultra`、未知模型保守模式和“跟随模型 / 固定 token”压缩策略。发布说明见 `docs/codex-for-tui-2.4.0-release-notes.md`。
+2.4.0 重构了配置档、模型目录和上下文策略底层，并将随包中文 Codex CLI 升级到 `0.144.1`：配置模式改为扁平 CRUD，配置档使用稳定 ID 和事务写入，TOML 注释与未知字段会保留；旧配置可无损迁移并完整回滚。第三方 `/models` 只决定可用模型 ID，推理等级、上下文窗口和工具能力从 OpenAI Codex 官方目录精确合并，支持 `max` / `ultra`、未知模型保守模式和“跟随模型 / 固定 token”压缩策略。发布说明见 `docs/codex-for-tui-2.4.0-release-notes.md`。
 
 2.3.11 是 2.3.10 的文件托盘桥接竞态热修版：修复 `codex-preview clear` / `codex-panel clear files` 等控制请求在 App 快速清理 `queue/` 时，shell 端临时 `.req` 还没发布完成就被删掉，导致 installed smoke 出现 `mv ... No such file or directory` 的问题。发布说明见 `docs/codex-for-tui-2.3.11-release-notes.md`。
 
@@ -159,7 +159,7 @@ codex 配置模式
 | Android App | `2.4.0` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug/Test 包名 | `com.gzy3894.codexfortui.test` |
-| Codex CLI | `0.142.4` 中文版 |
+| Codex CLI | `0.144.1` 中文版 |
 | 二进制目标 | `aarch64-unknown-linux-musl` |
 | 推荐设备 | Android 8.0+、ARM64 |
 | 默认分支 | `android-arm64-musl-installer` |
@@ -436,8 +436,8 @@ Alpine 依赖通常可以走国内镜像；Codex 压缩包来自 GitHub Release�
 当前 Codex 二进制校验值：
 
 ```text
-7BEC4F162DDE06C8B14F2D50309E4999D8239C5AD9E7A138509B0E758007CB29  codex-0.142.4-zh-aarch64-unknown-linux-musl.tar.gz
-40626C9FF0A63A04DD6BC5D2120CD418E07C5306202BD955F34EFE761B05E423  codex-0.142.4-zh-aarch64-unknown-linux-musl
+1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61  codex-0.144.1-zh-aarch64-unknown-linux-musl.tar.gz
+0cde6d6bad02855732ee0ee2867005408d169c46753d414e6a487884d49e0767  codex-0.144.1-zh-aarch64-unknown-linux-musl
 ```
 
 校验文件位于：

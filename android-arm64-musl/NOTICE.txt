@@ -1,6 +1,6 @@
 Codex for TUI installer notice
 
 - Current installer channel: android-arm64-musl-installer
-- Current Codex binary: 0.142.4 zh aarch64-unknown-linux-musl
+- Current Codex binary: 0.144.1 zh aarch64-unknown-linux-musl
 - If GitHub Release downloads are slow or unstable, enable a proxy/VPN before downloading the Codex archive.
 - Alpine packages are installed through apk mirrors and may be retried by reopening the app.
