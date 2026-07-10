@@ -23,7 +23,7 @@ concurrency:
 
 env:
   CODEX_REPO_REF: ${{ inputs.codex_ref || 'rust-v0.144.1' }}
-  CODEX_SKILLS_COMMIT: 34ef711c8f41db04941f89e93e6888d209f69255
+  CODEX_SKILLS_COMMIT: 3a8cf10d0813f4c3762c77fdac459ec7e51a696f
   CODEX_TARGET: aarch64-unknown-linux-musl
 
 jobs:
@@ -34,13 +34,13 @@ jobs:
 
     steps:
       - name: Checkout release inputs
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           path: release-repo
           persist-credentials: false
 
       - name: Checkout pinned localization skills
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           repository: gzy3894-png/codex-cli-zh-binary-skill
           ref: ${{ env.CODEX_SKILLS_COMMIT }}
@@ -51,7 +51,7 @@ jobs:
             codex-android-musl-zh
 
       - name: Checkout official Codex source
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           repository: openai/codex
           ref: ${{ env.CODEX_REPO_REF }}
@@ -89,7 +89,6 @@ jobs:
       - name: Set up Rust 1.95.0
         uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
         with:
-          toolchain: 1.95.0
           targets: aarch64-unknown-linux-musl
           components: rustfmt
 
@@ -104,7 +103,7 @@ jobs:
           echo "$cargo_home/bin" >> "$GITHUB_PATH"
 
       - name: Restore Cargo downloads
-        uses: actions/cache@v4
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7
         with:
           path: |
             .cargo-home/registry
@@ -262,7 +261,7 @@ jobs:
           cp build-evidence/BUILD-METADATA.txt dist/BUILD-METADATA.txt
 
       - name: Upload unverified build output
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: codex-zh-aarch64-musl-unverified
           path: |
@@ -277,7 +276,7 @@ jobs:
 
       - name: Upload build evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: codex-zh-aarch64-musl-build-evidence-${{ github.run_id }}
           path: build-evidence/
@@ -292,7 +291,7 @@ jobs:
 
     steps:
       - name: Download unverified output
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: codex-zh-aarch64-musl-unverified
           path: dist
@@ -375,7 +374,7 @@ jobs:
           fi
 
       - name: Upload verified release output
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: codex-zh-aarch64-musl-verified
           path: |
