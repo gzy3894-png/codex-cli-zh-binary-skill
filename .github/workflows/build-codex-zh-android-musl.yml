@@ -23,7 +23,7 @@ concurrency:
 
 env:
   CODEX_REPO_REF: ${{ inputs.codex_ref || 'rust-v0.144.1' }}
-  CODEX_SKILLS_COMMIT: f6ac21c483821db0ad7969ccd73efb8ef2f37ca0
+  CODEX_SKILLS_COMMIT: dbd148713b2e34b6ea0576fc4038851e7c52f368
   CODEX_TARGET: aarch64-unknown-linux-musl
 
 jobs:
