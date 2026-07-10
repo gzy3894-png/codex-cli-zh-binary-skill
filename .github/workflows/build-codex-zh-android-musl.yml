@@ -1,0 +1,162 @@
+name: Build Codex Chinese Android musl
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      codex_ref:
+        description: "Official Codex Rust tag"
+        required: true
+        default: "rust-v0.144.1"
+        type: string
+  push:
+    branches:
+      - "release/codex-zh-*-cloud"
+    paths:
+      - ".github/workflows/build-codex-zh-android-musl.yml"
+
+concurrency:
+  group: codex-zh-android-musl-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CODEX_REPO_REF: ${{ inputs.codex_ref || 'rust-v0.144.1' }}
+  CODEX_SKILLS_COMMIT: 09037d636779b08745e0abbe5be1e91a5962c329
+
+jobs:
+  build:
+    name: Build aarch64 musl on Windows
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout localization skills
+        uses: actions/checkout@v4
+        with:
+          repository: gzy3894-png/codex-cli-zh-binary-skill
+          ref: ${{ env.CODEX_SKILLS_COMMIT }}
+          path: build-skills
+          sparse-checkout: |
+            codex-cli-zh
+            codex-android-musl-zh
+
+      - name: Checkout official Codex source
+        uses: actions/checkout@v4
+        with:
+          repository: openai/codex
+          ref: ${{ env.CODEX_REPO_REF }}
+          path: codex-src
+          fetch-depth: 1
+          sparse-checkout: codex-rs
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache Cargo downloads and build tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}\codex-zh\cargo-home\registry
+            ${{ runner.temp }}\codex-zh\cargo-home\git
+            ${{ runner.temp }}\codex-zh\cargo-tools
+            ${{ runner.temp }}\codex-zh\zig
+            ${{ runner.temp }}\codex-zh\strawberry-perl
+          key: codex-zh-android-musl-v1-${{ runner.os }}-${{ env.CODEX_REPO_REF }}-${{ hashFiles('build-skills/codex-cli-zh/scripts/**', 'build-skills/codex-android-musl-zh/scripts/**') }}
+          restore-keys: |
+            codex-zh-android-musl-v1-${{ runner.os }}-${{ env.CODEX_REPO_REF }}-
+            codex-zh-android-musl-v1-${{ runner.os }}-
+
+      - name: Build localized ARM64 musl binary
+        shell: pwsh
+        env:
+          CARGO_BUILD_JOBS: "2"
+          CARGO_INCREMENTAL: "0"
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          RUST_MIN_STACK: "67108864"
+        run: |
+          $workRoot = Join-Path $env:RUNNER_TEMP "codex-zh"
+          $python = (Get-Command python -ErrorAction Stop).Source
+          $script = Join-Path $env:GITHUB_WORKSPACE "build-skills\codex-android-musl-zh\scripts\build-codex-android-musl-zh.ps1"
+          $sourceRoot = Join-Path $env:GITHUB_WORKSPACE "codex-src"
+          $distDir = Join-Path $workRoot "dist"
+
+          & $script `
+            -SourceRoot $sourceRoot `
+            -RepoRef $env:CODEX_REPO_REF `
+            -WorkRoot $workRoot `
+            -CargoHome (Join-Path $workRoot "cargo-home") `
+            -CargoTargetDir (Join-Path $workRoot "target-aarch64-musl") `
+            -CargoToolsRoot (Join-Path $workRoot "cargo-tools") `
+            -ZigDir (Join-Path $workRoot "zig") `
+            -StrawberryPerlRoot (Join-Path $workRoot "strawberry-perl") `
+            -DistDir $distDir `
+            -PythonExe $python `
+            -CodexZhSkillRoot (Join-Path $env:GITHUB_WORKSPACE "build-skills\codex-cli-zh") `
+            -PackageTarGz
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Android musl build failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload unverified build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-zh-aarch64-musl-unverified
+          path: ${{ runner.temp }}\codex-zh\dist\*
+          if-no-files-found: error
+          retention-days: 7
+
+  verify:
+    name: Verify ARM64 binary under QEMU
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Download build output
+        uses: actions/download-artifact@v4
+        with:
+          name: codex-zh-aarch64-musl-unverified
+          path: dist
+
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user
+
+      - name: Verify file, archive, version, and hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${CODEX_REPO_REF#rust-v}"
+          binary="codex-${version}-zh-aarch64-unknown-linux-musl"
+          archive="${binary}.tar.gz"
+
+          test -s "dist/${binary}"
+          test -s "dist/${archive}"
+          file "dist/${binary}"
+          tar -tzf "dist/${archive}" | grep -Fx "${binary}"
+          chmod 755 "dist/${binary}"
+          qemu-aarch64 "dist/${binary}" --version | tee dist/VERSION.txt
+          grep -Fx "codex-cli ${version}" dist/VERSION.txt
+          (
+            cd dist
+            sha256sum "${binary}" "${archive}" > SHA256SUMS
+            cat SHA256SUMS
+          )
+
+      - name: Upload verified release output
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-zh-aarch64-musl-verified
+          path: |
+            dist/codex-*-zh-aarch64-unknown-linux-musl
+            dist/codex-*-zh-aarch64-unknown-linux-musl.tar.gz
+            dist/SHA256SUMS
+            dist/VERSION.txt
+          if-no-files-found: error
+          retention-days: 14
