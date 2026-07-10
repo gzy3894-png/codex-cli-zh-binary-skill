@@ -6,10 +6,10 @@
 
 它的改动范围刻意保持很小：不改用户配置、不碰 CC Switch、不处理 Codex Desktop，只定位当前终端实际会执行的 npm wrapper，并让新开的 Codex CLI 启动中文二进制。
 
-当前预编译二进制基于 Codex CLI `0.142.4`。本地验证过的 Windows x64 产物信息：
+当前预编译二进制基于 Codex CLI `0.144.1`。本地验证过的 Windows x64 产物信息：
 
-- 版本：`codex-cli 0.142.4`
-- SHA256：`0DD8649E0C19FA57590D2F7B674FFDFE278744E2DCCC4036C28DB168B2E073A5`
+- 版本：`codex-cli 0.144.1`
+- SHA256：`5FA7E2CE095691F3976A7430883B684067A33AE850682AF6D9AE341F7E130056`
 - 汉化覆盖：授权/审批、登录/API key、信任目录、MCP、`/` 命令弹窗和次级页面等高频 TUI 文案。
 
 仓库里只放技能和安装脚本，不把 300MB 级别的 exe 写进 Git 历史。预编译二进制会作为 GitHub Release 资产发布，文件名固定为 `codex-cli-zh-windows-x64.exe`。
@@ -55,7 +55,7 @@ Copy-Item -Recurse -Force .\codex-cli-zh-binary-skill\codex-cli-zh-binary "$env:
 
 ## 一键安装
 
-默认从本仓库最新 Release 下载 `codex-cli-zh-windows-x64.exe`，复制到当前用户本地目录，然后修改当前 `codex` wrapper：
+默认从本仓库 `v0.144.1-zh.1` Release 下载 `codex-cli-zh-windows-x64.exe`，复制到当前用户本地目录，然后修改当前 `codex` wrapper：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\codex-cli-zh-binary\scripts\install-codex-cli-zh-binary.ps1"
@@ -86,7 +86,7 @@ codex --version
 应该看到中文二进制对应的版本，例如：
 
 ```text
-codex-cli 0.142.4
+codex-cli 0.144.1
 ```
 
 再检查 wrapper 是否有技能标记：

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$BinaryPath = "",
-    [string]$DownloadUrl = "https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/latest/download/codex-cli-zh-windows-x64.exe",
+    [string]$DownloadUrl = "https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/download/v0.144.1-zh.1/codex-cli-zh-windows-x64.exe",
     [string]$ExpectedSha256 = "",
     [string]$InstallDir = "$env:LOCALAPPDATA\codex-cli-zh-binary\bin",
     [string]$CodexCommand = "codex",
@@ -15,8 +15,8 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2.0
 
-$DefaultDownloadUrl = "https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/latest/download/codex-cli-zh-windows-x64.exe"
-$DefaultReleaseSha256 = "0DD8649E0C19FA57590D2F7B674FFDFE278744E2DCCC4036C28DB168B2E073A5"
+$DefaultDownloadUrl = "https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/download/v0.144.1-zh.1/codex-cli-zh-windows-x64.exe"
+$DefaultReleaseSha256 = "5FA7E2CE095691F3976A7430883B684067A33AE850682AF6D9AE341F7E130056"
 
 function Write-Step {
     param([string]$Message)
