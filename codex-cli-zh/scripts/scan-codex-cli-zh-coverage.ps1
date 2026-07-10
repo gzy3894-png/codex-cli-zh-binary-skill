@@ -17,7 +17,7 @@ function Resolve-CodexRsRoot {
     if (Test-Path -LiteralPath $candidate) {
         return (Resolve-Path -LiteralPath $candidate -ErrorAction Stop).Path
     }
-    if (Test-Path -LiteralPath (Join-Path $resolved "tui\src")) {
+    if (Test-Path -LiteralPath (Join-Path $resolved "tui/src")) {
         return $resolved
     }
     throw "Could not find codex-rs from SourceRoot: $Root"
@@ -83,9 +83,11 @@ function Resolve-TargetFile {
         [string]$RelativePath
     )
 
-    $normalized = $RelativePath -replace "/", "\"
-    if ($normalized.StartsWith("codex-rs\", [System.StringComparison]::OrdinalIgnoreCase)) {
-        $normalized = $normalized.Substring("codex-rs\".Length)
+    $separator = [System.IO.Path]::DirectorySeparatorChar
+    $normalized = $RelativePath.Replace("\", $separator).Replace("/", $separator)
+    $codexPrefix = "codex-rs$separator"
+    if ($normalized.StartsWith($codexPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $normalized = $normalized.Substring($codexPrefix.Length)
     }
 
     $candidate = Join-Path $CodexRsRoot $normalized
@@ -181,7 +183,7 @@ function Find-PlainTextHits {
 }
 
 $codexRs = Resolve-CodexRsRoot -Root $SourceRoot
-$tuiSrc = Join-Path $codexRs "tui\src"
+$tuiSrc = Join-Path $codexRs "tui/src"
 if (-not (Test-Path -LiteralPath $tuiSrc)) {
     throw "Could not find TUI source directory: $tuiSrc"
 }
@@ -189,17 +191,17 @@ if (-not (Test-Path -LiteralPath $tuiSrc)) {
 $rsFiles = Get-ChildItem -LiteralPath $tuiSrc -Recurse -Filter "*.rs"
 if (-not $IncludeTests) {
     $rsFiles = $rsFiles | Where-Object {
-        $_.FullName -notmatch "\\tests\\" -and
+        $_.FullName.Replace("\", "/") -notmatch "/tests/" -and
         $_.Name -ne "tests.rs" -and
         $_.Name -notlike "*_tests.rs"
     }
 }
 $sourceFiles = @($rsFiles)
-$modelsFile = Join-Path $codexRs "models-manager\models.json"
+$modelsFile = Join-Path $codexRs "models-manager/models.json"
 if (Test-Path -LiteralPath $modelsFile) {
     $sourceFiles += Get-Item -LiteralPath $modelsFile
 }
-$tooltipsFile = Join-Path $codexRs "tui\tooltips.txt"
+$tooltipsFile = Join-Path $codexRs "tui/tooltips.txt"
 if (Test-Path -LiteralPath $tooltipsFile) {
     $sourceFiles += Get-Item -LiteralPath $tooltipsFile
 }
