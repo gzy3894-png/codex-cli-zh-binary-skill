@@ -234,18 +234,9 @@ jobs:
             cargo fmt --all -- --check
           ) 2>&1 | tee build-evidence/cargo-fmt.log
 
-      - name: Compile musl code-mode compatibility gate
-        shell: bash
-        working-directory: codex-src/codex-rs
-        run: |
-          set -euo pipefail
-          cargo build \
-            --locked \
-            --release \
-            --target "$CODEX_TARGET" \
-            -p codex-code-mode \
-            2>&1 | tee "${GITHUB_WORKSPACE}/build-evidence/cargo-code-mode-build.log"
-
+      # Keep this as the first Cargo build. Building codex-code-mode alone
+      # changes workspace feature unification and makes openssl-sys search for
+      # a target system OpenSSL instead of using the full Codex static graph.
       - name: Build localized Codex
         shell: bash
         working-directory: codex-src/codex-rs
