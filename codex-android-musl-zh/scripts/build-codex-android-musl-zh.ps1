@@ -730,15 +730,57 @@ function Apply-CodeModeMuslStub {
     Write-Step "Patch code-mode V8 stub"
     $codeModeRoot = Join-Path $CargoRoot "code-mode"
     $codeModeToml = Join-Path $codeModeRoot "Cargo.toml"
+    $codeModeSessionRs = Join-Path $CargoRoot "code-mode-protocol/src/session.rs"
     $libRs = Join-Path $codeModeRoot "src/lib.rs"
     $stubRs = Join-Path $codeModeRoot "src/service_stub.rs"
 
     if (-not (Test-Path -LiteralPath $codeModeToml)) {
         throw "codex-code-mode Cargo.toml was not found: $codeModeToml"
     }
+    if (-not (Test-Path -LiteralPath $codeModeSessionRs)) {
+        throw "codex-code-mode protocol session trait was not found: $codeModeSessionRs"
+    }
     if (-not (Test-Path -LiteralPath $libRs)) {
         throw "codex-code-mode lib.rs was not found: $libRs"
     }
+
+    $sessionProtocol = Get-Content -LiteralPath $codeModeSessionRs -Raw
+    $sessionTrait = [regex]::Match(
+        $sessionProtocol,
+        'pub trait CodeModeSession\s*:\s*Send\s*\+\s*Sync\s*\{(?<body>.*?)\r?\n\}',
+        [System.Text.RegularExpressions.RegexOptions]::Singleline
+    )
+    if (-not $sessionTrait.Success) {
+        throw "Unable to parse CodeModeSession trait: $codeModeSessionRs"
+    }
+    $sessionMethods = @(
+        [regex]::Matches(
+            $sessionTrait.Groups["body"].Value,
+            '(?m)^\s*fn\s+([A-Za-z_][A-Za-z0-9_]*)'
+        ) | ForEach-Object { $_.Groups[1].Value }
+    )
+    $requiredSessionMethods = @("execute", "wait", "terminate", "shutdown")
+    foreach ($requiredMethod in $requiredSessionMethods) {
+        if ($sessionMethods -notcontains $requiredMethod) {
+            throw "CodeModeSession is missing required method '$requiredMethod': $codeModeSessionRs"
+        }
+    }
+    $supportedSessionMethods = @("is_alive") + $requiredSessionMethods
+    $unknownSessionMethods = @(
+        $sessionMethods | Where-Object { $supportedSessionMethods -notcontains $_ }
+    )
+    if ($unknownSessionMethods.Count -gt 0) {
+        throw "Unsupported CodeModeSession methods: $($unknownSessionMethods -join ', ')"
+    }
+    $sessionCompatMethods = ""
+    if ($sessionMethods -contains "is_alive") {
+        $sessionCompatMethods = @'
+    fn is_alive(&self) -> bool {
+        false
+    }
+'@
+    }
+    Write-Host "CodeModeSession methods: $($sessionMethods -join ', ')"
 
     $toml = Get-Content -LiteralPath $codeModeToml -Raw
     $tomlLineEnding = Get-SourceLineEnding -Text $toml
@@ -921,10 +963,7 @@ impl Default for CodeModeService {
 }
 
 impl CodeModeSession for CodeModeService {
-    fn is_alive(&self) -> bool {
-        false
-    }
-
+__CODE_MODE_SESSION_COMPAT_METHODS__
     fn execute<'a>(
         &'a self,
         request: ExecuteRequest,
@@ -953,6 +992,10 @@ fn missing_cell_response(cell_id: CellId) -> RuntimeResponse {
     }
 }
 '@
+    $stubSource = $stubSource.Replace(
+        "__CODE_MODE_SESSION_COMPAT_METHODS__",
+        $sessionCompatMethods
+    )
     $currentStub = if (Test-Path -LiteralPath $stubRs) { Get-Content -LiteralPath $stubRs -Raw } else { "" }
     $stubLineEnding = if ($currentStub) {
         Get-SourceLineEnding -Text $currentStub

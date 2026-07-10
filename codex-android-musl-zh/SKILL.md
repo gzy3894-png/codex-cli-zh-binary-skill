@@ -114,6 +114,12 @@ Perl, or Cargo build setup.
 GitHub Actions and Linux builders can then use `cargo-zigbuild` or `cross`
 natively.
 
+The musl stub inspects the checked-out `CodeModeSession` trait before writing
+its implementation. It supports the legacy `is_alive` method when present,
+omits it for newer upstream versions, and fails during source preparation if
+an unknown required trait method appears instead of discovering the mismatch
+late in the release build.
+
 ## Supported Versions
 
 - Verified artifact baseline: Codex CLI `0.142.4` for `aarch64-unknown-linux-musl`.
