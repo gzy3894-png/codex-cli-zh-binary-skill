@@ -23,21 +23,29 @@ concurrency:
 
 env:
   CODEX_REPO_REF: ${{ inputs.codex_ref || 'rust-v0.144.1' }}
-  CODEX_SKILLS_COMMIT: 09037d636779b08745e0abbe5be1e91a5962c329
+  CODEX_SKILLS_COMMIT: 34ef711c8f41db04941f89e93e6888d209f69255
+  CODEX_TARGET: aarch64-unknown-linux-musl
 
 jobs:
   build:
-    name: Build aarch64 musl on Windows
-    runs-on: windows-latest
+    name: Build localized ARM64 musl on native ARM64 Linux
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
 
     steps:
-      - name: Checkout localization skills
+      - name: Checkout release inputs
+        uses: actions/checkout@v4
+        with:
+          path: release-repo
+          persist-credentials: false
+
+      - name: Checkout pinned localization skills
         uses: actions/checkout@v4
         with:
           repository: gzy3894-png/codex-cli-zh-binary-skill
           ref: ${{ env.CODEX_SKILLS_COMMIT }}
           path: build-skills
+          persist-credentials: false
           sparse-checkout: |
             codex-cli-zh
             codex-android-musl-zh
@@ -49,106 +57,322 @@ jobs:
           ref: ${{ env.CODEX_REPO_REF }}
           path: codex-src
           fetch-depth: 1
-          sparse-checkout: codex-rs
+          persist-credentials: false
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Verify pinned inputs and runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$CODEX_REPO_REF" =~ ^rust-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Unsupported Codex ref: $CODEX_REPO_REF" >&2
+            exit 1
+          fi
+
+          test "$(uname -m)" = "aarch64"
+          test "$(git -C build-skills rev-parse HEAD)" = "$CODEX_SKILLS_COMMIT"
+          test "$(git -C codex-src describe --tags --exact-match HEAD)" = "$CODEX_REPO_REF"
+          test -s release-repo/android-arm64-musl/data/openai-models.json
+          command -v pwsh
+          command -v python3
+
+          mkdir -p build-evidence dist
+          {
+            printf 'runner_arch=%s\n' "$(uname -m)"
+            printf 'runner_kernel=%s\n' "$(uname -srmo)"
+            printf 'codex_ref=%s\n' "$CODEX_REPO_REF"
+            printf 'codex_commit=%s\n' "$(git -C codex-src rev-parse HEAD)"
+            printf 'skills_commit=%s\n' "$(git -C build-skills rev-parse HEAD)"
+            printf 'release_commit=%s\n' "$(git -C release-repo rev-parse HEAD)"
+            printf 'powershell=%s\n' "$(pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()')"
+          } | tee build-evidence/BUILD-METADATA.txt
+
+      - name: Set up Rust 1.95.0
+        uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
         with:
-          python-version: "3.12"
+          toolchain: 1.95.0
+          targets: aarch64-unknown-linux-musl
+          components: rustfmt
 
-      - name: Cache Cargo downloads and build tools
+      - name: Use hermetic Cargo home
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo_home="${GITHUB_WORKSPACE}/.cargo-home"
+          mkdir -p "$cargo_home/bin"
+          : > "$cargo_home/config.toml"
+          echo "CARGO_HOME=$cargo_home" >> "$GITHUB_ENV"
+          echo "$cargo_home/bin" >> "$GITHUB_PATH"
+
+      - name: Restore Cargo downloads
         uses: actions/cache@v4
         with:
           path: |
-            ${{ runner.temp }}\codex-zh\cargo-home\registry
-            ${{ runner.temp }}\codex-zh\cargo-home\git
-            ${{ runner.temp }}\codex-zh\cargo-tools
-            ${{ runner.temp }}\codex-zh\zig
-            ${{ runner.temp }}\codex-zh\strawberry-perl-5.42.2.1-64bit-portable
-            ${{ runner.temp }}\codex-zh\downloads
-          key: codex-zh-android-musl-v1-${{ runner.os }}-${{ env.CODEX_REPO_REF }}-${{ hashFiles('build-skills/codex-cli-zh/scripts/**', 'build-skills/codex-android-musl-zh/scripts/**') }}
+            .cargo-home/registry
+            .cargo-home/git
+          key: codex-zh-arm64-cargo-${{ env.CODEX_REPO_REF }}-${{ env.CODEX_SKILLS_COMMIT }}-${{ hashFiles('codex-src/codex-rs/Cargo.lock') }}
           restore-keys: |
-            codex-zh-android-musl-v1-${{ runner.os }}-${{ env.CODEX_REPO_REF }}-
-            codex-zh-android-musl-v1-${{ runner.os }}-
+            codex-zh-arm64-cargo-${{ env.CODEX_REPO_REF }}-
+            codex-zh-arm64-cargo-
 
-      - name: Build localized ARM64 musl binary
-        shell: pwsh
+      - name: Install Zig 0.14.0
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.14.0
+          use-cache: false
+
+      - name: Install native and musl build dependencies
+        shell: bash
         env:
-          CARGO_BUILD_JOBS: "2"
-          CARGO_INCREMENTAL: "0"
-          CARGO_PROFILE_RELEASE_LTO: "false"
-          RUST_MIN_STACK: "67108864"
+          TARGET: ${{ env.CODEX_TARGET }}
+          APT_UPDATE_ARGS: -o Acquire::Retries=3
+          APT_INSTALL_ARGS: --no-install-recommends
         run: |
+          set -euo pipefail
+          sudo apt-get update -o Acquire::Retries=3
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            binutils \
+            cmake \
+            file \
+            jq \
+            ninja-build \
+            perl
+          bash codex-src/.github/scripts/install-musl-build-tools.sh
+
+      - name: Configure stable musl build environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "AWS_LC_SYS_NO_JITTER_ENTROPY=1" >> "$GITHUB_ENV"
+          echo "AWS_LC_SYS_NO_JITTER_ENTROPY_aarch64_unknown_linux_musl=1" >> "$GITHUB_ENV"
+          echo "CARGO_BUILD_JOBS=2" >> "$GITHUB_ENV"
+          echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+          echo "CARGO_PROFILE_RELEASE_LTO=false" >> "$GITHUB_ENV"
+          echo "RUST_MIN_STACK=67108864" >> "$GITHUB_ENV"
+
+      - name: Prepare localized musl source with pinned skills
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
           $workRoot = Join-Path $env:RUNNER_TEMP "codex-zh"
-          $python = (Get-Command python -ErrorAction Stop).Source
-          $script = Join-Path $env:GITHUB_WORKSPACE "build-skills\codex-android-musl-zh\scripts\build-codex-android-musl-zh.ps1"
+          $script = Join-Path $env:GITHUB_WORKSPACE "build-skills/codex-android-musl-zh/scripts/build-codex-android-musl-zh.ps1"
           $sourceRoot = Join-Path $env:GITHUB_WORKSPACE "codex-src"
-          $distDir = Join-Path $workRoot "dist"
+          $skillRoot = Join-Path $env:GITHUB_WORKSPACE "build-skills/codex-cli-zh"
+          $cargoHome = Join-Path $env:GITHUB_WORKSPACE ".cargo-home"
+          $cargoTarget = Join-Path $sourceRoot "codex-rs/target"
+          $evidence = Join-Path $env:GITHUB_WORKSPACE "build-evidence/prepare-source.log"
 
           & $script `
             -SourceRoot $sourceRoot `
             -RepoRef $env:CODEX_REPO_REF `
             -WorkRoot $workRoot `
-            -CargoHome (Join-Path $workRoot "cargo-home") `
-            -CargoTargetDir (Join-Path $workRoot "target-aarch64-musl") `
-            -CargoToolsRoot (Join-Path $workRoot "cargo-tools") `
-            -ZigDir (Join-Path $workRoot "zig\zig-x86_64-windows-0.16.0") `
-            -StrawberryPerlRoot (Join-Path $workRoot "strawberry-perl-5.42.2.1-64bit-portable") `
-            -DistDir $distDir `
-            -PythonExe $python `
-            -CodexZhSkillRoot (Join-Path $env:GITHUB_WORKSPACE "build-skills\codex-cli-zh") `
-            -PackageTarGz
+            -CargoHome $cargoHome `
+            -CargoTargetDir $cargoTarget `
+            -PythonExe (Get-Command python3 -ErrorAction Stop).Source `
+            -CodexZhSkillRoot $skillRoot `
+            -PrepareSourceOnly 2>&1 | Tee-Object -FilePath $evidence
 
           if ($LASTEXITCODE -ne 0) {
-            throw "Android musl build failed with exit code $LASTEXITCODE"
+            throw "Localized source preparation failed with exit code $LASTEXITCODE"
           }
+
+      - name: Test and patch configured Android model catalog
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $skillRoot = Join-Path $env:GITHUB_WORKSPACE "build-skills/codex-cli-zh"
+          $fixtureTest = Join-Path $skillRoot "tests/test-model-catalog-patch.ps1"
+          $patchScript = Join-Path $skillRoot "scripts/patch-codex-model-catalog-zh.ps1"
+          $mapFile = Join-Path $skillRoot "scripts/deep-translations.zh.json"
+          $inputCatalog = Join-Path $env:GITHUB_WORKSPACE "release-repo/android-arm64-musl/data/openai-models.json"
+          $outputCatalog = Join-Path $env:GITHUB_WORKSPACE "dist/openai-models.json"
+          $backupDirectory = Join-Path $env:RUNNER_TEMP "model-catalog-backups"
+          $evidence = Join-Path $env:GITHUB_WORKSPACE "build-evidence/model-catalog.log"
+
+          & $fixtureTest 2>&1 | Tee-Object -FilePath $evidence
+          if ($LASTEXITCODE -ne 0) {
+            throw "Model catalog fixture test failed with exit code $LASTEXITCODE"
+          }
+
+          Copy-Item -LiteralPath $inputCatalog -Destination $outputCatalog -Force
+          & $patchScript `
+            -CatalogPath $outputCatalog `
+            -MapFile $mapFile `
+            -BackupDirectory $backupDirectory 2>&1 | Tee-Object -FilePath $evidence -Append
+          if ($LASTEXITCODE -ne 0) {
+            throw "Android model catalog patch failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Run localization and source-integrity gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e . dist/openai-models.json >/dev/null
+          git -C codex-src diff --check
+          git -C codex-src diff --stat | tee build-evidence/source-patch-stat.txt
+          git -C codex-src diff --binary > build-evidence/source-localization.patch
+
+          pwsh -NoLogo -NoProfile \
+            -File build-skills/codex-cli-zh/scripts/scan-codex-cli-zh-coverage.ps1 \
+            -SourceRoot codex-src \
+            -ModelCatalogPath dist/openai-models.json \
+            -FailOnFindings \
+            2>&1 | tee build-evidence/localization-coverage.log
+
+          (
+            cd codex-src/codex-rs
+            cargo fmt --all -- --check
+          ) 2>&1 | tee build-evidence/cargo-fmt.log
+
+      - name: Build localized Codex
+        shell: bash
+        working-directory: codex-src/codex-rs
+        run: |
+          set -euo pipefail
+          cargo build \
+            --locked \
+            --release \
+            --target "$CODEX_TARGET" \
+            -p codex-cli \
+            --bin codex \
+            2>&1 | tee "${GITHUB_WORKSPACE}/build-evidence/cargo-build.log"
+
+      - name: Stage unverified build output
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${CODEX_REPO_REF#rust-v}"
+          binary_name="codex-${version}-zh-${CODEX_TARGET}"
+          built="codex-src/codex-rs/target/${CODEX_TARGET}/release/codex"
+
+          test -s "$built"
+          cp "$built" "dist/$binary_name"
+          strip --strip-debug --strip-unneeded "dist/$binary_name"
+          chmod 755 "dist/$binary_name"
+
+          file "dist/$binary_name" | tee build-evidence/FILE.txt
+          "dist/$binary_name" --version | tee dist/VERSION.txt
+          grep -Fx "codex-cli ${version}" dist/VERSION.txt
+
+          tar -C dist -czf "dist/${binary_name}.tar.gz" "$binary_name"
+          (
+            cd dist
+            sha256sum "$binary_name" "${binary_name}.tar.gz" openai-models.json > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+          cp build-evidence/BUILD-METADATA.txt dist/BUILD-METADATA.txt
 
       - name: Upload unverified build output
         uses: actions/upload-artifact@v4
         with:
           name: codex-zh-aarch64-musl-unverified
-          path: ${{ runner.temp }}\codex-zh\dist\*
+          path: |
+            dist/codex-*-zh-aarch64-unknown-linux-musl
+            dist/codex-*-zh-aarch64-unknown-linux-musl.tar.gz
+            dist/openai-models.json
+            dist/SHA256SUMS
+            dist/VERSION.txt
+            dist/BUILD-METADATA.txt
           if-no-files-found: error
           retention-days: 7
 
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-zh-aarch64-musl-build-evidence-${{ github.run_id }}
+          path: build-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
   verify:
-    name: Verify ARM64 binary under QEMU
+    name: Verify ARM64 binary and Chinese model catalog
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
 
     steps:
-      - name: Download build output
+      - name: Download unverified output
         uses: actions/download-artifact@v4
         with:
           name: codex-zh-aarch64-musl-unverified
           path: dist
 
-      - name: Install QEMU
+      - name: Install verification tools
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user
+          set -euo pipefail
+          sudo apt-get update -o Acquire::Retries=3
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            binutils \
+            file \
+            jq
 
-      - name: Verify file, archive, version, and hashes
+      - name: Verify architecture, linkage, version, archive, hashes, and localization
         shell: bash
         run: |
           set -euo pipefail
           version="${CODEX_REPO_REF#rust-v}"
-          binary="codex-${version}-zh-aarch64-unknown-linux-musl"
+          binary="codex-${version}-zh-${CODEX_TARGET}"
           archive="${binary}.tar.gz"
 
-          test -s "dist/${binary}"
-          test -s "dist/${archive}"
-          file "dist/${binary}"
-          tar -tzf "dist/${archive}" | grep -Fx "${binary}"
-          chmod 755 "dist/${binary}"
-          qemu-aarch64 "dist/${binary}" --version | tee dist/VERSION.txt
-          grep -Fx "codex-cli ${version}" dist/VERSION.txt
+          test "$(uname -m)" = "aarch64"
+          test -s "dist/$binary"
+          test -s "dist/$archive"
+          test -s dist/openai-models.json
+          test -s dist/SHA256SUMS
+          test -s dist/BUILD-METADATA.txt
+
           (
             cd dist
-            sha256sum "${binary}" "${archive}" > SHA256SUMS
-            cat SHA256SUMS
+            sha256sum -c SHA256SUMS
           )
+
+          file "dist/$binary" | tee dist/FILE.txt
+          readelf -h "dist/$binary" | tee dist/ELF-HEADER.txt
+          grep -Eq 'Machine:[[:space:]]+AArch64' dist/ELF-HEADER.txt
+          if readelf -l "dist/$binary" | grep -q 'Requesting program interpreter'; then
+            echo "Binary is dynamically linked and is not a standalone musl artifact." >&2
+            exit 1
+          fi
+
+          mapfile -t archive_entries < <(tar -tzf "dist/$archive")
+          test "${#archive_entries[@]}" -eq 1
+          test "${archive_entries[0]}" = "$binary"
+
+          chmod 755 "dist/$binary"
+          timeout 30 "dist/$binary" --version | tee dist/DEVICE-VERSION.txt
+          grep -Fx "codex-cli ${version}" dist/DEVICE-VERSION.txt
+
+          grep -aFq '选择模型和推理等级' "dist/$binary"
+          grep -aFq '最新的前沿代理式编码模型。' "dist/$binary"
+          if grep -aFq 'Select Model and Effort' "dist/$binary"; then
+            echo "English model picker title remains in the binary." >&2
+            exit 1
+          fi
+          if grep -aFq 'Latest frontier agentic coding model.' "dist/$binary"; then
+            echo "English model description remains in the binary." >&2
+            exit 1
+          fi
+
+          jq -e '
+            any(.models[];
+              .slug == "gpt-5.6-sol"
+              and .description == "最新的前沿代理式编码模型。"
+              and any(.supported_reasoning_levels[];
+                .effort == "ultra"
+                and .description == "最强推理，并自动委派任务"
+              )
+            )
+          ' dist/openai-models.json >/dev/null
+
+          if grep -Fq 'Latest frontier agentic coding model.' dist/openai-models.json; then
+            echo "English model description remains in the external Android model catalog." >&2
+            exit 1
+          fi
+          if grep -Fq 'Maximum reasoning with automatic task delegation' dist/openai-models.json; then
+            echo "English ultra reasoning description remains in the external Android model catalog." >&2
+            exit 1
+          fi
 
       - name: Upload verified release output
         uses: actions/upload-artifact@v4
@@ -157,7 +381,12 @@ jobs:
           path: |
             dist/codex-*-zh-aarch64-unknown-linux-musl
             dist/codex-*-zh-aarch64-unknown-linux-musl.tar.gz
+            dist/openai-models.json
             dist/SHA256SUMS
             dist/VERSION.txt
+            dist/DEVICE-VERSION.txt
+            dist/BUILD-METADATA.txt
+            dist/FILE.txt
+            dist/ELF-HEADER.txt
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
