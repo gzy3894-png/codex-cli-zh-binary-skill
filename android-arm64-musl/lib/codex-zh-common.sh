@@ -145,6 +145,54 @@ codex_script_install_root() {
   printf '%s\n' "${CODEX_ZH_SCRIPT_INSTALL_ROOT:-$(codex_share_dir)/scripts}"
 }
 
+codex_config_engine_asset_list() {
+  cat <<'EOF'
+libexec/codex-config-engine.py
+data/openai-models.json
+data/openai-models-source.json
+vendor/python/tomlkit/__init__.py
+vendor/python/tomlkit/_compat.py
+vendor/python/tomlkit/_types.py
+vendor/python/tomlkit/_utils.py
+vendor/python/tomlkit/api.py
+vendor/python/tomlkit/container.py
+vendor/python/tomlkit/exceptions.py
+vendor/python/tomlkit/items.py
+vendor/python/tomlkit/parser.py
+vendor/python/tomlkit/source.py
+vendor/python/tomlkit/toml_char.py
+vendor/python/tomlkit/toml_document.py
+vendor/python/tomlkit/toml_file.py
+vendor/python/tomlkit-0.13.2.dist-info/LICENSE
+vendor/python/tomlkit-0.13.2.dist-info/METADATA
+EOF
+}
+
+codex_support_file_list() {
+  cat <<'EOF'
+codex-for-tui-bootstrap.sh
+codex-for-tui-self-test.sh
+codex-local-resume.sh
+codex-update.sh
+install-reterminal-alpine.sh
+install-alpine-proot.sh
+install.sh
+lib/codex-zh-common.sh
+lib/codex-zh-download.sh
+lib/codex-zh-config.sh
+lib/codex-zh-local.sh
+lib/codex-zh-update.sh
+EOF
+  codex_config_engine_asset_list
+}
+
+codex_support_file_mode() {
+  case "$1" in
+    *.sh|libexec/*.py) printf '%s\n' 755 ;;
+    *) printf '%s\n' 644 ;;
+  esac
+}
+
 codex_install_dir() {
   if [ -n "${CODEX_ZH_INSTALL_DIR:-}" ]; then
     printf '%s\n' "$CODEX_ZH_INSTALL_DIR"

@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.3.11-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.3.11)
+[![Release](https://img.shields.io/badge/release-v2.4.0-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.4.0)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.142.4-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,7 +9,9 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.3.11 更新
+## 重要：2.4.0 更新
+
+2.4.0 重构了配置档、模型目录和上下文策略底层：配置模式改为扁平 CRUD，配置档使用稳定 ID 和事务写入，TOML 注释与未知字段会保留；旧配置可无损迁移并完整回滚。第三方 `/models` 只决定可用模型 ID，推理等级、上下文窗口和工具能力从 OpenAI Codex 官方目录精确合并，支持 `max` / `ultra`、未知模型保守模式和“跟随模型 / 固定 token”压缩策略。发布说明见 `docs/codex-for-tui-2.4.0-release-notes.md`。
 
 2.3.11 是 2.3.10 的文件托盘桥接竞态热修版：修复 `codex-preview clear` / `codex-panel clear files` 等控制请求在 App 快速清理 `queue/` 时，shell 端临时 `.req` 还没发布完成就被删掉，导致 installed smoke 出现 `mv ... No such file or directory` 的问题。发布说明见 `docs/codex-for-tui-2.3.11-release-notes.md`。
 
@@ -47,7 +49,7 @@ codex-ops resume-hint
 
 `codex-clean scan` 默认只扫描；`apply` 只移动到 `$PREFIX/local/ops/trash/<task_id>/`，不永久删除；误清理可用 `codex-clean restore <apply_task_id>` 恢复。详细说明见 `docs/codex-for-tui-2.3.1-ops.md`，发布说明见 `docs/codex-for-tui-2.3.1-release-notes.md`。
 
-发布安全说明：正式 APK 构建必须使用 GitHub Secrets/离线签名输入，仓库内不再提供正式 keystore fallback；Release 门禁会校验包名、版本号、非 debuggable 和正式签名指纹。Android 不支持普通覆盖安装降级，2.3.11（`versionCode=54`）回滚到更低 `versionCode` 需要前滚回滚包或卸载重装。
+发布安全说明：正式 APK 构建必须使用 GitHub Secrets/离线签名输入，仓库内不再提供正式 keystore fallback；Release 门禁会校验包名、版本号、非 debuggable 和正式签名指纹。Android 不支持普通覆盖安装降级，2.4.0（`versionCode=55`）回滚到更低 `versionCode` 需要前滚回滚包或卸载重装。
 
 2.3.0 是 2.2.9 后的稳定化回归版：补齐 `docs/codex-for-tui-2.3.0-regression.md` 和 `tests/codex-for-tui-installed-device-smoke.sh`，把安装/更新/首启、RTK/context、文件托盘、会话折叠、浏览器后台截图、JS、Auth 状态清理和终端性能状态纳入可重复门禁。真机回归时发现 `codex-browser open` 重复打开当前已加载 URL 可能卡到超时并误报 `Page load timed out before userscript completion`，2.3.0 已修复为直接返回当前页面快照；需要强制刷新时仍使用 `codex-browser reload`。
 
@@ -59,7 +61,7 @@ codex-ops resume-hint
 
 内置 WebView 继续作为 Agent Browser，保留后台打开、DOM 读取、点击、输入、JS、截图、多标签、Cookie/WebStorage 持久化和 userscript；遇到验证码/风控/外部 scheme 时会进入明确的用户协作状态，而不是让 Agent 猜。
 
-已经安装 2.0.x/2.1.x/2.2.x/2.3.x 的用户需要从 Releases 下载并覆盖安装 2.3.11 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context`、`codex-doctor`、`codex-clean`、`codex-ops` 等 APK 内置桥接命令。
+已经安装 2.0.x/2.1.x/2.2.x/2.3.x 的用户需要从 Releases 下载并覆盖安装 2.4.0 APK。覆盖安装后重新打开终端，新会话会自动同步 `codex-panel`、`codex-preview`、`codex-browser`、`codex-session`、`codex-rtk`、`codex-context`、`codex-doctor`、`codex-clean`、`codex-ops` 等 APK 内置桥接命令。
 
 注意：普通启动按设计不会自动联网更新 `~/.local/share/codex-zh/scripts` 下的安装/配置脚本。已安装用户覆盖 APK 后，为确保 `codex 配置模式` 也切到最新配置管理器，请手动执行一次：
 
@@ -74,12 +76,13 @@ codex-local repair-launcher
 codex 配置模式
 ```
 
-如果菜单里能看到 `1. 新建配置 / 2. 选择配置 / 3. 编辑当前配置 / 4. 查看配置 / 5. 删除配置`，说明脚本已经更新到配置管理器版本。新建或编辑第三方 API 后会主动询问是否保存为配置档；切换配置或退出配置模式前，如果当前配置有未保存修改，会先提示保存，避免配置档为空或丢失。
+如果菜单里能看到 `1. 新建配置 / 2. 选择配置 / 3. 编辑配置 / 4. 查看配置 / 5. 删除配置 / 7. 上下文与压缩策略`，说明脚本已经更新到配置档 V2。首次进入时会先为旧配置创建完整备份并执行可回滚迁移；当前配置被手动修改或登录态变化后，切换或退出前会提示同步、另存或暂不保存。
 
 新安装、尚未完成首次安装的用户，首次安装时会拉取当前分支的最新脚本；普通启动仍然不会隐藏联网更新、不会刷新模型、不会覆盖用户配置。已安装用户运行 `codex 更新` 再运行 `codex-local repair-launcher` 后，新启动器会带上最新桥接命令、快捷授权菜单和配置管理器。
 
 ## 2.0 新功能
 
+- 2.4.0 重构：事务型配置档 V2、稳定 ID CRUD、V1 无损迁移/回滚、动态模型能力、真实上下文与压缩策略。
 - 2.3.11 修复：文件托盘/浏览器/会话折叠桥接请求先在非监听临时文件完成，再发布到队列与 legacy request，避免 App 清理队列时触发 shell 端 `mv ... No such file or directory` 竞态。
 - 2.3.10 修复：文件托盘缓存生命周期闭环，重启后恢复有效临时文件并清理孤儿缓存，清空/单删/Agent clear/自动淘汰都会同步删除 App 本地副本。
 - 2.3.9 修复：文件托盘文本/文件点击“发送”后延迟触发真实 Enter，避免短引用只停在 Codex 输入框而不提交。
@@ -153,7 +156,7 @@ codex 配置模式
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.3.11` |
+| Android App | `2.4.0` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug/Test 包名 | `com.gzy3894.codexfortui.test` |
 | Codex CLI | `0.142.4` 中文版 |
@@ -232,12 +235,28 @@ codex-update apply
 codex 配置模式
 ```
 
-`codex 配置模式` 会打开配置管理器，围绕配置的增、删、改、查和切换工作：新建配置、选择配置、编辑当前配置、查看配置、删除配置、保存当前配置、刷新模型目录和修复全权限授权。第三方配置会写入 `config.toml`、`auth.json` 和 `model_catalog_json`；新建或编辑完成后会主动询问是否保存为配置档，切换或退出前会提示保存未保存修改。通用配置如自动压缩、fast mode、goals、statusline 会保留；全权限模式会同时写入 `approval_policy = "never"` 和 `sandbox_mode = "danger-full-access"`，避免只显示 never 但实际仍受沙箱限制。
+`codex 配置模式` 会打开事务型配置档 V2，围绕增、删、改、查和切换工作：新建配置、选择配置、编辑配置、查看配置、删除配置、刷新模型目录、上下文/压缩策略和修复全权限授权。配置档使用稳定 ID；编辑不会变成同名新建，取消确认不会写入。第三方配置会保存 `config.toml`、`auth.json` 和 `model_catalog_json`；切换或退出前若检测到手改配置、登录态或目录变化，会提示同步当前配置、另存或暂不保存。通用配置、注释和未知 TOML 字段会保留；全权限模式会同时写入 `approval_policy = "never"` 和 `sandbox_mode = "danger-full-access"`。
 
-第三方模型目录刷新也可以手动执行；它只更新 `model_catalog_json` 指向的模型目录文件，保留当前 `model` 和 `model_reasoning_effort`：
+第三方模型目录刷新也可以手动执行。Provider `/models` 只决定可用模型 ID，真实推理等级、上下文窗口和工具能力从随包 OpenAI Codex 官方目录精确合并；未知模型使用保守能力，可通过映射文件补充。刷新会保留当前 `model` 和 `model_reasoning_effort`，如果当前选择已不再受支持会要求用户重新选择：
 
 ```sh
 codex-local refresh-models
+```
+
+配置档和压缩策略也可以直接用命令管理：
+
+```sh
+codex-local profile-list
+codex-local profile-show <名称或ID>
+codex-local profile-use <名称或ID>
+codex-local profile-rename <名称或ID> <新名称>
+codex-local profile-delete <名称或ID>
+codex-local profile-sync <名称或ID>
+codex-local compact-policy show
+codex-local compact-policy follow-model
+codex-local compact-policy fixed 220000
+codex-local config-status
+codex-local rollback-v1
 ```
 
 本地诊断和启动器修复：

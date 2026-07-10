@@ -1,5 +1,29 @@
 # Changelog
 
+## Codex for TUI 2.4.0
+
+Codex for TUI 2.4.0 重构了配置档、模型目录和上下文策略底层。
+
+### 新增
+
+- 新增事务型 Python 配置引擎和稳定 ID 配置档，支持增删改查、激活、同步当前运行配置、同名保护和取消不写入。
+- 新增 V1 无损迁移、完整迁移备份、崩溃自动恢复和 `codex-local rollback-v1`。
+- 新增 Provider 模型 ID与 OpenAI Codex 官方能力目录精确合并；支持显式映射、未知模型保守模式和缓存回退。
+- 新增动态 `max` / `ultra` 推理等级、真实上下文窗口、有效窗口比例和自动压缩阈值报告。
+- 新增“跟随模型 / 固定 token”压缩策略，以及 `profile-show/rename/delete/sync`、`compact-policy`、`config-status` 命令。
+
+### 修复与兼容
+
+- 配置模式改为扁平 CRUD，每层支持返回和退出；编辑保持原配置 ID，切换前会处理 `runtime_dirty`。
+- TOML 写入保留用户注释和未知字段；API Key 不进入命令行参数或 JSON 输出。
+- 普通启动不联网、不迁移、不覆盖用户配置；旧更新器只在用户显式进入配置模式时按需补齐引擎资源。
+- 删除旧 shell 中固定 `272000` 上下文、固定推理等级和嵌套配置菜单的死代码。
+
+### 验证与回滚
+
+- 本地通过配置 V2、配置 UI、安装器、静态、真实 Codex 目录解析和 `git diff --check` 门禁；APK 仍只由 GitHub Actions 构建。
+- Android 不能普通覆盖降级安装；从 2.4.0（`versionCode=55`）回到更低版本需要前滚回滚包，或卸载重装并承担数据迁移/丢失风险。
+
 ## Codex for TUI 2.3.11
 
 Codex for TUI 2.3.11 是 2.3.10 的文件托盘桥接竞态热修版。

@@ -26,7 +26,7 @@
 
 普通启动不会自动联网更新脚本，不会请求 `/models`，不会覆盖 `~/.codex/config.toml`。
 
-Codex for TUI 2.3.1 用户建议覆盖安装最新 APK；2.3.1 新增 `codex-doctor`、`codex-clean`、`codex-ops`，用于只读诊断、可回滚清理、运维日志和断线续连提示。2.3.0 的稳定化回归、2.2.9 的后台/折叠 WebView 截图修复、2.2.6 的 bridge 并发请求修复、2.2.5 的 RTK hook 绝对路径修复和 2.2.3 的后台 bridge 消费修复继续保留，普通启动规则不变。已经完成首次安装但只需要更新脚本时，可以手动运行：
+已经安装 2.0.x/2.1.x/2.2.x/2.3.x 的用户建议覆盖安装 2.4.0 APK。2.4.0 新增事务型配置档 V2、稳定 ID CRUD、V1 无损迁移/回滚、动态模型能力和上下文/压缩策略；此前版本的终端、托盘、浏览器、运维与稳定性修复继续保留，普通启动规则不变。已经完成首次安装但只需要更新脚本时，可以手动运行：
 
 ```sh
 codex 更新
@@ -49,7 +49,7 @@ codex 官方登录
 codex 配置模式
 ```
 
-如果菜单里出现 `1. 新建配置 / 2. 选择配置 / 3. 编辑当前配置 / 8. 修复全权限授权`，说明脚本已经更新到包含配置菜单和授权持久化修复的版本。需要修复授权时选择第 8 项；它会写入 `approval_policy = "never"` 和 `sandbox_mode = "danger-full-access"`。
+如果菜单里出现 `1. 新建配置 / 2. 选择配置 / 3. 编辑配置 / 7. 上下文与压缩策略 / 8. 修复全权限授权`，说明脚本已经更新到配置档 V2。首次进入时会检测并迁移旧配置档，迁移前创建完整备份；需要时可运行 `codex-local rollback-v1` 回滚。
 
 只有这些路径会拉取脚本：
 
@@ -79,7 +79,7 @@ codex-for-tui-bootstrap --update-scripts
 codex-local refresh-models
 ```
 
-它只刷新 `model_catalog_json` 指向的 JSON 文件，并保留当前 `model` 和 `model_reasoning_effort`。
+Provider `/models` 只提供可用模型 ID；配置引擎会与随包 OpenAI Codex 官方目录精确合并真实推理等级、上下文窗口和工具能力。未知模型不会模糊猜测，默认使用保守能力并支持显式映射。刷新会保留当前 `model` 和 `model_reasoning_effort`；如果当前选择不再受支持，会要求重新选择。
 
 新建、编辑、切换或保存第三方 API 配置时运行：
 
@@ -87,7 +87,7 @@ codex-local refresh-models
 codex 配置模式
 ```
 
-该命令会打开配置管理器，支持新建配置、选择配置、编辑当前配置、查看配置、删除配置、保存当前配置、刷新模型目录和修复全权限授权。第三方配置会写入 `config.toml`、`auth.json` 和 `model_catalog_json`；内部 provider id 保持 `custom`，provider 名称写为 `OpenAI`，`base_url` 可指向兼容 OpenAI Responses API 的第三方服务。新建或编辑完成后会主动询问是否保存为配置档，切换或退出前会提示保存未保存修改。配置切换会保持自动压缩、fast mode、goals、statusline、RTK hook、context hook 和全权限设置；全权限模式会同时写入 `approval_policy = "never"` 和 `sandbox_mode = "danger-full-access"`。
+该命令会打开事务型配置档 V2，支持新建、选择、编辑、查看、删除、刷新模型目录、上下文/压缩策略和修复全权限授权。配置档使用稳定 ID；编辑原配置不会触发同名新建，取消确认不会写入。第三方配置会保存 `config.toml`、`auth.json` 和 `model_catalog_json`；内部 provider id 保持 `custom`，provider 名称默认写为 `OpenAI`，`base_url` 可指向兼容 OpenAI Responses API 的第三方服务。TOML 注释、未知字段和通用设置会保留；外部手改配置或登录态变化后，切换或退出前可同步、另存或暂不保存。全权限模式会同时写入 `approval_policy = "never"` 和 `sandbox_mode = "danger-full-access"`。
 
 ## ReTerminal Alpine 安装
 
@@ -199,23 +199,15 @@ Base URL 会自动规范化：
 model_provider = "custom"
 model = "你选择的默认模型"
 model_reasoning_effort = "medium"
-model_auto_compact_token_limit = 220000
-service_tier = "default"
 model_catalog_json = "/root/.codex/model_catalog.json"
-disable_response_storage = true
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
 
 [features]
-auto_compaction = true
-fast_mode = true
-goals = true
 hooks = true
 
-[tui]
-status_line = ["model-with-reasoning", "current-dir", "context-remaining", "used-tokens", "total-input-tokens", "total-output-tokens", "fast-mode", "task-progress"]
-status_line_use_colors = true
-
 [model_providers.custom]
-name = "custom"
+name = "OpenAI"
 base_url = "https://api.example.com/v1"
 wire_api = "responses"
 requires_openai_auth = false
@@ -227,6 +219,8 @@ timeout_ms = 5000
 refresh_interval_ms = 300000
 cwd = "/root/.codex"
 ```
+
+配置引擎只管理当前配置档拥有的 model/provider 字段，用户已有的 `[features]`、`[tui]`、MCP、hooks、注释和其他未知字段会保留。默认压缩策略为 `follow-model`，不会硬写固定 `model_auto_compact_token_limit`；只有用户选择固定策略时才写入该字段。
 
 `/model` 菜单的模型目录来自 `model_catalog_json`。后续服务端模型变化时，手动执行：
 
@@ -240,7 +234,7 @@ codex-local refresh-models
 codex 配置模式
 ```
 
-该命令会进入配置菜单；选择新建/编辑时会重新请求 `/models` 并让你选择默认模型，但保留自动压缩、fast mode、goals、statusline 等通用配置。
+该命令会进入配置菜单；选择新建/编辑时会重新请求 `/models`，再按官方能力目录展示模型和推理等级，同时保留用户通用配置。
 
 ## 本地维护命令
 
@@ -251,6 +245,15 @@ codex-local status
 codex-local doctor
 codex-local configure
 codex-local refresh-models
+codex-local profile-list
+codex-local profile-show <名称或ID>
+codex-local profile-use <名称或ID>
+codex-local profile-rename <名称或ID> <新名称>
+codex-local profile-delete <名称或ID>
+codex-local profile-sync <名称或ID>
+codex-local compact-policy [show|follow-model|fixed TOKENS]
+codex-local config-status
+codex-local rollback-v1
 codex-local repair-launcher
 codex-local run --version
 codex-update check

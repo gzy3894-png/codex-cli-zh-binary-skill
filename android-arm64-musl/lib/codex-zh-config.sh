@@ -14,23 +14,6 @@ codex_config_official_marker_file() {
   printf '%s/official-login-mode\n' "$(codex_state_root)"
 }
 
-codex_config_mark_official_mode() {
-  codex_config_backup_current
-  marker="$(codex_config_official_marker_file)"
-  marker_tmp="$(codex_config_tmp_path "$marker")"
-  mkdir -p "$(dirname "$marker")"
-  printf '%s\n' "official-login" > "$marker_tmp" || codex_die "无法写入官方登录标记临时文件"
-  codex_config_atomic_install_file "$marker_tmp" "$marker" 600 ||
-    codex_die "无法写入官方登录标记"
-  codex_config_ensure_default_hooks
-  codex_config_apply_full_permission "$(codex_config_file)"
-}
-
-codex_config_clear_official_mode() {
-  codex_config_atomic_remove_file "$(codex_config_official_marker_file)" ||
-    codex_die "无法清除官方登录标记"
-}
-
 codex_config_has_runtime_config() {
   [ -s "$(codex_config_file)" ] && return 0
   [ -s "$(codex_config_auth_file)" ] && return 0
@@ -44,6 +27,101 @@ codex_config_auth_file() {
 
 codex_config_model_catalog_file() {
   printf '%s/model_catalog.json\n' "$(codex_home)"
+}
+
+codex_config_engine_assets() {
+  if command -v codex_config_engine_asset_list >/dev/null 2>&1; then
+    codex_config_engine_asset_list
+    return
+  fi
+  cat <<'EOF'
+libexec/codex-config-engine.py
+data/openai-models.json
+data/openai-models-source.json
+vendor/python/tomlkit/__init__.py
+vendor/python/tomlkit/_compat.py
+vendor/python/tomlkit/_types.py
+vendor/python/tomlkit/_utils.py
+vendor/python/tomlkit/api.py
+vendor/python/tomlkit/container.py
+vendor/python/tomlkit/exceptions.py
+vendor/python/tomlkit/items.py
+vendor/python/tomlkit/parser.py
+vendor/python/tomlkit/source.py
+vendor/python/tomlkit/toml_char.py
+vendor/python/tomlkit/toml_document.py
+vendor/python/tomlkit/toml_file.py
+vendor/python/tomlkit-0.13.2.dist-info/LICENSE
+vendor/python/tomlkit-0.13.2.dist-info/METADATA
+EOF
+}
+
+codex_config_engine_root_valid() {
+  engine_root="$1"
+  [ -x "$engine_root/libexec/codex-config-engine.py" ] || return 1
+  [ -s "$engine_root/data/openai-models.json" ] || return 1
+  [ -s "$engine_root/vendor/python/tomlkit/__init__.py" ] || return 1
+  [ -s "$engine_root/vendor/python/tomlkit/parser.py" ] || return 1
+}
+
+codex_config_engine_find_root() {
+  for engine_root in \
+    "${CODEX_CONFIG_ENGINE_ROOT:-}" \
+    "${CODEX_ZH_ACTIVE_SCRIPT_DIR:-}" \
+    "$(codex_script_install_root)" \
+    "$(codex_script_cache_root)" \
+    "$HOME/.codex-for-tui/remote"
+  do
+    [ -n "$engine_root" ] || continue
+    if codex_config_engine_root_valid "$engine_root"; then
+      printf '%s\n' "$engine_root"
+      return 0
+    fi
+  done
+  return 1
+}
+
+codex_config_engine_ensure() {
+  codex_have python3 || codex_die "配置引擎需要 python3。请先运行 apk add python3，或重新执行完整安装。"
+  if engine_root="$(codex_config_engine_find_root 2>/dev/null)"; then
+    CODEX_CONFIG_ENGINE_RESOLVED_ROOT="$engine_root"
+    return 0
+  fi
+  command -v codex_download_first_script >/dev/null 2>&1 ||
+    codex_die "配置引擎资源缺失，且当前没有可用的显式更新下载器。请先运行 codex-update apply。"
+  engine_root="$(codex_script_install_root)"
+  codex_info "配置引擎资源缺失；本次显式配置操作将补齐资源。"
+  engine_failed=0
+  while IFS= read -r engine_rel; do
+    [ -n "$engine_rel" ] || continue
+    engine_dest="$engine_root/$engine_rel"
+    if [ -s "$engine_dest" ]; then
+      continue
+    fi
+    mkdir -p "$(dirname "$engine_dest")"
+    if ! codex_download_first_script "$engine_rel" "$engine_dest" ""; then
+      engine_failed=1
+      break
+    fi
+    case "$engine_rel" in
+      libexec/*.py) chmod 755 "$engine_dest" 2>/dev/null || true ;;
+      *) chmod 644 "$engine_dest" 2>/dev/null || true ;;
+    esac
+  done <<EOF
+$(codex_config_engine_assets)
+EOF
+  [ "$engine_failed" -eq 0 ] || codex_die "配置引擎资源下载失败；用户配置未修改。"
+  codex_config_engine_root_valid "$engine_root" ||
+    codex_die "配置引擎资源不完整；用户配置未修改。"
+  PYTHONNOUSERSITE=1 python3 "$engine_root/libexec/codex-config-engine.py" --help >/dev/null 2>&1 ||
+    codex_die "配置引擎自检失败；用户配置未修改。"
+  CODEX_CONFIG_ENGINE_RESOLVED_ROOT="$engine_root"
+}
+
+codex_config_engine() {
+  codex_config_engine_ensure
+  PYTHONNOUSERSITE=1 python3 "$CODEX_CONFIG_ENGINE_RESOLVED_ROOT/libexec/codex-config-engine.py" \
+    --codex-home "$(codex_home)" "$@"
 }
 
 codex_config_backup_stamp() {
@@ -137,6 +215,9 @@ codex_config_valid_api_base() {
     http://?*|https://?*) ;;
     *) return 1 ;;
   esac
+  case "$cleaned" in
+    *@*|*\?*|*\#*) return 1 ;;
+  esac
   host_path="$(printf '%s' "$cleaned" | sed 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##')"
   host="$(printf '%s' "$host_path" | sed 's#[/?#].*##')"
   [ -n "$host" ]
@@ -146,49 +227,6 @@ codex_config_read_auth_key() {
   file="${1:-$(codex_config_auth_file)}"
   [ -s "$file" ] || return 1
   sed -n 's/.*"OPENAI_API_KEY"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" | sed -n '1p'
-}
-
-codex_config_write_auth_json() {
-  api_key="$1"
-  home_dir="$(codex_home)"
-  codex_ensure_private_dir "$home_dir"
-  auth_file="$home_dir/auth.json"
-  auth_tmp="$(codex_config_tmp_path "$auth_file")"
-  {
-    printf '{\n'
-    printf '  "OPENAI_API_KEY": "%s"\n' "$(codex_json_escape "$api_key")"
-    printf '}\n'
-  } > "$auth_tmp"
-  codex_config_atomic_install_file "$auth_tmp" "$auth_file" 600 ||
-    codex_die "无法写入 auth.json"
-}
-
-codex_config_write_auth_helper() {
-  home_dir="$(codex_home)"
-  helper_dir="$home_dir/bin"
-  helper="$helper_dir/provider-api-key"
-  codex_ensure_private_dir "$home_dir"
-  mkdir -p "$helper_dir"
-  helper_tmp="$(codex_config_tmp_path "$helper")"
-  cat > "$helper_tmp" <<'EOF'
-#!/usr/bin/env sh
-auth_file="${CODEX_HOME:-$HOME/.codex}/auth.json"
-sed -n 's/.*"OPENAI_API_KEY"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$auth_file" | sed -n '1p'
-EOF
-  codex_config_atomic_install_file "$helper_tmp" "$helper" 700 ||
-    codex_die "无法写入 API Key helper"
-  printf '%s\n' "$helper"
-}
-
-codex_config_validate_default_model() {
-  default_model="$1"
-  models_file="$2"
-  [ -n "$default_model" ] || codex_die "默认模型为空，未写入 config.toml"
-  if [ "$(printf '%s' "$default_model" | wc -l | tr -d ' ')" != "0" ]; then
-    codex_die "默认模型包含换行，未写入 config.toml"
-  fi
-  grep -F -x -- "$default_model" "$models_file" >/dev/null 2>&1 ||
-    codex_die "默认模型不在模型列表中，未写入 config.toml：$default_model"
 }
 
 codex_config_fetch_models() {
@@ -214,102 +252,6 @@ codex_config_fetch_models() {
     printf '%s\n' "缺少 curl/wget，无法请求 /models" > "$err_file"
     return 1
   fi
-}
-
-codex_config_parse_models() {
-  json_file="$1"
-  if codex_have jq; then
-    jq -r '.data[]?.id // empty' "$json_file" 2>/dev/null | sed '/^$/d'
-  else
-    sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$json_file" | sed '/^$/d'
-  fi
-}
-
-codex_config_model_display_name() {
-  printf '%s' "$1"
-}
-
-codex_config_write_model_catalog() {
-  models_file="$1"
-  default_model="${2:-}"
-  out_json="$3"
-  auto_limit="${CODEX_ZH_AUTO_COMPACT_TOKEN_LIMIT:-220000}"
-  catalog_tmp="$(codex_config_tmp_path "$out_json")"
-  catalog_dedup="$out_json.models.tmp.$$"
-  mkdir -p "$(dirname "$out_json")"
-  if [ -s "$models_file" ]; then
-    awk 'NF && !seen[$0]++ { print }' "$models_file" > "$catalog_dedup"
-  elif [ -n "$default_model" ]; then
-    printf '%s\n' "$default_model" > "$catalog_dedup"
-  else
-    codex_die "没有可写入 model_catalog_json 的模型名"
-  fi
-
-  {
-    printf '{\n'
-    printf '  "models": [\n'
-    count=0
-    while IFS= read -r model; do
-      [ -n "$model" ] || continue
-      model_esc="$(codex_json_escape "$model")"
-      name_esc="$(codex_json_escape "$(codex_config_model_display_name "$model")")"
-      [ "$count" -eq 0 ] || printf ',\n'
-      cat <<EOF
-    {
-      "prefer_websockets": true,
-      "support_verbosity": true,
-      "default_verbosity": "low",
-      "apply_patch_tool_type": "freeform",
-      "web_search_tool_type": "text",
-      "input_modalities": ["text", "image"],
-      "supports_image_detail_original": true,
-      "truncation_policy": {"mode": "tokens", "limit": 10000},
-      "supports_parallel_tool_calls": true,
-      "context_window": 272000,
-      "max_context_window": 272000,
-      "auto_compact_token_limit": $auto_limit,
-      "reasoning_summary_format": "experimental",
-      "default_reasoning_summary": "none",
-      "additional_speed_tiers": ["fast"],
-      "service_tiers": [
-        {"id": "priority", "name": "Fast", "description": "Priority processing."}
-      ],
-      "default_service_tier": null,
-      "slug": "$model_esc",
-      "display_name": "$name_esc",
-      "description": "$name_esc",
-      "default_reasoning_level": "medium",
-      "supported_reasoning_levels": [
-        {"effort": "low", "description": "响应更快，推理较轻"},
-        {"effort": "medium", "description": "在日常任务中平衡速度和推理深度"},
-        {"effort": "high", "description": "为复杂问题提供更深推理"},
-        {"effort": "xhigh", "description": "为复杂问题提供极高推理深度"}
-      ],
-      "shell_type": "shell_command",
-      "visibility": "list",
-      "minimal_client_version": "0.98.0",
-      "supported_in_api": true,
-      "availability_nux": null,
-      "upgrade": null,
-      "priority": 4,
-      "base_instructions": "",
-      "model_messages": null,
-      "supports_reasoning_summaries": true,
-      "effective_context_window_percent": 95,
-      "experimental_supported_tools": [],
-      "supports_search_tool": true,
-      "use_responses_lite": false
-    }
-EOF
-      count=$((count + 1))
-    done < "$catalog_dedup"
-    printf '\n'
-    printf '  ]\n'
-    printf '}\n'
-  } > "$catalog_tmp"
-  codex_config_atomic_install_file "$catalog_tmp" "$out_json" 600 ||
-    codex_die "无法写入 model_catalog_json：$out_json"
-  rm -f "$catalog_dedup"
 }
 
 codex_config_root_string_value() {
@@ -397,57 +339,9 @@ in_section { emit_if_match($0) }
 ' "$cfg" 2>/dev/null | sed -n '1p'
 }
 
-codex_config_any_string_value() {
-  key="$1"
-  cfg="${2:-$(codex_config_file)}"
-  [ -r "$cfg" ] || return 0
-  awk -v key="$key" '
-function emit_if_match(line, trimmed, rest) {
-  trimmed = line
-  sub(/^[[:space:]]*/, "", trimmed)
-  if (index(trimmed, key) != 1) {
-    return
-  }
-  rest = substr(trimmed, length(key) + 1)
-  if (rest !~ /^[[:space:]]*=/) {
-    return
-  }
-  sub(/^[^=]*=[[:space:]]*/, "", trimmed)
-  if (trimmed ~ /^"/) {
-    sub(/^"/, "", trimmed)
-    sub(/".*$/, "", trimmed)
-    print trimmed
-    exit
-  }
-  if (trimmed ~ /^\047/) {
-    sub(/^\047/, "", trimmed)
-    sub(/\047.*$/, "", trimmed)
-    print trimmed
-    exit
-  }
-}
-{ emit_if_match($0) }
-' "$cfg" 2>/dev/null | sed -n '1p'
-}
-
 codex_config_current_provider() {
   cfg="${1:-$(codex_config_file)}"
   codex_config_root_string_value model_provider "$cfg"
-}
-
-codex_config_current_model() {
-  cfg="${1:-$(codex_config_file)}"
-  codex_config_root_string_value model "$cfg"
-}
-
-codex_config_current_base_url() {
-  cfg="${1:-$(codex_config_file)}"
-  provider="$(codex_config_current_provider "$cfg")"
-  if [ -n "$provider" ]; then
-    base="$(codex_config_section_string_value "$cfg" "model_providers.$provider" base_url)"
-    [ -n "$base" ] && { printf '%s\n' "$base"; return 0; }
-  fi
-  codex_config_any_string_value base_url "$cfg"
 }
 
 codex_config_third_party_provider_name_needs_normalize() {
@@ -508,13 +402,6 @@ END {
 ' "$codex_provider_cfg" > "$codex_provider_cfg_tmp"
   codex_config_atomic_install_file "$codex_provider_cfg_tmp" "$codex_provider_cfg" 600 ||
     codex_die "无法修复第三方 provider 名称：$codex_provider_cfg"
-}
-
-codex_config_current_catalog_path() {
-  cfg="${1:-$(codex_config_file)}"
-  path="$(codex_config_root_string_value model_catalog_json "$cfg")"
-  [ -n "$path" ] || path="$(codex_config_model_catalog_file)"
-  printf '%s\n' "$path"
 }
 
 codex_config_is_full_permission() {
@@ -816,231 +703,6 @@ codex_config_backup_current() {
   [ "$made" -eq 0 ] || codex_info "已备份当前配置。"
 }
 
-codex_config_set_catalog_path() {
-  cfg="$1"
-  catalog="$2"
-  cfg_tmp="$(codex_config_tmp_path "$cfg")"
-  catalog_esc="$(codex_toml_escape "$catalog")"
-  mkdir -p "$(dirname "$cfg")"
-  if [ -s "$cfg" ] && grep -q '^[[:space:]]*model_catalog_json[[:space:]]*=' "$cfg"; then
-    sed "s#^[[:space:]]*model_catalog_json[[:space:]]*=.*#model_catalog_json = \"$catalog_esc\"#" "$cfg" > "$cfg_tmp"
-  else
-    [ -s "$cfg" ] && cat "$cfg" > "$cfg_tmp" || : > "$cfg_tmp"
-    printf '\nmodel_catalog_json = "%s"\n' "$catalog_esc" >> "$cfg_tmp"
-  fi
-  codex_config_atomic_install_file "$cfg_tmp" "$cfg" 600 ||
-    codex_die "无法写入 model_catalog_json 路径：$cfg"
-}
-
-codex_config_merge_common_and_runtime() {
-  cfg="$1"
-  out="$2"
-  provider_id="$3"
-  model_provider_line="$4"
-  model_line="$5"
-  catalog_line="$6"
-  input="$cfg"
-  [ -e "$input" ] || input="/dev/null"
-  awk \
-    -v provider="$provider_id" \
-    -v model_provider_line="$model_provider_line" \
-    -v model_line="$model_line" \
-    -v catalog_line="$catalog_line" '
-function section_name(line, s) {
-  s = line
-  sub(/^[[:space:]]*\[/, "", s)
-  sub(/\][[:space:]]*($|#.*$)/, "", s)
-  return s
-}
-function is_section(line) {
-  return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*($|#)/
-}
-function emit_root_defaults() {
-  if (root_done) {
-    return
-  }
-  print model_provider_line
-  print model_line
-  if (!root_effort_seen) {
-    print "model_reasoning_effort = \"medium\""
-  }
-  if (!root_compact_seen) {
-    print "model_auto_compact_token_limit = 220000"
-  }
-  if (!root_service_tier_seen) {
-    print "service_tier = \"default\""
-  }
-  print catalog_line
-  if (!root_disable_storage_seen) {
-    print "disable_response_storage = true"
-  }
-  root_done = 1
-}
-function flush_section_defaults() {
-  if (section == "features") {
-    if (!features_auto_seen) {
-      print "auto_compaction = true"
-    }
-    if (!features_fast_seen) {
-      print "fast_mode = true"
-    }
-    if (!features_goals_seen) {
-      print "goals = true"
-    }
-    if (!features_hooks_seen) {
-      print "hooks = true"
-    }
-  } else if (section == "tui") {
-    if (!tui_status_line_seen) {
-      print "status_line = [\"model-with-reasoning\", \"current-dir\", \"context-remaining\", \"used-tokens\", \"total-input-tokens\", \"total-output-tokens\", \"fast-mode\", \"task-progress\"]"
-    }
-    if (!tui_status_colors_seen) {
-      print "status_line_use_colors = true"
-    }
-  }
-}
-{
-  if (is_section($0)) {
-    flush_section_defaults()
-    s = section_name($0)
-    if (s == "model_providers." provider || s == "model_providers." provider ".auth") {
-      skipping = 1
-      section = s
-      next
-    }
-    skipping = 0
-    if (!root_done) {
-      emit_root_defaults()
-    }
-    section = s
-    if (section == "features") {
-      features_seen = 1
-    } else if (section == "tui") {
-      tui_seen = 1
-    }
-    print
-    next
-  }
-
-  if (skipping) {
-    if ($0 ~ /^[[:space:]]*($|#)/) {
-      print
-    }
-    next
-  }
-
-  if (section == "") {
-    if ($0 ~ /^[[:space:]]*model_provider[[:space:]]*=/) {
-      next
-    }
-    if ($0 ~ /^[[:space:]]*model[[:space:]]*=/) {
-      next
-    }
-    if ($0 ~ /^[[:space:]]*model_catalog_json[[:space:]]*=/) {
-      next
-    }
-    if ($0 ~ /^[[:space:]]*model_reasoning_effort[[:space:]]*=/) {
-      root_effort_seen = 1
-    } else if ($0 ~ /^[[:space:]]*model_auto_compact_token_limit[[:space:]]*=/) {
-      root_compact_seen = 1
-    } else if ($0 ~ /^[[:space:]]*service_tier[[:space:]]*=/) {
-      root_service_tier_seen = 1
-    } else if ($0 ~ /^[[:space:]]*disable_response_storage[[:space:]]*=/) {
-      root_disable_storage_seen = 1
-    }
-  } else if (section == "features") {
-    if ($0 ~ /^[[:space:]]*auto_compaction[[:space:]]*=/) {
-      features_auto_seen = 1
-    } else if ($0 ~ /^[[:space:]]*fast_mode[[:space:]]*=/) {
-      features_fast_seen = 1
-    } else if ($0 ~ /^[[:space:]]*goals[[:space:]]*=/) {
-      features_goals_seen = 1
-    } else if ($0 ~ /^[[:space:]]*hooks[[:space:]]*=/) {
-      features_hooks_seen = 1
-      print "hooks = true"
-      next
-    }
-  } else if (section == "tui") {
-    if ($0 ~ /^[[:space:]]*status_line[[:space:]]*=/) {
-      tui_status_line_seen = 1
-    } else if ($0 ~ /^[[:space:]]*status_line_use_colors[[:space:]]*=/) {
-      tui_status_colors_seen = 1
-    }
-  }
-
-  print
-}
-END {
-  flush_section_defaults()
-  if (!root_done) {
-    emit_root_defaults()
-  }
-  if (!features_seen) {
-    print ""
-    print "[features]"
-    print "auto_compaction = true"
-    print "fast_mode = true"
-    print "goals = true"
-    print "hooks = true"
-  }
-  if (!tui_seen) {
-    print ""
-    print "[tui]"
-    print "status_line = [\"model-with-reasoning\", \"current-dir\", \"context-remaining\", \"used-tokens\", \"total-input-tokens\", \"total-output-tokens\", \"fast-mode\", \"task-progress\"]"
-    print "status_line_use_colors = true"
-  }
-}
-' "$input" > "$out"
-}
-
-codex_config_write_third_party_config() {
-  api_base="$1"
-  api_key="$2"
-  default_model="$3"
-  models_file="$4"
-  home_dir="$(codex_home)"
-  cfg="$home_dir/config.toml"
-  catalog="$home_dir/model_catalog.json"
-  codex_config_validate_default_model "$default_model" "$models_file"
-  helper="$(codex_config_write_auth_helper)"
-  codex_config_write_auth_json "$api_key"
-  codex_config_write_model_catalog "$models_file" "$default_model" "$catalog"
-  api_base_esc="$(codex_toml_escape "$api_base")"
-  model_esc="$(codex_toml_escape "$default_model")"
-  provider_name_esc="$(codex_toml_escape "${CODEX_ZH_PROVIDER_NAME:-OpenAI}")"
-  helper_esc="$(codex_toml_escape "$helper")"
-  home_esc="$(codex_toml_escape "$home_dir")"
-  catalog_esc="$(codex_toml_escape "$catalog")"
-  config_tmp="$(codex_config_tmp_path "$cfg")"
-  codex_config_clear_official_mode
-  codex_config_merge_common_and_runtime \
-    "$cfg" \
-    "$config_tmp" \
-    "$CODEX_ZH_PROVIDER_ID" \
-    "model_provider = \"$CODEX_ZH_PROVIDER_ID\"" \
-    "model = \"$model_esc\"" \
-    "model_catalog_json = \"$catalog_esc\""
-
-  cat >> "$config_tmp" <<EOF
-[model_providers.$CODEX_ZH_PROVIDER_ID]
-name = "$provider_name_esc"
-base_url = "$api_base_esc"
-wire_api = "responses"
-requires_openai_auth = false
-
-[model_providers.$CODEX_ZH_PROVIDER_ID.auth]
-command = "$helper_esc"
-args = []
-timeout_ms = 5000
-refresh_interval_ms = 300000
-cwd = "$home_esc"
-EOF
-  codex_config_atomic_install_file "$config_tmp" "$cfg" 600 ||
-    codex_die "无法写入 config.toml"
-  codex_config_apply_full_permission "$cfg"
-  codex_config_ensure_default_hooks
-}
-
 codex_config_tty_read() {
   prompt="$1"
   default="${2:-}"
@@ -1084,129 +746,8 @@ codex_config_exit_config_mode() {
   exit 0
 }
 
-codex_config_choose_model() {
-  models_file="$1"
-  preferred_model="${2:-}"
-  count="$(wc -l < "$models_file" | tr -d ' ')"
-  [ "$count" -gt 0 ] || codex_die "模型列表为空"
-  default_choice="1"
-  if [ -n "$preferred_model" ]; then
-    preferred_choice="$(awk -v model="$preferred_model" '$0 == model { print NR; exit }' "$models_file")"
-    [ -n "$preferred_choice" ] && default_choice="$preferred_choice"
-  fi
-  while :; do
-    printf '%s\n' "可用模型：" >&2
-    awk '{ printf "%2d. %s\n", NR, $0 }' "$models_file" >&2
-    printf '%s\n' "b. 返回上一层" >&2
-    printf '%s\n' "0. 退出，不启动 Codex" >&2
-    choice="$(codex_config_tty_read "请选择默认模型编号" "$default_choice")"
-    codex_config_is_back_choice "$choice" && return 1
-    codex_config_is_exit_choice "$choice" && codex_config_exit_config_mode
-    [ -n "$choice" ] || choice="$default_choice"
-    case "$choice" in
-      *[!0-9]*) codex_warn "请输入有效模型编号，或输入 b 返回。"; continue ;;
-    esac
-    if [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$count" ] 2>/dev/null; then
-      sed -n "${choice}p" "$models_file"
-      return 0
-    fi
-    codex_warn "模型编号超出范围。"
-  done
-}
-
-codex_config_prompt_third_party() {
-  mode="${1:-new}"
-  home_dir="$(codex_home)"
-  cfg="$(codex_config_file)"
-  work="$(codex_state_root)/configure"
-  mkdir -p "$work"
-  existing_base=""
-  existing_key=""
-  existing_model=""
-  if [ "$mode" = "edit" ]; then
-    [ -s "$cfg" ] || codex_die "缺少当前 config.toml，无法编辑配置"
-    existing_base="$(codex_config_current_base_url "$cfg")"
-    existing_key="$(codex_config_read_auth_key "$(codex_config_auth_file)" || true)"
-    existing_model="$(codex_config_current_model "$cfg")"
-  fi
-  default_base="${CODEX_ZH_API_BASE:-$existing_base}"
-  while :; do
-    raw_base="$(codex_config_tty_read "API Base URL，例如 https://api.example.com/v1（b 返回，0 退出）" "$default_base")"
-    codex_config_is_back_choice "$raw_base" && return 1
-    codex_config_is_exit_choice "$raw_base" && codex_config_exit_config_mode
-    codex_config_valid_api_base "$raw_base" && break
-    codex_warn "API Base URL 无效，必须是 http(s) URL"
-  done
-  api_base="$(codex_config_normalize_api_base "$raw_base")"
-  api_key="${CODEX_ZH_API_KEY:-}"
-  if [ -z "$api_key" ]; then
-    while :; do
-      if [ "$mode" = "edit" ] && [ -n "$existing_key" ]; then
-        api_key="$(codex_config_tty_read "API Key（留空保留当前，b 返回，0 退出）" "")"
-        codex_config_is_back_choice "$api_key" && return 1
-        codex_config_is_exit_choice "$api_key" && codex_config_exit_config_mode
-        [ -n "$api_key" ] || api_key="$existing_key"
-      else
-        api_key="$(codex_config_tty_read "API Key（b 返回，0 退出）" "")"
-        codex_config_is_back_choice "$api_key" && return 1
-        codex_config_is_exit_choice "$api_key" && codex_config_exit_config_mode
-      fi
-      [ -n "$api_key" ] && break
-      codex_warn "API Key 不能为空。"
-    done
-  fi
-  [ -n "$api_key" ] || codex_die "API Key 不能为空"
-  models_json="$work/models.json"
-  models_err="$work/models.err"
-  models_file="$work/models.txt"
-  codex_info "请求模型列表：$api_base/models"
-  if ! codex_config_fetch_models "$api_base" "$api_key" "$models_json" "$models_err"; then
-    [ ! -s "$models_err" ] || sed -n '1,20p' "$models_err" >&2 || true
-    codex_die "无法获取模型列表，未写入 config.toml"
-  fi
-  codex_config_parse_models "$models_json" > "$models_file"
-  [ -s "$models_file" ] || codex_die "未解析到模型，未写入 config.toml"
-  default_model="${CODEX_ZH_DEFAULT_MODEL:-}"
-  if [ -z "$default_model" ]; then
-    default_model="$(codex_config_choose_model "$models_file" "$existing_model")" || return 1
-  fi
-  codex_config_backup_current
-  codex_config_write_third_party_config "$api_base" "$api_key" "$default_model" "$models_file"
-  codex_info "已写入第三方配置：$home_dir/config.toml"
-}
-
-codex_config_refresh_models() {
-  cfg="$(codex_config_file)"
-  [ -s "$cfg" ] || codex_die "缺少 $cfg，请先显式配置"
-  api_base="$(codex_config_current_base_url "$cfg")"
-  [ -n "$api_base" ] || codex_die "config.toml 中没有 base_url，无法刷新第三方模型目录"
-  api_key="$(codex_config_read_auth_key "$(codex_config_auth_file)" || true)"
-  [ -n "$api_key" ] || codex_die "auth.json 中没有 OPENAI_API_KEY"
-  default_model="$(codex_config_current_model "$cfg")"
-  catalog="$(codex_config_current_catalog_path "$cfg")"
-  work="$(codex_state_root)/refresh-models"
-  mkdir -p "$work"
-  models_json="$work/models.json"
-  models_err="$work/models.err"
-  models_file="$work/models.txt"
-  codex_info "显式刷新模型目录：$api_base/models"
-  if ! codex_config_fetch_models "$api_base" "$api_key" "$models_json" "$models_err"; then
-    [ ! -s "$models_err" ] || sed -n '1,20p' "$models_err" >&2 || true
-    codex_die "刷新失败，未修改当前配置"
-  fi
-  codex_config_parse_models "$models_json" > "$models_file"
-  [ -s "$models_file" ] || codex_die "未解析到模型，未修改当前配置"
-  codex_config_write_model_catalog "$models_file" "$default_model" "$catalog"
-  codex_config_set_catalog_path "$cfg" "$catalog"
-  codex_info "已刷新 model_catalog_json；保留当前 model 和 model_reasoning_effort"
-}
-
 codex_config_profiles_root() {
   printf '%s/config-profiles\n' "$(codex_home)"
-}
-
-codex_config_profile_current_file() {
-  printf '%s/current\n' "$(codex_config_profiles_root)"
 }
 
 codex_config_profile_valid_name() {
@@ -1218,495 +759,10 @@ codex_config_profile_valid_name() {
   return 0
 }
 
-codex_config_profile_dir() {
-  name="$1"
-  codex_config_profile_valid_name "$name" || codex_die "配置名称无效，只能使用字母、数字、点、下划线和短横线：$name"
-  printf '%s/%s\n' "$(codex_config_profiles_root)" "$name"
-}
-
-codex_config_profile_current_name() {
-  current_file="$(codex_config_profile_current_file)"
-  [ -s "$current_file" ] || return 0
-  name="$(sed -n '1p' "$current_file" 2>/dev/null | tr -d '\r')"
-  codex_config_profile_valid_name "$name" || return 0
-  [ -d "$(codex_config_profile_dir "$name")" ] || return 0
-  printf '%s\n' "$name"
-}
-
-codex_config_profile_mark_current() {
-  name="$1"
-  codex_config_profile_valid_name "$name" || codex_die "配置名称无效，只能使用字母、数字、点、下划线和短横线：$name"
-  root="$(codex_config_profiles_root)"
-  current_file="$(codex_config_profile_current_file)"
-  current_tmp="$(codex_config_tmp_path "$current_file")"
-  mkdir -p "$root"
-  printf '%s\n' "$name" > "$current_tmp" || codex_die "无法写入当前配置标记临时文件"
-  codex_config_atomic_install_file "$current_tmp" "$current_file" 600 ||
-    codex_die "无法写入当前配置标记"
-}
-
-codex_config_profile_clear_current() {
-  codex_config_atomic_remove_file "$(codex_config_profile_current_file)" ||
-    codex_die "无法清除当前配置标记"
-}
-
-codex_config_profile_list() {
-  root="$(codex_config_profiles_root)"
-  [ -d "$root" ] || return 0
-  find "$root" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | sort
-}
-
-codex_config_profile_count() {
-  codex_config_profile_list | wc -l | tr -d ' '
-}
-
-codex_config_files_same() {
-  left="$1"
-  right="$2"
-  if [ -e "$left" ] || [ -e "$right" ]; then
-    [ -s "$left" ] && [ -s "$right" ] || return 1
-    cmp -s "$left" "$right"
-    return $?
-  fi
-  return 0
-}
-
-codex_config_profile_matches_current() {
-  name="$1"
-  dir="$(codex_config_profile_dir "$name")"
-  home_dir="$(codex_home)"
-  codex_config_files_same "$home_dir/config.toml" "$dir/config.toml" || return 1
-  codex_config_files_same "$home_dir/auth.json" "$dir/auth.json" || return 1
-  current_catalog="$(codex_config_current_catalog_path "$home_dir/config.toml")"
-  codex_config_files_same "$current_catalog" "$dir/model_catalog.json" || return 1
-  codex_config_files_same "$(codex_config_official_marker_file)" "$dir/install-state/official-login-mode" || return 1
-  return 0
-}
-
-codex_config_profile_is_dirty() {
-  codex_config_has_runtime_config || return 1
-  current="$(codex_config_profile_current_name)"
-  [ -n "$current" ] || return 0
-  codex_config_profile_matches_current "$current" || return 0
-  return 1
-}
-
-codex_config_profile_status_label() {
-  if ! codex_config_has_runtime_config; then
-    printf '%s\n' "无当前配置"
-    return 0
-  fi
-  current="$(codex_config_profile_current_name)"
-  if [ -z "$current" ]; then
-    printf '%s\n' "未保存当前配置"
-  elif codex_config_profile_is_dirty; then
-    printf '%s\n' "$current（未保存修改）"
-  else
-    printf '%s\n' "$current"
-  fi
-}
-
-codex_config_default_profile_name() {
-  current="$(codex_config_profile_current_name)"
-  [ -n "$current" ] && { printf '%s\n' "$current"; return 0; }
-  if [ "$(codex_config_profile_count)" = "0" ]; then
-    printf '%s\n' "default"
-  else
-    stamp="$(date '+%Y%m%d-%H%M%S' 2>/dev/null || printf '%s' "$$")"
-    printf 'profile-%s\n' "$stamp"
-  fi
-}
-
-codex_config_profile_save() {
-  name="$1"
-  cfg="$(codex_config_file)"
-  [ -s "$cfg" ] || codex_die "缺少当前 config.toml，无法保存配置：$name"
-  root="$(codex_config_profiles_root)"
-  dest="$(codex_config_profile_dir "$name")"
-  profile_tmp="$root/.tmp-$name-$$"
-  rm -rf "$profile_tmp"
-  mkdir -p "$profile_tmp"
-  cp "$cfg" "$profile_tmp/config.toml"
-  auth="$(codex_config_auth_file)"
-  [ ! -s "$auth" ] || cp "$auth" "$profile_tmp/auth.json"
-  catalog="$(codex_config_current_catalog_path "$cfg")"
-  [ ! -s "$catalog" ] || cp "$catalog" "$profile_tmp/model_catalog.json"
-  marker="$(codex_config_official_marker_file)"
-  if [ -s "$marker" ]; then
-    mkdir -p "$profile_tmp/install-state"
-    cp "$marker" "$profile_tmp/install-state/official-login-mode"
-    chmod 700 "$profile_tmp/install-state" 2>/dev/null || true
-    chmod 600 "$profile_tmp/install-state/official-login-mode" 2>/dev/null || true
-  fi
-  for profile_file in config.toml auth.json model_catalog.json; do
-    [ ! -e "$profile_tmp/$profile_file" ] || chmod 600 "$profile_tmp/$profile_file" 2>/dev/null || true
-  done
-  codex_config_atomic_replace_dir "$profile_tmp" "$dest" "profile-$name" ||
-    codex_die "无法保存配置：$name"
-  chmod 700 "$dest" 2>/dev/null || true
-  codex_config_profile_mark_current "$name"
-  codex_info "已保存配置：$name"
-}
-
-codex_config_profile_use() {
-  name="$1"
-  dir="$(codex_config_profile_dir "$name")"
-  [ -s "$dir/config.toml" ] || codex_die "找不到配置：$name"
-  home_dir="$(codex_home)"
-  old_catalog="$(codex_config_current_catalog_path "$home_dir/config.toml" 2>/dev/null || true)"
-  codex_config_backup_current
-  codex_ensure_private_dir "$home_dir"
-  tmp_cfg="$(codex_config_tmp_path "$home_dir/config.toml")"
-  cp "$dir/config.toml" "$tmp_cfg"
-  codex_config_atomic_install_file "$tmp_cfg" "$home_dir/config.toml" 600 ||
-    codex_die "无法切换 config.toml"
-
-  if [ -s "$dir/auth.json" ]; then
-    tmp_auth="$(codex_config_tmp_path "$home_dir/auth.json")"
-    cp "$dir/auth.json" "$tmp_auth"
-    codex_config_atomic_install_file "$tmp_auth" "$home_dir/auth.json" 600 ||
-      codex_die "无法切换 auth.json"
-  else
-    codex_config_atomic_remove_file "$home_dir/auth.json" ||
-      codex_die "无法移除旧 auth.json"
-  fi
-
-  if [ -s "$dir/model_catalog.json" ]; then
-    catalog_target="$(codex_config_current_catalog_path "$home_dir/config.toml")"
-    [ -n "$catalog_target" ] || catalog_target="$home_dir/model_catalog.json"
-    catalog_dir="$(dirname "$catalog_target")"
-    if mkdir -p "$catalog_dir" 2>/dev/null; then
-      tmp_catalog="$(codex_config_tmp_path "$catalog_target")"
-      if cp "$dir/model_catalog.json" "$tmp_catalog" 2>/dev/null &&
-        codex_config_atomic_install_file "$tmp_catalog" "$catalog_target" 600 2>/dev/null; then
-        :
-      else
-        rm -f "$tmp_catalog" 2>/dev/null || true
-        catalog_target="$home_dir/model_catalog.json"
-        tmp_catalog="$(codex_config_tmp_path "$catalog_target")"
-        cp "$dir/model_catalog.json" "$tmp_catalog"
-        codex_config_atomic_install_file "$tmp_catalog" "$catalog_target" 600 ||
-          codex_die "无法切换 model_catalog.json"
-        codex_config_set_catalog_path "$home_dir/config.toml" "$catalog_target"
-      fi
-    else
-      catalog_target="$home_dir/model_catalog.json"
-      tmp_catalog="$(codex_config_tmp_path "$catalog_target")"
-      cp "$dir/model_catalog.json" "$tmp_catalog"
-      codex_config_atomic_install_file "$tmp_catalog" "$catalog_target" 600 ||
-        codex_die "无法切换 model_catalog.json"
-      codex_config_set_catalog_path "$home_dir/config.toml" "$catalog_target"
-    fi
-  else
-    catalog_target="$(codex_config_current_catalog_path "$home_dir/config.toml")"
-    case "$catalog_target" in
-      "$home_dir"/*) codex_config_atomic_remove_file "$catalog_target" || codex_die "无法移除旧 model_catalog.json" ;;
-    esac
-    if [ -n "$old_catalog" ] && [ "$old_catalog" != "$catalog_target" ]; then
-      case "$old_catalog" in
-        "$home_dir"/*) codex_config_atomic_remove_file "$old_catalog" || codex_die "无法移除旧 model_catalog.json" ;;
-      esac
-    fi
-  fi
-
-  profile_marker="$dir/install-state/official-login-mode"
-  runtime_marker="$(codex_config_official_marker_file)"
-  if [ -s "$profile_marker" ]; then
-    mkdir -p "$(dirname "$runtime_marker")"
-    tmp_marker="$(codex_config_tmp_path "$runtime_marker")"
-    cp "$profile_marker" "$tmp_marker"
-    codex_config_atomic_install_file "$tmp_marker" "$runtime_marker" 600 ||
-      codex_die "无法切换官方登录标记"
-  else
-    codex_config_clear_official_mode
-  fi
-  codex_config_apply_full_permission "$home_dir/config.toml"
-  codex_config_ensure_default_hooks
-  codex_config_profile_mark_current "$name"
-  codex_info "已切换配置：$name"
-}
-
-codex_config_profile_new() {
-  name="$1"
-  codex_config_profile_valid_name "$name" || codex_die "配置名称无效，只能使用字母、数字、点、下划线和短横线：$name"
-  codex_config_prompt_third_party
-  codex_config_profile_save "$name"
-}
-
-codex_config_prompt_profile_name() {
-  prompt="$1"
-  default="${2:-}"
-  CODEX_CONFIG_PROFILE_NAME=""
-  while :; do
-    name="$(codex_config_tty_read "$prompt（b 返回，0 退出）" "$default")"
-    case "$name" in
-      b|B|back|BACK|返回) return 1 ;;
-      0|q|Q|quit|QUIT|退出) codex_config_exit_config_mode ;;
-    esac
-    if codex_config_profile_valid_name "$name"; then
-      CODEX_CONFIG_PROFILE_NAME="$name"
-      return 0
-    fi
-    codex_warn "配置名称无效，只能使用字母、数字、点、下划线和短横线。"
-  done
-}
-
-codex_config_profile_save_interactive() {
-  default="$(codex_config_default_profile_name)"
-  codex_config_prompt_profile_name "请输入配置名称" "$default" || return 1
-  name="$CODEX_CONFIG_PROFILE_NAME"
-  dest="$(codex_config_profile_dir "$name")"
-  if [ -e "$dest" ] && ! codex_config_tty_confirm "配置已存在，是否覆盖？" "y"; then
-    codex_warn "已取消保存配置"
-    return 1
-  fi
-  codex_config_profile_save "$name"
-}
-
-codex_config_profile_choose_name() {
-  prompt="${1:-请选择配置编号}"
-  work="$(codex_state_root)/profile-menu"
-  mkdir -p "$work"
-  profiles_file="$work/profiles.txt"
-  CODEX_CONFIG_SELECTED_PROFILE=""
-  while :; do
-    codex_config_profile_list > "$profiles_file"
-    if [ ! -s "$profiles_file" ]; then
-      codex_warn "没有已保存配置；请先新建或保存当前配置。"
-      return 1
-    fi
-    printf '%s\n' "已保存配置：" >&2
-    awk '{ printf "%2d. %s\n", NR, $0 }' "$profiles_file" >&2
-    printf '%s\n' "b. 返回上一层" >&2
-    printf '%s\n' "0. 退出，不启动 Codex" >&2
-    count="$(wc -l < "$profiles_file" | tr -d ' ')"
-    choice="$(codex_config_tty_read "$prompt" "b")"
-    case "$choice" in
-      b|B|back|BACK|返回) return 1 ;;
-      0|q|Q|quit|QUIT|退出) codex_config_exit_config_mode ;;
-      *[!0-9]*|"") codex_warn "请输入有效编号，或输入 b 返回。"; continue ;;
-    esac
-    if [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$count" ] 2>/dev/null; then
-      CODEX_CONFIG_SELECTED_PROFILE="$(sed -n "${choice}p" "$profiles_file")"
-      return 0
-    fi
-    codex_warn "配置编号超出范围。"
-  done
-}
-
-codex_config_confirm_save_dirty_before() {
-  reason="${1:-继续操作}"
-  codex_config_profile_is_dirty || return 0
-  while :; do
-    current="$(codex_config_profile_current_name)"
-    printf '%s\n' "当前配置有未保存修改，$reason 前请选择：" >&2
-    if [ -n "$current" ]; then
-      printf '%s\n' "1. 保存到当前配置：$current（推荐）" >&2
-    else
-      printf '%s\n' "1. 保存为配置档（推荐）" >&2
-    fi
-    printf '%s\n' "2. 另存为新配置" >&2
-    printf '%s\n' "3. 不保存，继续" >&2
-    printf '%s\n' "b. 取消并返回上一层" >&2
-    printf '%s\n' "0. 退出，不启动 Codex" >&2
-    choice="$(codex_config_tty_read "请输入选项编号" "1")"
-    case "$choice" in
-      1|"")
-        if [ -n "$current" ]; then
-          codex_config_profile_save "$current" && return 0
-        else
-          codex_config_profile_save_interactive && return 0
-        fi
-        ;;
-      2)
-        codex_config_profile_save_interactive && return 0
-        ;;
-      3)
-        return 0
-        ;;
-      b|B|back|BACK|返回)
-        return 1
-        ;;
-      0|q|Q|quit|QUIT|退出)
-        codex_config_exit_config_mode
-        ;;
-      *)
-        codex_warn "请输入 1、2、3、b 或 0。"
-        ;;
-    esac
-  done
-}
-
-codex_config_prompt_save_after_write() {
-  default="${1:-$(codex_config_default_profile_name)}"
-  while :; do
-    printf '%s\n' "是否保存为配置档？" >&2
-    printf '%s\n' "1. 保存为 $default（推荐）" >&2
-    printf '%s\n' "2. 输入新名称保存" >&2
-    printf '%s\n' "3. 暂不保存，保留为当前未保存配置" >&2
-    printf '%s\n' "b. 返回菜单" >&2
-    printf '%s\n' "0. 退出，不启动 Codex" >&2
-    choice="$(codex_config_tty_read "请输入选项编号" "1")"
-    case "$choice" in
-      1|"")
-        if [ -e "$(codex_config_profile_dir "$default")" ] && ! codex_config_tty_confirm "配置 $default 已存在，是否覆盖？" "y"; then
-          continue
-        fi
-        codex_config_profile_save "$default"
-        return 0
-        ;;
-      2)
-        codex_config_profile_save_interactive
-        return 0
-        ;;
-      3|b|B|back|BACK|返回)
-        codex_config_profile_clear_current
-        codex_warn "当前配置尚未保存；切换或退出前会再次提示保存。"
-        return 0
-        ;;
-      0|q|Q|quit|QUIT|退出)
-        codex_config_exit_config_mode
-        ;;
-      *)
-        codex_warn "请输入 1、2、3、b 或 0。"
-        ;;
-    esac
-  done
-}
-
-codex_config_profile_choose_use() {
-  codex_config_profile_choose_name "请选择要切换的配置编号" || return 1
-  CODEX_CONFIG_PROFILE_TO_USE="$CODEX_CONFIG_SELECTED_PROFILE"
-  codex_config_confirm_save_dirty_before "切换配置" || return 1
-  codex_config_profile_use "$CODEX_CONFIG_PROFILE_TO_USE"
-}
-
-codex_config_profile_delete_interactive() {
-  codex_config_profile_choose_name "请选择要删除的配置编号" || return 1
-  CODEX_CONFIG_PROFILE_TO_DELETE="$CODEX_CONFIG_SELECTED_PROFILE"
-  dir="$(codex_config_profile_dir "$CODEX_CONFIG_PROFILE_TO_DELETE")"
-  [ -d "$dir" ] || { codex_warn "配置不存在：$CODEX_CONFIG_PROFILE_TO_DELETE"; return 1; }
-  if ! codex_config_tty_confirm "确认删除配置 $CODEX_CONFIG_PROFILE_TO_DELETE？" "n"; then
-    codex_warn "已取消删除。"
-    return 1
-  fi
-  codex_config_backup_file "$dir" "profile-$CODEX_CONFIG_PROFILE_TO_DELETE" ||
-    codex_die "无法备份待删除配置：$CODEX_CONFIG_PROFILE_TO_DELETE"
-  rm -rf "$dir"
-  current="$(codex_config_profile_current_name)"
-  [ "$current" = "$CODEX_CONFIG_PROFILE_TO_DELETE" ] && codex_config_profile_clear_current
-  codex_info "已删除配置：$CODEX_CONFIG_PROFILE_TO_DELETE"
-}
-
-codex_config_profile_summary_from_dir() {
-  label="$1"
-  dir="$2"
-  cfg="$dir/config.toml"
-  auth="$dir/auth.json"
-  catalog="$dir/model_catalog.json"
-  printf '%s\n' "[$label]" >&2
-  if [ ! -s "$cfg" ]; then
-    printf '%s\n' "  config.toml: 缺失" >&2
-    return 0
-  fi
-  printf '%s\n' "  model: $(codex_config_current_model "$cfg")" >&2
-  printf '%s\n' "  base_url: $(codex_config_current_base_url "$cfg")" >&2
-  if codex_config_is_full_permission "$cfg"; then
-    printf '%s\n' "  full_permission: yes" >&2
-  else
-    printf '%s\n' "  full_permission: no" >&2
-  fi
-  [ -s "$dir/install-state/official-login-mode" ] && printf '%s\n' "  official_login_mode: yes" >&2 || printf '%s\n' "  official_login_mode: no" >&2
-  [ -s "$auth" ] && printf '%s\n' "  auth.json: 已保存（key 不显示）" >&2 || printf '%s\n' "  auth.json: 缺失" >&2
-  [ -s "$catalog" ] && printf '%s\n' "  model_catalog.json: 已保存" >&2 || printf '%s\n' "  model_catalog.json: 缺失" >&2
-}
-
-codex_config_current_summary() {
-  home_dir="$(codex_home)"
-  tmp_dir="$home_dir"
-  printf '%s\n' "当前配置：$(codex_config_profile_status_label)" >&2
-  codex_config_profile_summary_from_dir "current" "$tmp_dir"
-}
-
-codex_config_profile_view_interactive() {
-  codex_config_current_summary
-  printf '%s\n' "" >&2
-  printf '%s\n' "已保存配置：" >&2
-  if codex_config_profile_list | sed 's/^/  - /' >&2; then
-    :
-  fi
-  printf '%s\n' "" >&2
-  codex_config_profile_choose_name "输入编号查看详情，或 b 返回" || return 0
-  CODEX_CONFIG_PROFILE_TO_VIEW="$CODEX_CONFIG_SELECTED_PROFILE"
-  codex_config_profile_summary_from_dir "$CODEX_CONFIG_PROFILE_TO_VIEW" "$(codex_config_profile_dir "$CODEX_CONFIG_PROFILE_TO_VIEW")"
-}
-
-codex_config_menu_migrate_existing() {
-  codex_config_has_runtime_config || return 0
-  root="$(codex_config_profiles_root)"
-  mkdir -p "$root"
-  current="$(codex_config_profile_current_name)"
-  [ -n "$current" ] && return 0
-  if [ "$(codex_config_profile_count)" = "0" ]; then
-    printf '%s\n' "检测到当前已有配置，但还没有保存档。" >&2
-    while :; do
-      printf '%s\n' "1. 保存为 default（推荐）" >&2
-      printf '%s\n' "2. 输入名称保存" >&2
-      printf '%s\n' "3. 暂不保存" >&2
-      choice="$(codex_config_tty_read "请输入选项编号" "1")"
-      case "$choice" in
-        1|"") codex_config_profile_save default; return 0 ;;
-        2) codex_config_profile_save_interactive; return 0 ;;
-        3) codex_warn "当前配置尚未保存；切换或退出前会再次提示保存。"; return 0 ;;
-        *) codex_warn "请输入 1、2 或 3。" ;;
-      esac
-    done
-  fi
-  for name in $(codex_config_profile_list); do
-    if codex_config_profile_matches_current "$name"; then
-      codex_config_profile_mark_current "$name"
-      return 0
-    fi
-  done
-  codex_warn "当前配置未匹配到已保存配置；切换或退出前会提示保存。"
-}
-
-codex_config_menu_new() {
-  if ( codex_config_prompt_third_party new ); then
-    default="$(codex_config_default_profile_name)"
-    codex_config_prompt_save_after_write "$default"
-  else
-    codex_warn "新建配置未完成，已返回配置模式。"
-  fi
-}
-
-codex_config_menu_edit() {
-  [ -s "$(codex_config_file)" ] || { codex_warn "缺少当前 config.toml，无法编辑；请先新建配置。"; return 1; }
-  current="$(codex_config_profile_current_name)"
-  if ( codex_config_prompt_third_party edit ); then
-    default="${current:-$(codex_config_default_profile_name)}"
-    codex_config_prompt_save_after_write "$default"
-  else
-    codex_warn "编辑配置未完成，已返回配置模式。"
-  fi
-}
-
-codex_config_menu_refresh_models() {
-  if ( codex_config_backup_current; codex_config_refresh_models ); then
-    current="$(codex_config_profile_current_name)"
-    [ -z "$current" ] || codex_config_profile_save "$current" || true
-    codex_info "模型目录刷新完成。"
-  else
-    codex_warn "模型目录刷新失败，已返回配置模式。"
-  fi
-}
-
 codex_config_menu_repair_full_permission() {
-  if ( codex_config_repair_full_permission ); then
-    current="$(codex_config_profile_current_name)"
-    [ -z "$current" ] || codex_config_profile_save "$current" || true
-  else
+  if ! codex_config_repair_full_permission; then
     codex_warn "全权限授权修复失败，已返回配置模式。"
+    return 1
   fi
 }
 
@@ -1727,67 +783,895 @@ codex_config_repair_full_permission() {
   codex_info "已修复授权：approval_policy=never，sandbox_mode=danger-full-access"
 }
 
-codex_config_menu() {
-  codex_config_menu_migrate_existing
+# Configuration UI V2. V1 storage migration is implemented by the
+# transactional Python engine; all public profile and menu entry points below
+# use the V2 schema.
+
+codex_config_v2_work_root() {
+  printf '%s/config-v2-ui\n' "$(codex_state_root)"
+}
+
+codex_config_v2_json_value() {
+  v2_json_file="$1"
+  v2_json_path="$2"
+  python3 - "$v2_json_file" "$v2_json_path" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        value = json.load(handle)
+    for key in sys.argv[2].split("."):
+        if not key:
+            continue
+        value = value[key]
+except (OSError, KeyError, TypeError, ValueError):
+    raise SystemExit(1)
+
+if value is None:
+    pass
+elif value is True:
+    print("true")
+elif value is False:
+    print("false")
+elif isinstance(value, (dict, list)):
+    print(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+else:
+    print(value)
+PY
+}
+
+codex_config_v2_run() {
+  v2_run_output="$1"
+  shift
+  mkdir -p "$(dirname "$v2_run_output")"
+  codex_config_engine_ensure
+  if PYTHONNOUSERSITE=1 python3 \
+    "$CODEX_CONFIG_ENGINE_RESOLVED_ROOT/libexec/codex-config-engine.py" \
+    --codex-home "$(codex_home)" "$@" > "$v2_run_output"
+  then
+    return 0
+  else
+    v2_run_rc=$?
+  fi
+  v2_run_error="$(codex_config_v2_json_value "$v2_run_output" error 2>/dev/null || true)"
+  [ -n "$v2_run_error" ] || v2_run_error="配置引擎操作失败"
+  codex_warn "$v2_run_error"
+  return "$v2_run_rc"
+}
+
+codex_config_v2_prompt_name() {
+  v2_name_prompt="$1"
+  v2_name_default="${2:-}"
+  CODEX_CONFIG_V2_NAME=""
   while :; do
+    v2_name_value="$(codex_config_tty_read "$v2_name_prompt（b 返回，0 退出）" "$v2_name_default")"
+    codex_config_is_back_choice "$v2_name_value" && return 1
+    codex_config_is_exit_choice "$v2_name_value" && codex_config_exit_config_mode
+    if codex_config_profile_valid_name "$v2_name_value"; then
+      CODEX_CONFIG_V2_NAME="$v2_name_value"
+      return 0
+    fi
+    codex_warn "名称只能使用字母、数字、点、下划线和短横线。"
+  done
+}
+
+codex_config_v2_read_secret() {
+  v2_secret_prompt="$1"
+  v2_secret_value=""
+  if [ "${CODEX_ZH_FORCE_STDIN:-0}" != "1" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    printf '%s: ' "$v2_secret_prompt" > /dev/tty
+    v2_stty_state="$(stty -g < /dev/tty 2>/dev/null || true)"
+    [ -z "$v2_stty_state" ] || stty -echo < /dev/tty 2>/dev/null || true
+    IFS= read -r v2_secret_value < /dev/tty || v2_secret_value=""
+    [ -z "$v2_stty_state" ] || stty "$v2_stty_state" < /dev/tty 2>/dev/null || true
+    printf '\n' > /dev/tty
+  else
+    printf '%s: ' "$v2_secret_prompt" >&2
+    IFS= read -r v2_secret_value || v2_secret_value=""
+  fi
+  printf '%s' "$v2_secret_value"
+}
+
+codex_config_v2_write_auth_input() {
+  v2_auth_path="$1"
+  v2_auth_key="$2"
+  mkdir -p "$(dirname "$v2_auth_path")"
+  v2_auth_tmp="$(codex_config_tmp_path "$v2_auth_path")"
+  {
+    printf '{\n'
+    printf '  "OPENAI_API_KEY": "%s"\n' "$(codex_json_escape "$v2_auth_key")"
+    printf '}\n'
+  } > "$v2_auth_tmp"
+  mv "$v2_auth_tmp" "$v2_auth_path"
+  chmod 600 "$v2_auth_path" 2>/dev/null || true
+}
+
+codex_config_v2_profile_lines() {
+  v2_profiles_json="$1"
+  python3 - "$v2_profiles_json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    value = json.load(handle)
+active = value.get("active_profile_id")
+for item in value.get("profiles", []):
+    fields = [
+        item.get("id", ""),
+        item.get("name", ""),
+        item.get("mode", ""),
+        item.get("model", ""),
+        item.get("reasoning_effort") or "",
+        "1" if item.get("id") == active else "0",
+    ]
+    print("|".join(str(field).replace("|", "/").replace("\n", " ") for field in fields))
+PY
+}
+
+codex_config_v2_choose_profile() {
+  v2_choose_prompt="${1:-请选择配置编号}"
+  v2_choose_work="$(codex_config_v2_work_root)"
+  v2_choose_json="$v2_choose_work/profiles.json"
+  v2_choose_lines="$v2_choose_work/profiles.lines"
+  CODEX_CONFIG_V2_PROFILE_ID=""
+  CODEX_CONFIG_V2_PROFILE_NAME=""
+  codex_config_v2_run "$v2_choose_json" profile list || return 1
+  codex_config_v2_profile_lines "$v2_choose_json" > "$v2_choose_lines"
+  [ -s "$v2_choose_lines" ] || {
+    codex_warn "还没有配置档，请先新建配置。"
+    return 1
+  }
+  while :; do
+    printf '%s\n' "配置档：" >&2
+    awk -F '|' '{
+      active = ($6 == "1" ? " *当前" : "")
+      effort = ($5 != "" ? "/" $5 : "")
+      model = ($4 != "" ? $4 effort : "默认模型")
+      printf "%2d. %s%s  [%s]  %s\n", NR, $2, active, $3, model
+    }' "$v2_choose_lines" >&2
+    printf '%s\n' "b. 返回上一层" >&2
+    printf '%s\n' "0. 退出，不启动 Codex" >&2
+    v2_choose_count="$(wc -l < "$v2_choose_lines" | tr -d ' ')"
+    v2_choose_value="$(codex_config_tty_read "$v2_choose_prompt" "b")"
+    codex_config_is_back_choice "$v2_choose_value" && return 1
+    codex_config_is_exit_choice "$v2_choose_value" && codex_config_exit_config_mode
+    case "$v2_choose_value" in
+      *[!0-9]*|"") codex_warn "请输入有效编号，或输入 b 返回。"; continue ;;
+    esac
+    if [ "$v2_choose_value" -ge 1 ] 2>/dev/null &&
+      [ "$v2_choose_value" -le "$v2_choose_count" ] 2>/dev/null
+    then
+      v2_choose_line="$(sed -n "${v2_choose_value}p" "$v2_choose_lines")"
+      CODEX_CONFIG_V2_PROFILE_ID="$(printf '%s\n' "$v2_choose_line" | cut -d '|' -f 1)"
+      CODEX_CONFIG_V2_PROFILE_NAME="$(printf '%s\n' "$v2_choose_line" | cut -d '|' -f 2)"
+      return 0
+    fi
+    codex_warn "配置编号超出范围。"
+  done
+}
+
+codex_config_v2_catalog_lines() {
+  v2_catalog_json="$1"
+  python3 - "$v2_catalog_json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    value = json.load(handle)
+for item in value.get("models", []):
+    fields = [
+        item.get("slug", ""),
+        item.get("display_name", ""),
+        ",".join(item.get("reasoning_levels") or []),
+        item.get("default_reasoning_level") or "",
+        item.get("resolved_context_window") or "",
+        item.get("auto_compact_token_limit") or "",
+        "1" if item.get("conservative_fallback") else "0",
+    ]
+    print("|".join(str(field).replace("|", "/").replace("\n", " ") for field in fields))
+PY
+}
+
+codex_config_v2_choose_model() {
+  v2_model_catalog="$1"
+  v2_model_preferred="${2:-}"
+  v2_model_allow_missing="${3:-0}"
+  v2_model_work="$(codex_config_v2_work_root)"
+  v2_model_json="$v2_model_work/catalog-inspect.json"
+  v2_model_lines="$v2_model_work/catalog.lines"
+  codex_config_v2_run "$v2_model_json" catalog inspect --catalog-file "$v2_model_catalog" || return 1
+  codex_config_v2_catalog_lines "$v2_model_json" > "$v2_model_lines"
+  if [ "$v2_model_allow_missing" = "1" ] && [ -n "$v2_model_preferred" ] &&
+    ! awk -F '|' -v model="$v2_model_preferred" '$1 == model { found = 1 } END { exit !found }' "$v2_model_lines"
+  then
+    v2_model_extra="$v2_model_lines.extra"
+    printf '%s|%s|||||1\n' "$v2_model_preferred" "$v2_model_preferred" > "$v2_model_extra"
+    cat "$v2_model_lines" >> "$v2_model_extra"
+    mv "$v2_model_extra" "$v2_model_lines"
+  fi
+  [ -s "$v2_model_lines" ] || {
+    codex_warn "模型目录为空。"
+    return 1
+  }
+  v2_model_default="1"
+  if [ -n "$v2_model_preferred" ]; then
+    v2_model_match="$(awk -F '|' -v model="$v2_model_preferred" '$1 == model { print NR; exit }' "$v2_model_lines")"
+    [ -z "$v2_model_match" ] || v2_model_default="$v2_model_match"
+  fi
+  while :; do
+    printf '%s\n' "可用模型：" >&2
+    awk -F '|' '{
+      context = ($5 != "" ? "  上下文 " $5 : "  能力未知")
+      fallback = ($7 == "1" ? "  [保守模式]" : "")
+      printf "%2d. %s%s%s\n", NR, $1, context, fallback
+    }' "$v2_model_lines" >&2
+    printf '%s\n' "b. 返回上一层" >&2
+    printf '%s\n' "0. 退出，不启动 Codex" >&2
+    v2_model_count="$(wc -l < "$v2_model_lines" | tr -d ' ')"
+    v2_model_choice="$(codex_config_tty_read "请选择模型编号" "$v2_model_default")"
+    codex_config_is_back_choice "$v2_model_choice" && return 1
+    codex_config_is_exit_choice "$v2_model_choice" && codex_config_exit_config_mode
+    case "$v2_model_choice" in
+      *[!0-9]*|"") codex_warn "请输入有效编号，或输入 b 返回。"; continue ;;
+    esac
+    if [ "$v2_model_choice" -ge 1 ] 2>/dev/null &&
+      [ "$v2_model_choice" -le "$v2_model_count" ] 2>/dev/null
+    then
+      v2_model_line="$(sed -n "${v2_model_choice}p" "$v2_model_lines")"
+      CODEX_CONFIG_V2_MODEL="$(printf '%s\n' "$v2_model_line" | cut -d '|' -f 1)"
+      CODEX_CONFIG_V2_LEVELS="$(printf '%s\n' "$v2_model_line" | cut -d '|' -f 3)"
+      CODEX_CONFIG_V2_DEFAULT_LEVEL="$(printf '%s\n' "$v2_model_line" | cut -d '|' -f 4)"
+      return 0
+    fi
+    codex_warn "模型编号超出范围。"
+  done
+}
+
+codex_config_v2_choose_reasoning() {
+  v2_reasoning_levels="$1"
+  v2_reasoning_preferred="${2:-}"
+  v2_reasoning_work="$(codex_config_v2_work_root)"
+  v2_reasoning_file="$v2_reasoning_work/reasoning-levels.txt"
+  mkdir -p "$v2_reasoning_work"
+  printf '%s\n' "$v2_reasoning_levels" | tr ',' '\n' | sed '/^$/d' > "$v2_reasoning_file"
+  if [ ! -s "$v2_reasoning_file" ]; then
+    CODEX_CONFIG_V2_REASONING=""
+    codex_info "该模型未声明可用推理等级，将不写入 model_reasoning_effort。"
+    return 0
+  fi
+  v2_reasoning_default="$v2_reasoning_preferred"
+  if [ -z "$v2_reasoning_default" ] ||
+    ! grep -F -x -- "$v2_reasoning_default" "$v2_reasoning_file" >/dev/null 2>&1
+  then
+    v2_reasoning_default="$CODEX_CONFIG_V2_DEFAULT_LEVEL"
+  fi
+  if [ -z "$v2_reasoning_default" ] ||
+    ! grep -F -x -- "$v2_reasoning_default" "$v2_reasoning_file" >/dev/null 2>&1
+  then
+    if grep -F -x -- medium "$v2_reasoning_file" >/dev/null 2>&1; then
+      v2_reasoning_default="medium"
+    else
+      v2_reasoning_default="$(sed -n '1p' "$v2_reasoning_file")"
+    fi
+  fi
+  v2_reasoning_default_number="$(awk -v effort="$v2_reasoning_default" '$0 == effort { print NR; exit }' "$v2_reasoning_file")"
+  while :; do
+    printf '%s\n' "推理等级：" >&2
+    awk '{ printf "%2d. %s\n", NR, $0 }' "$v2_reasoning_file" >&2
+    printf '%s\n' "b. 返回上一层" >&2
+    printf '%s\n' "0. 退出，不启动 Codex" >&2
+    v2_reasoning_count="$(wc -l < "$v2_reasoning_file" | tr -d ' ')"
+    v2_reasoning_choice="$(codex_config_tty_read "请选择推理等级编号" "$v2_reasoning_default_number")"
+    codex_config_is_back_choice "$v2_reasoning_choice" && return 1
+    codex_config_is_exit_choice "$v2_reasoning_choice" && codex_config_exit_config_mode
+    case "$v2_reasoning_choice" in
+      *[!0-9]*|"") codex_warn "请输入有效编号，或输入 b 返回。"; continue ;;
+    esac
+    if [ "$v2_reasoning_choice" -ge 1 ] 2>/dev/null &&
+      [ "$v2_reasoning_choice" -le "$v2_reasoning_count" ] 2>/dev/null
+    then
+      CODEX_CONFIG_V2_REASONING="$(sed -n "${v2_reasoning_choice}p" "$v2_reasoning_file")"
+      return 0
+    fi
+    codex_warn "推理等级编号超出范围。"
+  done
+}
+
+codex_config_v2_prepare() {
+  v2_prepare_work="$(codex_config_v2_work_root)"
+  v2_prepare_status="$v2_prepare_work/status.json"
+  mkdir -p "$v2_prepare_work"
+  codex_config_v2_run "$v2_prepare_status" status || return 1
+  v2_prepare_schema="$(codex_config_v2_json_value "$v2_prepare_status" schema_version 2>/dev/null || printf '1')"
+  v2_prepare_recovered="$(codex_config_v2_json_value "$v2_prepare_status" recovered_transaction 2>/dev/null || printf 'false')"
+  [ "$v2_prepare_recovered" != "true" ] ||
+    codex_warn "检测到上次未完成的配置事务，已自动恢复到操作前状态。"
+  [ "$v2_prepare_schema" = "1" ] || return 0
+
+  v2_prepare_policy="follow-model"
+  if ! codex_config_has_runtime_config && [ "$(codex_config_v2_json_value "$v2_prepare_status" profile_count 2>/dev/null || printf '0')" = "0" ]; then
+    codex_config_v2_run "$v2_prepare_work/migrate.json" migrate-v1 --compact-policy follow-model
+    return $?
+  fi
+
+  printf '%s\n' "检测到旧版配置档。迁移会先创建完整 V1 备份，失败可自动恢复。" >&2
+  if [ -s "$(codex_config_file)" ] &&
+    grep -Eq '^[[:space:]]*model_auto_compact_token_limit[[:space:]]*=[[:space:]]*220000([[:space:]]|$)' "$(codex_config_file)"
+  then
+    printf '%s\n' "1. 跟随模型真实上下文与自动压缩阈值（推荐）" >&2
+    printf '%s\n' "2. 保留固定 220000 压缩阈值" >&2
+    printf '%s\n' "b. 返回，不迁移" >&2
+    printf '%s\n' "0. 退出，不启动 Codex" >&2
+    while :; do
+      v2_prepare_choice="$(codex_config_tty_read "请选择迁移策略" "1")"
+      case "$v2_prepare_choice" in
+        1|"") v2_prepare_policy="follow-model"; break ;;
+        2) v2_prepare_policy="fixed"; break ;;
+        b|B|back|BACK|返回) return 1 ;;
+        0|q|Q|quit|QUIT|退出) codex_config_exit_config_mode ;;
+        *) codex_warn "请输入 1、2、b 或 0。" ;;
+      esac
+    done
+  else
+    codex_config_tty_confirm "迁移到事务型配置档结构？（可回滚）" "y" || return 1
+  fi
+  codex_config_v2_run "$v2_prepare_work/migrate.json" migrate-v1 --compact-policy "$v2_prepare_policy"
+}
+
+codex_config_v2_dirty_guard() {
+  v2_dirty_reason="${1:-继续操作}"
+  v2_dirty_work="$(codex_config_v2_work_root)"
+  v2_dirty_status="$v2_dirty_work/dirty-status.json"
+  codex_config_v2_run "$v2_dirty_status" status || return 1
+  v2_dirty_value="$(codex_config_v2_json_value "$v2_dirty_status" runtime_dirty 2>/dev/null || printf 'false')"
+  [ "$v2_dirty_value" = "true" ] || return 0
+  v2_dirty_active="$(codex_config_v2_json_value "$v2_dirty_status" active_profile_id 2>/dev/null || true)"
+  [ -n "$v2_dirty_active" ] || return 0
+  v2_dirty_reasons="$(python3 - "$v2_dirty_status" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    value = json.load(handle)
+print("、".join(value.get("runtime_dirty_reasons") or []))
+PY
+)"
+  while :; do
+    printf '%s\n' "检测到当前运行配置与配置档不同：$v2_dirty_reasons" >&2
+    printf '%s\n' "$v2_dirty_reason 前请选择：" >&2
+    printf '%s\n' "1. 同步到当前配置档（推荐）" >&2
+    printf '%s\n' "2. 另存为新配置档" >&2
+    printf '%s\n' "3. 暂不保存，继续" >&2
+    printf '%s\n' "b. 取消并返回" >&2
+    printf '%s\n' "0. 退出，不启动 Codex" >&2
+    v2_dirty_choice="$(codex_config_tty_read "请输入选项编号" "1")"
+    case "$v2_dirty_choice" in
+      1|"")
+        codex_config_v2_run "$v2_dirty_work/sync-current.json" profile sync-current "$v2_dirty_active"
+        return $?
+        ;;
+      2)
+        codex_config_v2_prompt_name "新配置名称" "profile-$(date '+%Y%m%d-%H%M%S' 2>/dev/null || printf '%s' "$$")" || return 1
+        codex_config_v2_run "$v2_dirty_work/import-current.json" \
+          profile import-current --name "$CODEX_CONFIG_V2_NAME" --activate
+        return $?
+        ;;
+      3) return 0 ;;
+      b|B|back|BACK|返回) return 1 ;;
+      0|q|Q|quit|QUIT|退出) codex_config_exit_config_mode ;;
+      *) codex_warn "请输入 1、2、3、b 或 0。" ;;
+    esac
+  done
+}
+
+codex_config_v2_post_materialize() {
+  codex_config_apply_full_permission "$(codex_config_file)"
+  codex_config_ensure_default_hooks
+}
+
+codex_config_v2_build_catalog() {
+  v2_build_base="$1"
+  v2_build_key="$2"
+  v2_build_work="$(codex_config_v2_work_root)/provider"
+  mkdir -p "$v2_build_work"
+  CODEX_CONFIG_V2_PROVIDER_JSON="$v2_build_work/models.json"
+  CODEX_CONFIG_V2_PROVIDER_ERROR="$v2_build_work/models.err"
+  CODEX_CONFIG_V2_CATALOG="$v2_build_work/model_catalog.json"
+  codex_info "请求模型列表：$v2_build_base/models"
+  if ! codex_config_fetch_models \
+    "$v2_build_base" \
+    "$v2_build_key" \
+    "$CODEX_CONFIG_V2_PROVIDER_JSON" \
+    "$CODEX_CONFIG_V2_PROVIDER_ERROR"
+  then
+    [ ! -s "$CODEX_CONFIG_V2_PROVIDER_ERROR" ] ||
+      sed -n '1,12p' "$CODEX_CONFIG_V2_PROVIDER_ERROR" >&2 || true
+    codex_warn "无法获取 Provider 模型列表；用户配置未修改。"
+    return 1
+  fi
+  codex_config_v2_run "$v2_build_work/catalog-build.json" \
+    catalog build \
+    --provider-json "$CODEX_CONFIG_V2_PROVIDER_JSON" \
+    --output "$CODEX_CONFIG_V2_CATALOG"
+}
+
+codex_config_v2_create_official() {
+  codex_config_v2_dirty_guard "新建并切换配置" || return 1
+  v2_official_default_name="${CODEX_CONFIG_REQUESTED_NAME:-default}"
+  codex_config_v2_prompt_name "配置名称" "$v2_official_default_name" || return 1
+  codex_config_engine_ensure
+  v2_official_catalog="$CODEX_CONFIG_ENGINE_RESOLVED_ROOT/data/openai-models.json"
+  codex_config_v2_choose_model "$v2_official_catalog" "${CODEX_ZH_DEFAULT_MODEL:-}" 0 || return 1
+  codex_config_v2_choose_reasoning "$CODEX_CONFIG_V2_LEVELS" "" || return 1
+  v2_official_summary="$CODEX_CONFIG_V2_NAME / $CODEX_CONFIG_V2_MODEL"
+  [ -z "$CODEX_CONFIG_V2_REASONING" ] ||
+    v2_official_summary="$v2_official_summary / $CODEX_CONFIG_V2_REASONING"
+  printf '%s\n' "将创建官方配置：$v2_official_summary" >&2
+  codex_config_tty_confirm "确认创建并切换？" "y" || return 1
+  v2_official_work="$(codex_config_v2_work_root)"
+  codex_config_v2_run "$v2_official_work/create-official.json" \
+    profile create \
+    --name "$CODEX_CONFIG_V2_NAME" \
+    --mode official \
+    --model "$CODEX_CONFIG_V2_MODEL" \
+    --reasoning-effort "$CODEX_CONFIG_V2_REASONING" \
+    --activate || return 1
+  codex_config_v2_post_materialize
+  codex_info "已创建并切换配置：$CODEX_CONFIG_V2_NAME"
+}
+
+codex_config_v2_create_third_party() {
+  codex_config_v2_dirty_guard "新建并切换配置" || return 1
+  v2_create_default_name="${CODEX_CONFIG_REQUESTED_NAME:-default}"
+  codex_config_v2_prompt_name "配置名称" "$v2_create_default_name" || return 1
+  v2_create_default_base="${CODEX_ZH_API_BASE:-}"
+  while :; do
+    v2_create_raw_base="$(codex_config_tty_read "API Base URL（b 返回，0 退出）" "$v2_create_default_base")"
+    codex_config_is_back_choice "$v2_create_raw_base" && return 1
+    codex_config_is_exit_choice "$v2_create_raw_base" && codex_config_exit_config_mode
+    codex_config_valid_api_base "$v2_create_raw_base" && break
+    codex_warn "API Base URL 无效，必须是不含账号、查询参数或片段的 http(s) URL。"
+  done
+  v2_create_base="$(codex_config_normalize_api_base "$v2_create_raw_base")"
+  v2_create_key="${CODEX_ZH_API_KEY:-}"
+  while [ -z "$v2_create_key" ]; do
+    v2_create_key="$(codex_config_v2_read_secret "API Key（输入 b 返回，0 退出）")"
+    codex_config_is_back_choice "$v2_create_key" && return 1
+    codex_config_is_exit_choice "$v2_create_key" && codex_config_exit_config_mode
+    [ -n "$v2_create_key" ] || codex_warn "API Key 不能为空。"
+  done
+  codex_config_v2_build_catalog "$v2_create_base" "$v2_create_key" || return 1
+  codex_config_v2_choose_model \
+    "$CODEX_CONFIG_V2_CATALOG" \
+    "${CODEX_ZH_DEFAULT_MODEL:-}" \
+    0 || return 1
+  codex_config_v2_choose_reasoning "$CODEX_CONFIG_V2_LEVELS" "" || return 1
+  printf '%s\n' "将创建第三方配置：$CODEX_CONFIG_V2_NAME" >&2
+  printf '%s\n' "  Base URL: $v2_create_base" >&2
+  v2_create_model_summary="$CODEX_CONFIG_V2_MODEL"
+  [ -z "$CODEX_CONFIG_V2_REASONING" ] ||
+    v2_create_model_summary="$v2_create_model_summary / $CODEX_CONFIG_V2_REASONING"
+  printf '%s\n' "  模型: $v2_create_model_summary" >&2
+  codex_config_tty_confirm "确认创建并切换？" "y" || return 1
+  v2_create_work="$(codex_config_v2_work_root)"
+  v2_create_auth="$v2_create_work/auth-input.json"
+  codex_config_v2_write_auth_input "$v2_create_auth" "$v2_create_key"
+  if codex_config_v2_run "$v2_create_work/create-third-party.json" \
+    profile create \
+    --name "$CODEX_CONFIG_V2_NAME" \
+    --mode third_party \
+    --provider-name "${CODEX_ZH_PROVIDER_NAME:-OpenAI}" \
+    --base-url "$v2_create_base" \
+    --model "$CODEX_CONFIG_V2_MODEL" \
+    --reasoning-effort "$CODEX_CONFIG_V2_REASONING" \
+    --auth-file "$v2_create_auth" \
+    --catalog-file "$CODEX_CONFIG_V2_CATALOG" \
+    --activate
+  then
+    rm -f "$v2_create_auth"
+  else
+    v2_create_rc=$?
+    rm -f "$v2_create_auth"
+    return "$v2_create_rc"
+  fi
+  codex_config_v2_post_materialize
+  codex_info "已创建并切换配置：$CODEX_CONFIG_V2_NAME"
+}
+
+codex_config_v2_create_menu() {
+  while :; do
+    printf '%s\n' "新建配置：" >&2
+    printf '%s\n' "1. 第三方 Responses API" >&2
+    printf '%s\n' "2. OpenAI 官方登录" >&2
+    printf '%s\n' "b. 返回上一层" >&2
+    printf '%s\n' "0. 退出，不启动 Codex" >&2
+    v2_create_type="$(codex_config_tty_read "请选择配置类型" "1")"
+    case "$v2_create_type" in
+      1|"") codex_config_v2_create_third_party; return $? ;;
+      2) codex_config_v2_create_official; return $? ;;
+      b|B|back|BACK|返回) return 1 ;;
+      0|q|Q|quit|QUIT|退出) codex_config_exit_config_mode ;;
+      *) codex_warn "请输入 1、2、b 或 0。" ;;
+    esac
+  done
+}
+
+codex_config_v2_show_profile() {
+  v2_show_ref="$1"
+  v2_show_work="$(codex_config_v2_work_root)"
+  v2_show_json="$v2_show_work/profile-show.json"
+  codex_config_v2_run "$v2_show_json" profile show "$v2_show_ref" || return 1
+  python3 - "$v2_show_json" <<'PY' >&2
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    value = json.load(handle)
+item = value["profile"]
+print(f"名称: {item.get('name', '')}")
+print(f"ID: {item.get('id', '')}")
+print(f"类型: {item.get('mode', '')}")
+print(f"模型: {item.get('model') or '默认'}")
+print(f"推理等级: {item.get('reasoning_effort') or '默认'}")
+if item.get("mode") == "third_party":
+    print(f"Provider: {item.get('provider_name', '')}")
+    print(f"Base URL: {item.get('base_url', '')}")
+print(f"认证: {'已保存' if item.get('has_auth') else '未保存'}（密钥不显示）")
+print(f"模型目录: {'已保存' if item.get('has_catalog') else '未保存'}")
+print(f"当前使用: {'是' if value.get('active') else '否'}")
+PY
+}
+
+codex_config_v2_edit_official() {
+  v2_edit_id="$1"
+  v2_edit_json="$2"
+  v2_edit_name="$(codex_config_v2_json_value "$v2_edit_json" profile.name)"
+  v2_edit_model="$(codex_config_v2_json_value "$v2_edit_json" profile.model 2>/dev/null || true)"
+  v2_edit_effort="$(codex_config_v2_json_value "$v2_edit_json" profile.reasoning_effort 2>/dev/null || true)"
+  codex_config_v2_prompt_name "配置名称" "$v2_edit_name" || return 1
+  codex_config_engine_ensure
+  v2_edit_catalog="$CODEX_CONFIG_ENGINE_RESOLVED_ROOT/data/openai-models.json"
+  codex_config_v2_choose_model "$v2_edit_catalog" "$v2_edit_model" 1 || return 1
+  codex_config_v2_choose_reasoning "$CODEX_CONFIG_V2_LEVELS" "$v2_edit_effort" || return 1
+  codex_config_tty_confirm "确认保存修改？" "y" || return 1
+  v2_edit_work="$(codex_config_v2_work_root)"
+  codex_config_v2_run "$v2_edit_work/edit-official.json" \
+    profile update "$v2_edit_id" \
+    --name "$CODEX_CONFIG_V2_NAME" \
+    --model "$CODEX_CONFIG_V2_MODEL" \
+    --reasoning-effort "$CODEX_CONFIG_V2_REASONING" || return 1
+  codex_config_v2_post_materialize
+  codex_info "已保存配置：$CODEX_CONFIG_V2_NAME"
+}
+
+codex_config_v2_edit_third_party() {
+  v2_edit_id="$1"
+  v2_edit_json="$2"
+  v2_edit_name="$(codex_config_v2_json_value "$v2_edit_json" profile.name)"
+  v2_edit_base="$(codex_config_v2_json_value "$v2_edit_json" profile.base_url)"
+  v2_edit_model="$(codex_config_v2_json_value "$v2_edit_json" profile.model)"
+  v2_edit_effort="$(codex_config_v2_json_value "$v2_edit_json" profile.reasoning_effort 2>/dev/null || true)"
+  codex_config_v2_prompt_name "配置名称" "$v2_edit_name" || return 1
+  while :; do
+    v2_edit_raw_base="$(codex_config_tty_read "API Base URL（b 返回，0 退出）" "$v2_edit_base")"
+    codex_config_is_back_choice "$v2_edit_raw_base" && return 1
+    codex_config_is_exit_choice "$v2_edit_raw_base" && codex_config_exit_config_mode
+    codex_config_valid_api_base "$v2_edit_raw_base" && break
+    codex_warn "API Base URL 无效，必须是不含账号、查询参数或片段的 http(s) URL。"
+  done
+  v2_edit_new_base="$(codex_config_normalize_api_base "$v2_edit_raw_base")"
+  v2_edit_existing_auth="$(codex_home)/config-profiles/profiles/$v2_edit_id/auth.json"
+  v2_edit_existing_key="$(codex_config_read_auth_key "$v2_edit_existing_auth" || true)"
+  v2_edit_key="$(codex_config_v2_read_secret "API Key（留空保留当前，输入 b 返回，0 退出）")"
+  codex_config_is_back_choice "$v2_edit_key" && return 1
+  codex_config_is_exit_choice "$v2_edit_key" && codex_config_exit_config_mode
+  [ -n "$v2_edit_key" ] || v2_edit_key="$v2_edit_existing_key"
+  [ -n "$v2_edit_key" ] || {
+    codex_warn "该配置没有可保留的 API Key。"
+    return 1
+  }
+  codex_config_v2_build_catalog "$v2_edit_new_base" "$v2_edit_key" || return 1
+  codex_config_v2_choose_model "$CODEX_CONFIG_V2_CATALOG" "$v2_edit_model" 0 || return 1
+  codex_config_v2_choose_reasoning "$CODEX_CONFIG_V2_LEVELS" "$v2_edit_effort" || return 1
+  codex_config_tty_confirm "确认保存修改？" "y" || return 1
+  v2_edit_work="$(codex_config_v2_work_root)"
+  v2_edit_auth="$v2_edit_work/auth-input.json"
+  codex_config_v2_write_auth_input "$v2_edit_auth" "$v2_edit_key"
+  if codex_config_v2_run "$v2_edit_work/edit-third-party.json" \
+    profile update "$v2_edit_id" \
+    --name "$CODEX_CONFIG_V2_NAME" \
+    --provider-name "${CODEX_ZH_PROVIDER_NAME:-OpenAI}" \
+    --base-url "$v2_edit_new_base" \
+    --model "$CODEX_CONFIG_V2_MODEL" \
+    --reasoning-effort "$CODEX_CONFIG_V2_REASONING" \
+    --auth-file "$v2_edit_auth" \
+    --catalog-file "$CODEX_CONFIG_V2_CATALOG"
+  then
+    rm -f "$v2_edit_auth"
+  else
+    v2_edit_rc=$?
+    rm -f "$v2_edit_auth"
+    return "$v2_edit_rc"
+  fi
+  codex_config_v2_post_materialize
+  codex_info "已保存配置：$CODEX_CONFIG_V2_NAME"
+}
+
+codex_config_v2_edit_menu() {
+  codex_config_v2_dirty_guard "编辑配置" || return 1
+  codex_config_v2_choose_profile "请选择要编辑的配置编号" || return 1
+  v2_edit_work="$(codex_config_v2_work_root)"
+  v2_edit_json="$v2_edit_work/edit-profile.json"
+  codex_config_v2_run "$v2_edit_json" profile show "$CODEX_CONFIG_V2_PROFILE_ID" || return 1
+  v2_edit_mode="$(codex_config_v2_json_value "$v2_edit_json" profile.mode)"
+  case "$v2_edit_mode" in
+    official) codex_config_v2_edit_official "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" ;;
+    third_party) codex_config_v2_edit_third_party "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" ;;
+    *) codex_warn "未知配置类型：$v2_edit_mode"; return 1 ;;
+  esac
+}
+
+codex_config_v2_use_menu() {
+  codex_config_v2_choose_profile "请选择要切换的配置编号" || return 1
+  v2_use_id="$CODEX_CONFIG_V2_PROFILE_ID"
+  v2_use_name="$CODEX_CONFIG_V2_PROFILE_NAME"
+  codex_config_v2_dirty_guard "切换配置" || return 1
+  v2_use_work="$(codex_config_v2_work_root)"
+  codex_config_v2_run "$v2_use_work/activate.json" profile activate "$v2_use_id" || return 1
+  codex_config_v2_post_materialize
+  codex_info "已切换配置：$v2_use_name"
+}
+
+codex_config_v2_delete_menu() {
+  codex_config_v2_choose_profile "请选择要删除的配置编号" || return 1
+  v2_delete_id="$CODEX_CONFIG_V2_PROFILE_ID"
+  v2_delete_name="$CODEX_CONFIG_V2_PROFILE_NAME"
+  codex_config_tty_confirm "确认删除配置 $v2_delete_name？当前配置不能直接删除" "n" || return 1
+  v2_delete_work="$(codex_config_v2_work_root)"
+  codex_config_v2_run "$v2_delete_work/delete.json" profile delete "$v2_delete_id" || return 1
+  codex_info "已删除配置：$v2_delete_name"
+}
+
+codex_config_v2_view_menu() {
+  codex_config_v2_choose_profile "请选择要查看的配置编号" || return 1
+  codex_config_v2_show_profile "$CODEX_CONFIG_V2_PROFILE_ID"
+}
+
+codex_config_v2_compact_menu() {
+  v2_compact_work="$(codex_config_v2_work_root)"
+  v2_compact_show="$v2_compact_work/compact-show.json"
+  codex_config_v2_run "$v2_compact_show" compact-policy show || return 1
+  v2_compact_mode="$(codex_config_v2_json_value "$v2_compact_show" compact_policy.mode)"
+  v2_compact_value="$(codex_config_v2_json_value "$v2_compact_show" compact_policy.value 2>/dev/null || true)"
+  printf '%s\n' "当前压缩策略：$v2_compact_mode${v2_compact_value:+ / $v2_compact_value}" >&2
+  while :; do
+    printf '%s\n' "1. 跟随模型目录，由 Codex 按真实窗口计算（推荐）" >&2
+    printf '%s\n' "2. 使用固定 token 阈值" >&2
+    printf '%s\n' "b. 返回上一层" >&2
+    printf '%s\n' "0. 退出，不启动 Codex" >&2
+    v2_compact_choice="$(codex_config_tty_read "请选择压缩策略" "1")"
+    case "$v2_compact_choice" in
+      1|"")
+        codex_config_v2_run "$v2_compact_work/compact-follow.json" compact-policy follow-model
+        return $?
+        ;;
+      2)
+        while :; do
+          v2_compact_fixed="$(codex_config_tty_read "固定 token 阈值（b 返回，0 退出）" "${v2_compact_value:-220000}")"
+          codex_config_is_back_choice "$v2_compact_fixed" && return 1
+          codex_config_is_exit_choice "$v2_compact_fixed" && codex_config_exit_config_mode
+          case "$v2_compact_fixed" in
+            *[!0-9]*|"") codex_warn "请输入正整数。"; continue ;;
+          esac
+          [ "$v2_compact_fixed" -gt 0 ] 2>/dev/null || { codex_warn "请输入正整数。"; continue; }
+          codex_config_v2_run "$v2_compact_work/compact-fixed.json" compact-policy fixed "$v2_compact_fixed"
+          return $?
+        done
+        ;;
+      b|B|back|BACK|返回) return 1 ;;
+      0|q|Q|quit|QUIT|退出) codex_config_exit_config_mode ;;
+      *) codex_warn "请输入 1、2、b 或 0。" ;;
+    esac
+  done
+}
+
+codex_config_refresh_models() {
+  codex_config_v2_prepare || return 1
+  v2_refresh_work="$(codex_config_v2_work_root)"
+  v2_refresh_status="$v2_refresh_work/refresh-status.json"
+  codex_config_v2_run "$v2_refresh_status" status || return 1
+  v2_refresh_active="$(codex_config_v2_json_value "$v2_refresh_status" active_profile_id 2>/dev/null || true)"
+  [ -n "$v2_refresh_active" ] || {
+    codex_warn "当前没有已激活配置。"
+    return 1
+  }
+  v2_refresh_profile="$v2_refresh_work/refresh-profile.json"
+  codex_config_v2_run "$v2_refresh_profile" profile show "$v2_refresh_active" || return 1
+  v2_refresh_mode="$(codex_config_v2_json_value "$v2_refresh_profile" profile.mode)"
+  [ "$v2_refresh_mode" = "third_party" ] || {
+    codex_warn "官方配置使用 Codex 官方模型目录，不需要请求第三方 /models。"
+    return 1
+  }
+  v2_refresh_base="$(codex_config_v2_json_value "$v2_refresh_profile" profile.base_url)"
+  v2_refresh_model="$(codex_config_v2_json_value "$v2_refresh_profile" profile.model)"
+  v2_refresh_effort="$(codex_config_v2_json_value "$v2_refresh_profile" profile.reasoning_effort 2>/dev/null || true)"
+  v2_refresh_auth="$(codex_home)/config-profiles/profiles/$v2_refresh_active/auth.json"
+  v2_refresh_key="$(codex_config_read_auth_key "$v2_refresh_auth" || true)"
+  [ -n "$v2_refresh_key" ] || {
+    codex_warn "当前配置没有 API Key。"
+    return 1
+  }
+  codex_config_v2_build_catalog "$v2_refresh_base" "$v2_refresh_key" || return 1
+  v2_refresh_model_json="$v2_refresh_work/refresh-model-check.json"
+  if ! codex_config_v2_run "$v2_refresh_model_json" \
+    catalog inspect \
+    --catalog-file "$CODEX_CONFIG_V2_CATALOG" \
+    --model "$v2_refresh_model"
+  then
+    codex_warn "当前模型已不在 Provider 模型列表中。请使用“编辑配置”选择新模型。"
+    return 1
+  fi
+  v2_refresh_levels="$(codex_config_v2_json_value "$v2_refresh_model_json" model.reasoning_levels)"
+  if [ -n "$v2_refresh_effort" ] &&
+    ! python3 - "$v2_refresh_model_json" "$v2_refresh_effort" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    value = json.load(handle)
+raise SystemExit(0 if sys.argv[2] in value["model"]["reasoning_levels"] else 1)
+PY
+  then
+    codex_warn "当前推理等级已不受该模型支持。请使用“编辑配置”重新选择。"
+    return 1
+  fi
+  codex_config_v2_run "$v2_refresh_work/refresh-update.json" \
+    profile update "$v2_refresh_active" \
+    --catalog-file "$CODEX_CONFIG_V2_CATALOG" || return 1
+  codex_config_v2_post_materialize
+  codex_info "模型目录已刷新；当前模型和推理等级保持不变。"
+}
+
+codex_config_v2_initialize_official() {
+  codex_config_v2_prepare || return 1
+  v2_init_name="${CODEX_CONFIG_REQUESTED_NAME:-default}"
+  v2_init_work="$(codex_config_v2_work_root)"
+  if codex_config_v2_run "$v2_init_work/init-show.json" profile show "$v2_init_name" 2>/dev/null; then
+    codex_config_v2_run "$v2_init_work/init-activate.json" profile activate "$v2_init_name" || return 1
+  else
+    codex_config_v2_run "$v2_init_work/init-create.json" \
+      profile create \
+      --name "$v2_init_name" \
+      --mode official \
+      --activate || return 1
+  fi
+  codex_config_v2_post_materialize
+  codex_info "已启用官方登录配置：$v2_init_name"
+}
+
+codex_config_prompt_official() {
+  codex_config_v2_prepare || return 1
+  codex_config_v2_create_official
+}
+
+codex_config_prompt_third_party() {
+  v2_prompt_mode="${1:-new}"
+  codex_config_v2_prepare || return 1
+  if [ "$v2_prompt_mode" = "edit" ]; then
+    codex_config_v2_edit_menu
+  else
+    codex_config_v2_create_third_party
+  fi
+}
+
+codex_config_profile_list() {
+  codex_config_engine_ensure
+  v2_list_work="$(codex_config_v2_work_root)"
+  v2_list_status="$v2_list_work/list-status.json"
+  codex_config_v2_run "$v2_list_status" status || return 1
+  if [ "$(codex_config_v2_json_value "$v2_list_status" schema_version)" = "1" ]; then
+    v2_list_root="$(codex_config_profiles_root)"
+    [ -d "$v2_list_root" ] || return 0
+    find "$v2_list_root" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | sort
+    return 0
+  fi
+  v2_list_json="$v2_list_work/list.json"
+  codex_config_v2_run "$v2_list_json" profile list || return 1
+  python3 - "$v2_list_json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    value = json.load(handle)
+for item in value.get("profiles", []):
+    print(item.get("name", ""))
+PY
+}
+
+codex_config_profile_use() {
+  v2_profile_ref="$1"
+  codex_config_v2_prepare || return 1
+  codex_config_v2_dirty_guard "切换配置" || return 1
+  v2_profile_work="$(codex_config_v2_work_root)"
+  codex_config_v2_run "$v2_profile_work/profile-use.json" profile activate "$v2_profile_ref" || return 1
+  codex_config_v2_post_materialize
+}
+
+codex_config_profile_save() {
+  v2_profile_name="$1"
+  codex_config_v2_prepare || return 1
+  v2_profile_work="$(codex_config_v2_work_root)"
+  if codex_config_v2_run "$v2_profile_work/profile-save-show.json" profile show "$v2_profile_name" 2>/dev/null; then
+    v2_profile_id="$(codex_config_v2_json_value "$v2_profile_work/profile-save-show.json" profile.id)"
+    v2_profile_active="$(codex_config_v2_json_value "$v2_profile_work/profile-save-show.json" active)"
+    [ "$v2_profile_active" = "true" ] || {
+      codex_warn "同名配置已存在且不是当前配置；未覆盖。"
+      return 3
+    }
+    codex_config_v2_run "$v2_profile_work/profile-save-sync.json" profile sync-current "$v2_profile_id"
+  else
+    codex_config_v2_run "$v2_profile_work/profile-save-import.json" \
+      profile import-current \
+      --name "$v2_profile_name" \
+      --activate
+  fi
+}
+
+codex_config_profile_new() {
+  CODEX_CONFIG_REQUESTED_NAME="$1"
+  codex_config_prompt_third_party new
+  unset CODEX_CONFIG_REQUESTED_NAME
+}
+
+codex_config_menu() {
+  codex_config_v2_prepare || return 0
+  while :; do
+    v2_menu_work="$(codex_config_v2_work_root)"
+    v2_menu_status="$v2_menu_work/menu-status.json"
+    codex_config_v2_run "$v2_menu_status" status || return 1
+    v2_menu_active="$(codex_config_v2_json_value "$v2_menu_status" active_profile_id 2>/dev/null || true)"
+    v2_menu_label="无"
+    if [ -n "$v2_menu_active" ]; then
+      if codex_config_v2_run "$v2_menu_work/menu-active.json" profile show "$v2_menu_active"; then
+        v2_menu_label="$(codex_config_v2_json_value "$v2_menu_work/menu-active.json" profile.name)"
+        [ "$(codex_config_v2_json_value "$v2_menu_status" runtime_dirty)" != "true" ] ||
+          v2_menu_label="$v2_menu_label（运行配置有未保存变化）"
+      fi
+    fi
     printf '%s\n' "" >&2
     printf '%s\n' "Codex 配置模式" >&2
-    printf '%s\n' "当前配置：$(codex_config_profile_status_label)" >&2
+    printf '%s\n' "当前配置：$v2_menu_label" >&2
     printf '%s\n' "1. 新建配置" >&2
     printf '%s\n' "2. 选择配置" >&2
-    printf '%s\n' "3. 编辑当前配置" >&2
+    printf '%s\n' "3. 编辑配置" >&2
     printf '%s\n' "4. 查看配置" >&2
     printf '%s\n' "5. 删除配置" >&2
-    printf '%s\n' "6. 保存当前配置" >&2
-    printf '%s\n' "7. 刷新当前模型目录" >&2
+    printf '%s\n' "6. 刷新当前模型目录" >&2
+    printf '%s\n' "7. 上下文与压缩策略" >&2
     printf '%s\n' "8. 修复全权限授权" >&2
     printf '%s\n' "9. 返回并启动 Codex" >&2
     printf '%s\n' "0. 退出，不启动 Codex" >&2
-    choice="$(codex_config_tty_read "请输入选项编号" "9")"
-    case "$choice" in
-      1)
-        codex_config_menu_new
-        ;;
-      2)
-        codex_config_profile_choose_use || true
-        ;;
-      3)
-        codex_config_menu_edit || true
-        ;;
-      4)
-        codex_config_profile_view_interactive || true
-        ;;
-      5)
-        codex_config_profile_delete_interactive || true
-        ;;
-      6)
-        if codex_config_has_runtime_config; then
-          codex_config_profile_save_interactive || true
-        else
-          codex_warn "当前没有可保存的配置；请先新建配置。"
-        fi
-        ;;
-      7)
-        codex_config_menu_refresh_models
-        ;;
-      8)
-        codex_config_menu_repair_full_permission
-        ;;
-      9)
-        codex_config_confirm_save_dirty_before "返回启动 Codex" || continue
+    v2_menu_choice="$(codex_config_tty_read "请输入选项编号" "9")"
+    case "$v2_menu_choice" in
+      1) codex_config_v2_create_menu || true ;;
+      2) codex_config_v2_use_menu || true ;;
+      3) codex_config_v2_edit_menu || true ;;
+      4) codex_config_v2_view_menu || true ;;
+      5) codex_config_v2_delete_menu || true ;;
+      6) codex_config_refresh_models || true ;;
+      7) codex_config_v2_compact_menu || true ;;
+      8) codex_config_menu_repair_full_permission || true ;;
+      9|"")
+        codex_config_v2_dirty_guard "返回启动 Codex" || continue
         return 0
         ;;
       0|q|Q|quit|QUIT|退出)
-        codex_config_confirm_save_dirty_before "退出配置模式" || continue
+        codex_config_v2_dirty_guard "退出配置模式" || continue
         codex_config_exit_config_mode
         ;;
       b|B|back|BACK|返回)
-        codex_config_confirm_save_dirty_before "返回启动 Codex" || continue
+        codex_config_v2_dirty_guard "返回启动 Codex" || continue
         return 0
         ;;
-      *)
-        codex_warn "请输入 0 到 9，或输入 b 返回。"
-        ;;
+      *) codex_warn "请输入 0 到 9，或输入 b 返回。" ;;
     esac
   done
 }

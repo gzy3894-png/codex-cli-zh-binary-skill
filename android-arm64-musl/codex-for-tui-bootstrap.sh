@@ -111,6 +111,36 @@ script_urls() {
   [ -n "$SCRIPT_RELEASE_BASE_URL" ] && printf '%s\n' "$SCRIPT_RELEASE_BASE_URL/$name"
 }
 
+config_engine_assets() {
+  cat <<'EOF'
+libexec/codex-config-engine.py
+data/openai-models.json
+data/openai-models-source.json
+vendor/python/tomlkit/__init__.py
+vendor/python/tomlkit/_compat.py
+vendor/python/tomlkit/_types.py
+vendor/python/tomlkit/_utils.py
+vendor/python/tomlkit/api.py
+vendor/python/tomlkit/container.py
+vendor/python/tomlkit/exceptions.py
+vendor/python/tomlkit/items.py
+vendor/python/tomlkit/parser.py
+vendor/python/tomlkit/source.py
+vendor/python/tomlkit/toml_char.py
+vendor/python/tomlkit/toml_document.py
+vendor/python/tomlkit/toml_file.py
+vendor/python/tomlkit-0.13.2.dist-info/LICENSE
+vendor/python/tomlkit-0.13.2.dist-info/METADATA
+EOF
+}
+
+support_file_mode() {
+  case "$1" in
+    *.sh|libexec/*.py) printf '%s\n' 755 ;;
+    *) printf '%s\n' 644 ;;
+  esac
+}
+
 refresh_one() {
   ro_label="$1"
   ro_name="$2"
@@ -129,7 +159,7 @@ refresh_one() {
         rm -f "$ro_tmp"
       else
         mv "$ro_tmp" "$ro_dest"
-        chmod 755 "$ro_dest" 2>/dev/null || true
+        chmod "$(support_file_mode "$ro_name")" "$ro_dest" 2>/dev/null || true
         info "已更新：$ro_name"
       fi
       IFS="$ro_old_ifs"
@@ -151,6 +181,12 @@ refresh_remote_scripts() {
   for lib in codex-zh-common.sh codex-zh-download.sh codex-zh-config.sh codex-zh-local.sh codex-zh-update.sh; do
     refresh_one "模块" "lib/$lib" "" || true
   done
+  while IFS= read -r asset; do
+    [ -n "$asset" ] || continue
+    refresh_one "配置引擎资源" "$asset" "" || true
+  done <<EOF
+$(config_engine_assets)
+EOF
   [ -s "$REMOTE_DIR/codex-local-resume.sh" ] && cp "$REMOTE_DIR/codex-local-resume.sh" "$HOME/.local/bin/codex-local-resume" 2>/dev/null && chmod 755 "$HOME/.local/bin/codex-local-resume" 2>/dev/null || true
   [ -s "$REMOTE_DIR/codex-local-resume.sh" ] && cp "$REMOTE_DIR/codex-local-resume.sh" "$HOME/.local/bin/codex-local" 2>/dev/null && chmod 755 "$HOME/.local/bin/codex-local" 2>/dev/null || true
   [ -s "$REMOTE_DIR/codex-update.sh" ] && cp "$REMOTE_DIR/codex-update.sh" "$HOME/.local/bin/codex-update" 2>/dev/null && chmod 755 "$HOME/.local/bin/codex-update" 2>/dev/null || true

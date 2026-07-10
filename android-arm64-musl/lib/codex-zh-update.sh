@@ -3,20 +3,7 @@
 CODEX_ZH_UPDATE_LOADED=1
 
 codex_update_file_list() {
-  cat <<'EOF'
-codex-for-tui-bootstrap.sh
-codex-for-tui-self-test.sh
-codex-local-resume.sh
-codex-update.sh
-install-reterminal-alpine.sh
-install-alpine-proot.sh
-install.sh
-lib/codex-zh-common.sh
-lib/codex-zh-download.sh
-lib/codex-zh-config.sh
-lib/codex-zh-local.sh
-lib/codex-zh-update.sh
-EOF
+  codex_support_file_list
 }
 
 codex_update_one_file() {
@@ -50,10 +37,7 @@ codex_update_one_file() {
     codex_warn "无法写入：$update_one_dest"
     return 3
   fi
-  case "$rel" in
-    *.sh) chmod 755 "$update_one_dest" 2>/dev/null || true ;;
-    *) chmod 644 "$update_one_dest" 2>/dev/null || true ;;
-  esac
+  chmod "$(codex_support_file_mode "$rel")" "$update_one_dest" 2>/dev/null || true
   codex_info "已更新：$rel"
   rm -f "$update_one_tmp"
   return 1
@@ -209,10 +193,7 @@ EOF
       update_dest_tmp="$update_dest.tmp.$$"
       mkdir -p "$(dirname "$update_dest")"
       if cp "$update_file_tmp" "$update_dest_tmp"; then
-        case "$rel" in
-          *.sh) chmod 755 "$update_dest_tmp" 2>/dev/null || true ;;
-          *) chmod 644 "$update_dest_tmp" 2>/dev/null || true ;;
-        esac
+        chmod "$(codex_support_file_mode "$rel")" "$update_dest_tmp" 2>/dev/null || true
         if mv "$update_dest_tmp" "$update_dest"; then
           codex_info "已更新：$rel"
           printf '%s\n' "$rel" >> "$update_applied_list"

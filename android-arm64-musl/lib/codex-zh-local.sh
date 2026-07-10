@@ -8,7 +8,7 @@ codex_local_install_alpine_deps() {
   profile="${CODEX_ZH_DEPS_PROFILE:-full}"
   codex_info "安装 Alpine 依赖：$profile"
   if [ "$profile" = "minimal" ]; then
-    apk add --no-cache ca-certificates curl wget tar gzip git openssh-client ripgrep fd jq
+    apk add --no-cache ca-certificates curl wget tar gzip git openssh-client ripgrep fd jq python3
   else
     apk add --no-cache \
       ca-certificates curl wget tar gzip unzip xz \
@@ -39,7 +39,7 @@ codex_local_install_termux_deps() {
   if [ "$profile" = "minimal" ]; then
     DEBIAN_FRONTEND=noninteractive apt-get \
       -o Dpkg::Options::=--force-confdef \
-      -o Dpkg::Options::=--force-confold install -y ca-certificates curl wget tar gzip git openssh ripgrep jq
+      -o Dpkg::Options::=--force-confold install -y ca-certificates curl wget tar gzip git openssh ripgrep jq python
   else
     DEBIAN_FRONTEND=noninteractive apt-get \
       -o Dpkg::Options::=--force-confdef \
@@ -433,22 +433,36 @@ codex_local_install_support_scripts() {
   dest_root="$(codex_script_install_root)"
   src_root="${CODEX_ZH_ACTIVE_SCRIPT_DIR:-}"
   cache_root="$(codex_script_cache_root)"
-  mkdir -p "$dest_root/lib" "$install_dir"
+  mkdir -p "$dest_root" "$install_dir"
 
-  for root in "$src_root" "$cache_root"; do
-    [ -n "$root" ] || continue
-    [ -d "$root/lib" ] || continue
-    for file in "$root"/lib/*.sh; do
-      [ -f "$file" ] || continue
-      cp "$file" "$dest_root/lib/$(basename "$file")"
-      chmod 644 "$dest_root/lib/$(basename "$file")" 2>/dev/null || true
+  while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    source_file=""
+    for root in "$src_root" "$cache_root"; do
+      [ -n "$root" ] || continue
+      if [ -r "$root/$rel" ]; then
+        source_file="$root/$rel"
+        break
+      fi
     done
-    for name in codex-local-resume.sh codex-update.sh codex-for-tui-bootstrap.sh codex-for-tui-self-test.sh install-reterminal-alpine.sh install-alpine-proot.sh install.sh; do
-      [ -f "$root/$name" ] || continue
-      cp "$root/$name" "$dest_root/$name"
-      chmod 755 "$dest_root/$name" 2>/dev/null || true
-    done
-    break
+    [ -n "$source_file" ] || continue
+    mkdir -p "$(dirname "$dest_root/$rel")"
+    cp "$source_file" "$dest_root/$rel"
+    chmod "$(codex_support_file_mode "$rel")" "$dest_root/$rel" 2>/dev/null || true
+  done <<EOF
+$(codex_support_file_list)
+EOF
+
+  for required in \
+    lib/codex-zh-common.sh \
+    lib/codex-zh-download.sh \
+    lib/codex-zh-config.sh \
+    lib/codex-zh-local.sh \
+    lib/codex-zh-update.sh \
+    codex-local-resume.sh \
+    codex-update.sh
+  do
+    [ -s "$dest_root/$required" ] || codex_die "安装后缺少支持文件：$required"
   done
 
   [ -s "$dest_root/codex-local-resume.sh" ] && cp "$dest_root/codex-local-resume.sh" "$install_dir/codex-local-resume" && chmod 755 "$install_dir/codex-local-resume"
@@ -473,7 +487,7 @@ codex_local_configure_if_requested() {
   fi
   if [ "${CODEX_ZH_SETUP_MODE:-}" = "official" ]; then
     codex_info "使用官方 Codex 登录入口；不写第三方 provider 配置。"
-    codex_config_mark_official_mode
+    codex_config_v2_initialize_official
     return 0
   fi
   if [ "${CODEX_ZH_SETUP_MODE:-}" = "third_party" ] || [ -n "${CODEX_ZH_API_BASE:-}" ] || [ -n "${CODEX_ZH_API_KEY:-}" ]; then
@@ -488,7 +502,7 @@ codex_local_configure_if_requested() {
     2) codex_config_prompt_third_party ;;
     *)
       codex_info "使用官方 Codex 登录入口；不写第三方 provider 配置。"
-      codex_config_mark_official_mode
+      codex_config_v2_initialize_official
       ;;
   esac
 }
@@ -533,59 +547,35 @@ codex_local_proot_exec() {
 codex_local_materialize_script_tree() {
   out_root="$1"
   src_root="${CODEX_ZH_ACTIVE_SCRIPT_DIR:-}"
-  mkdir -p "$out_root/lib"
-  for rel in \
-    lib/codex-zh-common.sh \
-    lib/codex-zh-download.sh \
-    lib/codex-zh-config.sh \
-    lib/codex-zh-local.sh \
-    lib/codex-zh-update.sh \
-    codex-local-resume.sh \
-    codex-update.sh \
-    codex-for-tui-bootstrap.sh \
-    codex-for-tui-self-test.sh \
-    install-reterminal-alpine.sh \
-    install-alpine-proot.sh \
-    install.sh
-  do
+  mkdir -p "$out_root"
+  while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
     if [ -n "$src_root" ] && [ -r "$src_root/$rel" ]; then
       mkdir -p "$(dirname "$out_root/$rel")"
       cp "$src_root/$rel" "$out_root/$rel"
     else
       codex_download_first_script "$rel" "$out_root/$rel" ""
     fi
-    case "$rel" in
-      *.sh) chmod 755 "$out_root/$rel" 2>/dev/null || true ;;
-    esac
-  done
+    chmod "$(codex_support_file_mode "$rel")" "$out_root/$rel" 2>/dev/null || true
+  done <<EOF
+$(codex_support_file_list)
+EOF
 }
 
 codex_local_copy_tree() {
   src_root="$1"
   dest_root="$2"
   rm -rf "$dest_root"
-  mkdir -p "$dest_root/lib"
-  for rel in \
-    lib/codex-zh-common.sh \
-    lib/codex-zh-download.sh \
-    lib/codex-zh-config.sh \
-    lib/codex-zh-local.sh \
-    lib/codex-zh-update.sh \
-    codex-local-resume.sh \
-    codex-update.sh \
-    codex-for-tui-bootstrap.sh \
-    codex-for-tui-self-test.sh \
-    install-reterminal-alpine.sh \
-    install-alpine-proot.sh \
-    install.sh
-  do
+  mkdir -p "$dest_root"
+  while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
     [ -r "$src_root/$rel" ] || codex_die "缺少脚本文件：$src_root/$rel"
     mkdir -p "$(dirname "$dest_root/$rel")"
     cp "$src_root/$rel" "$dest_root/$rel"
-    case "$rel" in
-      *.sh) chmod 755 "$dest_root/$rel" 2>/dev/null || true ;;
-    esac
-  done
+    chmod "$(codex_support_file_mode "$rel")" "$dest_root/$rel" 2>/dev/null || true
+  done <<EOF
+$(codex_support_file_list)
+EOF
 }
 
 codex_local_run_rootfs_installer() {

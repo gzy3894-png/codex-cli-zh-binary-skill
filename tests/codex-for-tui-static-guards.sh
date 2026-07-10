@@ -140,15 +140,16 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 54'
-assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.3.11"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 55'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.4.0"'
 }
 
 test_release_workflow_signature_gate() {
+  assert_file_contains "$BUILD_WORKFLOW" '- "release/codex-for-tui-*"'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui'
-assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "54"'
-assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.11'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "55"'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.4.0'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -157,6 +158,8 @@ assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.11'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Prepare release signing key'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Config manager smoke tests'
   assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-config-smoke.sh'
+  assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-config-v2-smoke.sh'
+  assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-config-v2-ui-smoke.sh'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Dev transfer smoke tests'
   assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-dev-transfer-smoke.sh'
   assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-dev-transfer-security-smoke.sh'
@@ -191,7 +194,26 @@ assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.3.11'
   assert_file_contains "$BUILD_WORKFLOW" 'ref: v0.43.0'
   assert_file_contains "$BUILD_WORKFLOW" 'cross build --release --target aarch64-unknown-linux-musl'
   assert_file_contains "$BUILD_WORKFLOW" 'qemu-aarch64 /tmp/rtk --version'
+  assert_file_contains "$BUILD_WORKFLOW" 'name: Verify Codex config parser under qemu'
+  assert_file_contains "$BUILD_WORKFLOW" '. android-arm64-musl/lib/codex-zh-common.sh'
+  assert_file_contains "$BUILD_WORKFLOW" 'archive_url="${CODEX_ZH_ARCHIVE_URL:-$CODEX_ZH_BINARY_BASE_URL/$CODEX_ZH_ARCHIVE}"'
+  assert_file_contains "$BUILD_WORKFLOW" 'codex_verify_sha256 "$archive" "$CODEX_ZH_ARCHIVE_SHA256"'
+  assert_file_contains "$BUILD_WORKFLOW" 'codex_verify_sha256 "$codex_bin" "$CODEX_ZH_BIN_SHA256"'
+  assert_file_contains "$BUILD_WORKFLOW" 'exec qemu-aarch64 "$CODEX_QEMU_BINARY" "$@"'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_BIN="$wrapper"'
+  assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-config-v2-codex-parser-smoke.sh'
+  assert_file_not_contains "$BUILD_WORKFLOW" '0.142.4'
   assert_file_contains "$BUILD_WORKFLOW" 'cp /tmp/codex-for-tui-rtk/rtk core/main/src/main/assets/rtk'
+  assert_file_contains "$BUILD_WORKFLOW" 'promote-installer-channel:'
+  assert_file_contains "$BUILD_WORKFLOW" 'name: Promote verified tag to installer channel'
+  assert_file_contains "$BUILD_WORKFLOW" '- android-release-build'
+  assert_file_contains "$BUILD_WORKFLOW" 'name: Fast-forward installer channel'
+  assert_file_contains "$BUILD_WORKFLOW" 'tag_commit="$(git rev-list -n 1 "$GITHUB_REF")"'
+  assert_file_contains "$BUILD_WORKFLOW" 'git merge-base --is-ancestor "$channel_commit" "$tag_commit"'
+  assert_file_contains "$BUILD_WORKFLOW" 'git push origin "$tag_commit:$channel_ref"'
+  assert_file_not_contains "$BUILD_WORKFLOW" 'git push --force'
+  assert_file_not_contains "$BUILD_WORKFLOW" 'git push -f'
+  assert_file_not_contains "$BUILD_WORKFLOW" 'git push origin "+'
   assert_file_not_contains "$BUILD_WORKFLOW" 'codex-for-tui-unsigned-or-test-signed-release-apk'
   [ ! -e "$RELEASE_KEYSTORE" ] || fail "repository release keystore must not be committed: $RELEASE_KEYSTORE"
   [ ! -e "$LEGACY_DEBUG_KEYSTORE" ] || fail "legacy debug-named release key should be moved: $LEGACY_DEBUG_KEYSTORE"
@@ -1126,6 +1148,9 @@ test_codex_context_bridge_asset() {
   assert_file_contains "$CONTEXT_ASSET" 'session_compact_count='
   assert_file_contains "$CONTEXT_ASSET" 'pre_compact_unknown_trigger_count='
   assert_file_contains "$CONTEXT_ASSET" 'post_compact_manual_trigger_count='
+  assert_file_contains "$CONTEXT_ASSET" 'model_effective_context_window='
+  assert_file_contains "$CONTEXT_ASSET" 'model_auto_compact_source='
+  assert_file_contains "$CONTEXT_ASSET" 'catalog inspect'
   assert_file_contains "$CONTEXT_ASSET" '/system/bin/date -d "@$epoch"'
   assert_file_not_contains "$CONTEXT_ASSET" '/sessions'
   assert_file_not_contains "$CONTEXT_ASSET" 'rollout-'
@@ -1227,6 +1252,35 @@ EOF
   CODEX_FOR_TUI_REQUIREMENTS_FILE="$tmp/requirements.toml" HOME="$tmp/home" CODEX_HOME="$tmp/home/.codex" sh "$CONTEXT_ASSET" status >"$tmp/status" || fail "codex-context requirements status failed"
   assert_file_contains "$tmp/status" 'context_hook=enabled'
   assert_file_contains "$tmp/status" 'context_hook_source=requirements'
+
+  mkdir -p "$tmp/cap-home/.codex"
+  printf '%s\n' \
+    'model = "gpt-5.6-sol"' \
+    'model_reasoning_effort = "ultra"' > "$tmp/cap-home/.codex/config.toml"
+  CODEX_CONFIG_ENGINE_ROOT="$SCRIPT_DIR" \
+    HOME="$tmp/cap-home" \
+    CODEX_HOME="$tmp/cap-home/.codex" \
+    sh "$CONTEXT_ASSET" status > "$tmp/cap-status" ||
+    fail "codex-context model capability status failed"
+  assert_file_contains "$tmp/cap-status" 'model=gpt-5.6-sol'
+  assert_file_contains "$tmp/cap-status" 'model_capability_mode=exact'
+  assert_file_contains "$tmp/cap-status" 'model_catalog_source=bundled-official'
+  assert_file_contains "$tmp/cap-status" 'model_context_window=372000'
+  assert_file_contains "$tmp/cap-status" 'model_effective_context_window=353400'
+  assert_file_contains "$tmp/cap-status" 'model_effective_context_window_percent=95'
+  assert_file_contains "$tmp/cap-status" 'model_auto_compact_token_limit=334800'
+  assert_file_contains "$tmp/cap-status" 'model_auto_compact_source=derived-90-percent'
+  assert_file_contains "$tmp/cap-status" 'model_reasoning_levels=low,medium,high,xhigh,max,ultra'
+
+  printf '%s\n' 'model_auto_compact_token_limit = 220000' >> "$tmp/cap-home/.codex/config.toml"
+  CODEX_CONFIG_ENGINE_ROOT="$SCRIPT_DIR" \
+    HOME="$tmp/cap-home" \
+    CODEX_HOME="$tmp/cap-home/.codex" \
+    sh "$CONTEXT_ASSET" status > "$tmp/cap-fixed-status" ||
+    fail "codex-context fixed compact status failed"
+  assert_file_contains "$tmp/cap-fixed-status" 'model_auto_compact_token_limit=220000'
+  assert_file_contains "$tmp/cap-fixed-status" 'model_auto_compact_source=config-fixed'
+
   sh "$CONTEXT_ASSET" verify >/dev/null || fail "codex-context verify failed"
   rm -rf "$tmp"
 }
@@ -1244,24 +1298,36 @@ EOF
 exit 0
 EOF
   chmod 755 "$tmp/bin/codex-rtk" "$tmp/bin/codex-context"
-  printf '%s\n' 'model-a' > "$tmp/models.txt"
 
   (
     . "$SCRIPT_DIR/lib/codex-zh-common.sh"
+    . "$SCRIPT_DIR/lib/codex-zh-download.sh"
     . "$SCRIPT_DIR/lib/codex-zh-config.sh"
     export PATH="$tmp/bin:$PATH"
     export HOME="$tmp/home"
     export CODEX_HOME="$tmp/home/.codex"
+    export CODEX_ZH_ACTIVE_SCRIPT_DIR="$SCRIPT_DIR"
+    export CODEX_ZH_SCRIPT_INSTALL_ROOT="$tmp/scripts"
     export CODEX_FOR_TUI_REQUIREMENTS_FILE="$tmp/requirements.toml"
-    codex_config_write_third_party_config "https://api.example.com/v1" "key" "model-a" "$tmp/models.txt"
-    codex_config_profile_save keep-hooks
-    mkdir -p "$CODEX_HOME/config-profiles/no-hooks"
-    {
-      printf 'model = "model-a"\n'
-      printf '[features]\n'
-      printf 'hooks = false\n'
-    } > "$CODEX_HOME/config-profiles/no-hooks/config.toml"
-    codex_config_profile_use no-hooks
+    codex_config_v2_prepare
+    work="$(codex_config_v2_work_root)"
+    codex_config_v2_run "$work/create-first.json" \
+      profile create \
+      --name keep-hooks \
+      --mode official \
+      --model gpt-5.4 \
+      --reasoning-effort high \
+      --activate
+    codex_config_v2_post_materialize
+    codex_config_v2_run "$work/create-second.json" \
+      profile create \
+      --name second \
+      --mode official \
+      --model gpt-5.5 \
+      --reasoning-effort xhigh
+    codex_config_v2_run "$work/activate-second.json" profile activate second
+    codex_config_v2_post_materialize
+    codex_config_engine profile show second > "$tmp/second.json"
   ) >/dev/null
 
   assert_file_contains "$tmp/home/.codex/config.toml" 'hooks = true'
@@ -1271,7 +1337,8 @@ EOF
   assert_file_contains "$tmp/home/.codex/config.toml" 'command = "codex-context hook"'
   assert_file_contains "$tmp/home/.codex/config.toml" 'approval_policy = "never"'
   assert_file_contains "$tmp/home/.codex/config.toml" 'sandbox_mode = "danger-full-access"'
-  assert_file_contains "$tmp/home/.codex/config-profiles/current" 'no-hooks'
+  assert_file_contains "$tmp/second.json" '"active": true'
+  assert_file_contains "$tmp/second.json" '"name": "second"'
   rm -rf "$tmp"
 }
 
@@ -1531,9 +1598,13 @@ test_codex_local_profile_commands_are_explicit_only() {
   assert_file_contains "$SCRIPT_DIR/codex-local-resume.sh" 'profile-use'
   assert_file_contains "$SCRIPT_DIR/codex-local-resume.sh" 'profile-list'
   assert_file_contains "$SCRIPT_DIR/codex-local-resume.sh" 'codex_config_menu'
-  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" 'codex_config_profile_choose_use'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" 'codex_config_v2_choose_profile'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" 'codex_config_v2_dirty_guard'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" 'codex_config_repair_full_permission'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" 'sandbox_mode = \"danger-full-access\"'
+  assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" 'codex_config_write_model_catalog'
+  assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" 'codex_config_write_third_party_config'
+  assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" 'context_window": 272000'
   assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'profile-use'
 }
 

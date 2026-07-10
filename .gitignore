@@ -1,6 +1,8 @@
 *.exe
 *.pdb
 *.bak
+*.py[cod]
+__pycache__/
 dist/
 tmp/
 release/

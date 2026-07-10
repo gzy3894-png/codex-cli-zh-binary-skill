@@ -76,8 +76,8 @@ android {
         applicationId = "com.gzy3894.codexfortui"
         minSdk = 26
         targetSdk = 36
-versionCode = 54
-versionName = "2.3.11"
+versionCode = 55
+versionName = "2.4.0"
         vectorDrawables {
             useSupportLibrary = true
         }

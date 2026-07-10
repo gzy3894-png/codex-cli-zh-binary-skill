@@ -605,16 +605,162 @@ run_hook() {
   record_event "$event_name" "$trigger" "$location" "$session_key" "$reason"
 }
 
+config_root_string() {
+  key="$1"
+  cfg="$(config_file)"
+  [ -r "$cfg" ] || return 0
+  awk -v key="$key" '
+    /^[[:space:]]*\[/ { exit }
+    {
+      line = $0
+      sub(/^[[:space:]]*/, "", line)
+      if (index(line, key) != 1) {
+        next
+      }
+      rest = substr(line, length(key) + 1)
+      if (rest !~ /^[[:space:]]*=/) {
+        next
+      }
+      sub(/^[^=]*=[[:space:]]*/, "", line)
+      if (line ~ /^"/) {
+        sub(/^"/, "", line)
+        sub(/".*$/, "", line)
+        print line
+        exit
+      }
+      if (line ~ /^\047/) {
+        sub(/^\047/, "", line)
+        sub(/\047.*$/, "", line)
+        print line
+        exit
+      }
+    }
+  ' "$cfg"
+}
+
+config_fixed_compact_limit() {
+  cfg="$(config_file)"
+  [ -r "$cfg" ] || return 0
+  sed -n 's/^[[:space:]]*model_auto_compact_token_limit[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*$/\1/p' "$cfg" |
+    sed -n '1p'
+}
+
+find_config_engine_root() {
+  for root in \
+    "${CODEX_CONFIG_ENGINE_ROOT:-}" \
+    "${CODEX_ZH_SCRIPT_INSTALL_ROOT:-}" \
+    "$HOME/.local/share/codex-zh/scripts" \
+    "/usr/local/share/codex-zh/scripts" \
+    "$HOME/.cache/codex-zh/scripts" \
+    "$HOME/.codex-for-tui/remote"
+  do
+    [ -n "$root" ] || continue
+    [ -x "$root/libexec/codex-config-engine.py" ] || continue
+    [ -s "$root/data/openai-models.json" ] || continue
+    [ -s "$root/vendor/python/tomlkit/parser.py" ] || continue
+    printf '%s\n' "$root"
+    return 0
+  done
+  return 1
+}
+
+print_model_capabilities() {
+  model="$(config_root_string model)"
+  fixed_limit="$(config_fixed_compact_limit)"
+  [ -n "$model" ] || {
+    printf 'model=default\n'
+    printf 'model_capability_mode=unavailable\n'
+    printf 'model_catalog_source=none\n'
+    printf 'model_context_window=unknown\n'
+    printf 'model_effective_context_window=unknown\n'
+    printf 'model_effective_context_window_percent=unknown\n'
+    if [ -n "$fixed_limit" ]; then
+      printf 'model_auto_compact_token_limit=%s\n' "$fixed_limit"
+      printf 'model_auto_compact_source=config-fixed\n'
+    else
+      printf 'model_auto_compact_token_limit=default\n'
+      printf 'model_auto_compact_source=unknown\n'
+    fi
+    printf 'model_reasoning_levels=unknown\n'
+    return 0
+  }
+
+  printf 'model=%s\n' "$model"
+  engine_root="$(find_config_engine_root 2>/dev/null || true)"
+  catalog="$(config_root_string model_catalog_json)"
+  catalog_source="active-profile"
+  if [ -z "$catalog" ] || [ ! -s "$catalog" ]; then
+    if [ -n "$engine_root" ] && [ -s "$engine_root/data/openai-models.json" ]; then
+      catalog="$engine_root/data/openai-models.json"
+      catalog_source="bundled-official"
+    else
+      catalog=""
+      catalog_source="none"
+    fi
+  fi
+
+  if [ -n "$engine_root" ] && [ -n "$catalog" ] && command -v python3 >/dev/null 2>&1; then
+    dir="$(state_dir)"
+    mkdir -p "$dir"
+    capability_json="$dir/model-capabilities.tmp.$$"
+    if PYTHONNOUSERSITE=1 python3 "$engine_root/libexec/codex-config-engine.py" \
+      --codex-home "$(codex_home)" \
+      catalog inspect \
+      --catalog-file "$catalog" \
+      --model "$model" > "$capability_json" 2>/dev/null
+    then
+      python3 - "$capability_json" "$fixed_limit" "$catalog_source" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    model = json.load(handle)["model"]
+fixed = int(sys.argv[2]) if sys.argv[2] else None
+catalog_source = sys.argv[3]
+value = lambda item: "unknown" if item is None else item
+print(f"model_capability_mode={'conservative' if model['conservative_fallback'] else 'exact'}")
+print(f"model_catalog_source={catalog_source}")
+print(f"model_context_window={value(model['resolved_context_window'])}")
+print(f"model_max_context_window={value(model['max_context_window'])}")
+print(f"model_effective_context_window={value(model['effective_context_window'])}")
+print(f"model_effective_context_window_percent={model['effective_context_window_percent']}")
+if fixed is not None:
+    print(f"model_auto_compact_token_limit={fixed}")
+    print("model_auto_compact_source=config-fixed")
+else:
+    print(f"model_auto_compact_token_limit={value(model['auto_compact_token_limit'])}")
+    print(f"model_auto_compact_source={model['auto_compact_source']}")
+levels = model.get("reasoning_levels") or []
+print(f"model_reasoning_levels={','.join(levels) if levels else 'unknown'}")
+PY
+      rm -f "$capability_json"
+      return 0
+    fi
+    rm -f "$capability_json"
+  fi
+
+  printf 'model_capability_mode=unavailable\n'
+  printf 'model_catalog_source=%s\n' "$catalog_source"
+  printf 'model_context_window=unknown\n'
+  printf 'model_max_context_window=unknown\n'
+  printf 'model_effective_context_window=unknown\n'
+  printf 'model_effective_context_window_percent=unknown\n'
+  if [ -n "$fixed_limit" ]; then
+    printf 'model_auto_compact_token_limit=%s\n' "$fixed_limit"
+    printf 'model_auto_compact_source=config-fixed\n'
+  else
+    printf 'model_auto_compact_token_limit=default\n'
+    printf 'model_auto_compact_source=unknown\n'
+  fi
+  printf 'model_reasoning_levels=unknown\n'
+}
+
 status() {
   cfg="$(config_file)"
   printf 'codex_home=%s\n' "$(codex_home)"
   printf 'config=%s\n' "$cfg"
   printf 'state_dir=%s\n' "$(state_dir)"
-  if [ -f "$cfg" ] && grep -Eq '^[[:space:]]*model_auto_compact_token_limit[[:space:]]*=' "$cfg"; then
-    sed -n 's/^[[:space:]]*model_auto_compact_token_limit[[:space:]]*=[[:space:]]*/model_auto_compact_token_limit=/p' "$cfg" | sed -n '1p'
-  else
-    printf 'model_auto_compact_token_limit=default\n'
-  fi
+  print_model_capabilities
   print_metrics
   if [ -f "$cfg" ] && grep -Eq '^[[:space:]]*hooks[[:space:]]*=[[:space:]]*true' "$cfg"; then
     printf 'hooks_feature=true\n'
