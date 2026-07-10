@@ -107,8 +107,10 @@ pwsh -File "$HOME/.codex/skills/codex-android-musl-zh/scripts/build-codex-androi
 
 `-PrepareSourceOnly` is cross-platform under PowerShell 7. It applies the
 shared Chinese maps, installs the ARM64 musl code-mode stub, refreshes
-`Cargo.lock`, and exits before Zig, Perl, or Cargo build setup. GitHub Actions
-and Linux builders can then use `cargo-zigbuild` or `cross` natively.
+`Cargo.lock`, preserves each patched source file's existing line-ending style,
+runs `git diff --check`, and exits before Zig, Perl, or Cargo build setup.
+GitHub Actions and Linux builders can then use `cargo-zigbuild` or `cross`
+natively.
 
 ## Supported Versions
 

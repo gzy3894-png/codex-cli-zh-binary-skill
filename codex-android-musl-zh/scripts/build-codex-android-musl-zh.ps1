@@ -685,6 +685,38 @@ function New-ZigbuildTargetToolWrappers {
     return [pscustomobject]$result
 }
 
+function Get-SourceLineEnding {
+    param([string]$Text)
+
+    if ($Text.Contains("`r`n")) {
+        return "`r`n"
+    }
+    return "`n"
+}
+
+function Format-SourceText {
+    param(
+        [string]$Text,
+        [string]$LineEnding
+    )
+
+    $normalized = $Text.Replace("`r`n", "`n").Replace("`r", "`n")
+    return $normalized.TrimEnd("`r", "`n") + $LineEnding
+}
+
+function Write-SourceText {
+    param(
+        [string]$Path,
+        [string]$Text
+    )
+
+    [System.IO.File]::WriteAllText(
+        $Path,
+        $Text,
+        [System.Text.UTF8Encoding]::new($false)
+    )
+}
+
 function Apply-CodeModeMuslStub {
     param(
         [string]$CargoRoot,
@@ -709,15 +741,30 @@ function Apply-CodeModeMuslStub {
     }
 
     $toml = Get-Content -LiteralPath $codeModeToml -Raw
-    $updatedToml = [regex]::Replace($toml, '(?m)^\s*sandbox\s*=\s*\["v8/v8_enable_sandbox"\]\r?\n', "sandbox = []`r`n")
+    $tomlLineEnding = Get-SourceLineEnding -Text $toml
+    $updatedToml = [regex]::Replace(
+        $toml,
+        '(?m)^\s*sandbox\s*=\s*\["v8/v8_enable_sandbox"\]\r?\n',
+        "sandbox = []$tomlLineEnding"
+    )
     $updatedToml = [regex]::Replace($updatedToml, "(?m)^\s*deno_core_icudata\s*=\s*\{\s*workspace\s*=\s*true\s*\}\r?\n", "")
     $updatedToml = [regex]::Replace($updatedToml, "(?m)^\s*v8\s*=\s*\{\s*workspace\s*=\s*true\s*\}\r?\n", "")
     $targetHeader = '[target.''cfg(not(all(target_arch = "aarch64", target_os = "linux", target_env = "musl")))''.dependencies]'
     if ($updatedToml -notlike "*$targetHeader*") {
-        $updatedToml = $updatedToml.TrimEnd() + "`r`n`r`n$targetHeader`r`ndeno_core_icudata = { workspace = true }`r`nv8 = { workspace = true }`r`n"
+        $targetBlock = @(
+            $targetHeader,
+            "deno_core_icudata = { workspace = true }",
+            "v8 = { workspace = true }"
+        ) -join $tomlLineEnding
+        $updatedToml = $updatedToml.TrimEnd("`r", "`n") +
+            $tomlLineEnding +
+            $tomlLineEnding +
+            $targetBlock +
+            $tomlLineEnding
     }
+    $updatedToml = Format-SourceText -Text $updatedToml -LineEnding $tomlLineEnding
     if ($updatedToml -ne $toml) {
-        Set-Content -LiteralPath $codeModeToml -Encoding ASCII -Value $updatedToml
+        Write-SourceText -Path $codeModeToml -Text $updatedToml
     }
 
     $libSource = @'
@@ -747,8 +794,10 @@ pub use service_stub::InProcessCodeModeSessionProvider;
 pub use service_stub::NoopCodeModeSessionDelegate;
 '@
     $currentLib = Get-Content -LiteralPath $libRs -Raw
+    $libLineEnding = Get-SourceLineEnding -Text $currentLib
+    $libSource = Format-SourceText -Text $libSource -LineEnding $libLineEnding
     if ($currentLib -ne $libSource) {
-        Set-Content -LiteralPath $libRs -Encoding ASCII -Value $libSource
+        Write-SourceText -Path $libRs -Text $libSource
     }
 
     $stubSource = @'
@@ -905,8 +954,15 @@ fn missing_cell_response(cell_id: CellId) -> RuntimeResponse {
 }
 '@
     $currentStub = if (Test-Path -LiteralPath $stubRs) { Get-Content -LiteralPath $stubRs -Raw } else { "" }
+    $stubLineEnding = if ($currentStub) {
+        Get-SourceLineEnding -Text $currentStub
+    }
+    else {
+        $libLineEnding
+    }
+    $stubSource = Format-SourceText -Text $stubSource -LineEnding $stubLineEnding
     if ($currentStub -ne $stubSource) {
-        Set-Content -LiteralPath $stubRs -Encoding ASCII -Value $stubSource
+        Write-SourceText -Path $stubRs -Text $stubSource
     }
 }
 
@@ -1009,6 +1065,8 @@ Apply-CodeModeMuslStub -CargoRoot $cargoRoot -RustTarget $Target
 if ($Target -eq "aarch64-unknown-linux-musl") {
     Update-CargoLockfile -CargoRoot $cargoRoot -CargoHomePath $CargoHome
 }
+Write-Step "Validate patched source diff"
+Invoke-Checked -FilePath "git" -Arguments @("-C", $sourcePath, "diff", "--check")
 if ($PrepareSourceOnly) {
     Write-Step "Prepared source only"
     Write-Host "Localized musl source is ready: $cargoRoot"
