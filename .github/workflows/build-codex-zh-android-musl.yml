@@ -23,7 +23,7 @@ concurrency:
 
 env:
   CODEX_REPO_REF: ${{ inputs.codex_ref || 'rust-v0.144.1' }}
-  CODEX_SKILLS_COMMIT: 18487b9553622f4449c575ad9f0e6cac4437700d
+  CODEX_SKILLS_COMMIT: ab1573aaa545c5a027b05274471d115b53fe0f5b
   CODEX_TARGET: aarch64-unknown-linux-musl
 
 jobs:
@@ -212,14 +212,39 @@ jobs:
 
           session_trait=codex-src/codex-rs/code-mode-protocol/src/session.rs
           session_stub=codex-src/codex-rs/code-mode/src/service_stub.rs
+          upstream_code_mode_lib=codex-rs/code-mode/src/lib.rs
+          generated_code_mode_lib=codex-src/codex-rs/code-mode/src/lib.rs
           test -s "$session_trait"
           test -s "$session_stub"
+          test -s "$generated_code_mode_lib"
           ! grep -Fq '__CODE_MODE_SESSION_COMPAT_METHODS__' "$session_stub"
           if grep -Fq 'fn is_alive(&self) -> bool;' "$session_trait"; then
             grep -Fq 'fn is_alive(&self) -> bool {' "$session_stub"
           elif grep -Fq 'fn is_alive(&self) -> bool {' "$session_stub"; then
             echo "Generated musl stub implements is_alive but the upstream trait does not." >&2
             exit 1
+          fi
+          for public_name in \
+            InProcessCodeModeSession \
+            InProcessCodeModeSessionProvider \
+            NoopCodeModeSessionDelegate \
+            ProcessOwnedCodeModeSession \
+            ProcessOwnedCodeModeSessionProvider
+          do
+            if git -C codex-src show "HEAD:$upstream_code_mode_lib" |
+              grep -Eq "^pub use (remote_session|service)::${public_name};$"
+            then
+              grep -Fq "pub use service_stub::${public_name};" "$generated_code_mode_lib" || {
+                echo "Generated musl stub does not preserve upstream export: $public_name" >&2
+                exit 1
+              }
+            fi
+          done
+          if git -C codex-src show "HEAD:$upstream_code_mode_lib" |
+            grep -Fq 'pub use remote_session::ProcessOwnedCodeModeSessionProvider;'
+          then
+            grep -Fq 'pub struct ProcessOwnedCodeModeSessionProvider;' "$session_stub"
+            grep -Fq 'pub fn with_host_program(_host_program: PathBuf) -> Self {' "$session_stub"
           fi
 
           pwsh -NoLogo -NoProfile \
