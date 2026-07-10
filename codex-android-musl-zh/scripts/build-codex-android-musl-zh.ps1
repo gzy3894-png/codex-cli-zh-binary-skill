@@ -14,6 +14,7 @@ param(
     [string]$DistDir = "",
     [string]$PythonExe = "E:\tools\python\python.exe",
     [string]$CodexZhSkillRoot = "",
+    [switch]$PrepareSourceOnly,
     [switch]$SkipPatch,
     [switch]$SkipPrereqInstall,
     [switch]$KeepDebugInfo,
@@ -184,7 +185,7 @@ function Resolve-CodexZhSkillRoot {
 
     if ($Requested) {
         $resolved = (Resolve-Path -LiteralPath $Requested -ErrorAction Stop).Path
-        if (Test-Path -LiteralPath (Join-Path $resolved "scripts\apply-codex-cli-zh.ps1")) {
+        if (Test-Path -LiteralPath (Join-Path $resolved "scripts/apply-codex-cli-zh.ps1")) {
             return $resolved
         }
         throw "codex-cli-zh apply script was not found under: $resolved"
@@ -199,12 +200,23 @@ function Resolve-CodexZhSkillRoot {
     )
 
     foreach ($candidate in $candidates) {
-        if (Test-Path -LiteralPath (Join-Path $candidate "scripts\apply-codex-cli-zh.ps1")) {
+        if (Test-Path -LiteralPath (Join-Path $candidate "scripts/apply-codex-cli-zh.ps1")) {
             return (Resolve-Path -LiteralPath $candidate -ErrorAction Stop).Path
         }
     }
 
     throw "Could not find codex-cli-zh skill. Pass -CodexZhSkillRoot."
+}
+
+function Resolve-PatchPowerShell {
+    foreach ($name in @("pwsh", "powershell")) {
+        $command = Get-Command $name -ErrorAction SilentlyContinue
+        if ($command -and $command.Source) {
+            return $command.Source
+        }
+    }
+
+    throw "Neither pwsh nor powershell is available to apply Chinese source patches."
 }
 
 function Get-PlannedSourceRoot {
@@ -686,8 +698,8 @@ function Apply-CodeModeMuslStub {
     Write-Step "Patch code-mode V8 stub"
     $codeModeRoot = Join-Path $CargoRoot "code-mode"
     $codeModeToml = Join-Path $codeModeRoot "Cargo.toml"
-    $libRs = Join-Path $codeModeRoot "src\lib.rs"
-    $stubRs = Join-Path $codeModeRoot "src\service_stub.rs"
+    $libRs = Join-Path $codeModeRoot "src/lib.rs"
+    $stubRs = Join-Path $codeModeRoot "src/service_stub.rs"
 
     if (-not (Test-Path -LiteralPath $codeModeToml)) {
         throw "codex-code-mode Cargo.toml was not found: $codeModeToml"
@@ -942,7 +954,7 @@ if (-not $DistDir) {
 }
 
 $codexZhRoot = Resolve-CodexZhSkillRoot -Requested $CodexZhSkillRoot
-$applyZh = Join-Path $codexZhRoot "scripts\apply-codex-cli-zh.ps1"
+$applyZh = Join-Path $codexZhRoot "scripts/apply-codex-cli-zh.ps1"
 $sourcePath = Get-PlannedSourceRoot -RequestedSourceRoot $SourceRoot -Root $WorkRoot -Ref $RepoRef
 
 Write-Step "Plan"
@@ -962,7 +974,8 @@ Write-Host "codex-cli-zh skill:  $codexZhRoot"
 
 if (-not $SkipPatch) {
     Write-Step "Apply Chinese source patches"
-    Invoke-Checked -FilePath "powershell" -Arguments @(
+    $patchPowerShell = Resolve-PatchPowerShell
+    Invoke-Checked -FilePath $patchPowerShell -Arguments @(
         "-NoProfile",
         "-ExecutionPolicy",
         "Bypass",
@@ -995,6 +1008,11 @@ if (-not (Test-Path -LiteralPath (Join-Path $cargoRoot "Cargo.toml"))) {
 Apply-CodeModeMuslStub -CargoRoot $cargoRoot -RustTarget $Target
 if ($Target -eq "aarch64-unknown-linux-musl") {
     Update-CargoLockfile -CargoRoot $cargoRoot -CargoHomePath $CargoHome
+}
+if ($PrepareSourceOnly) {
+    Write-Step "Prepared source only"
+    Write-Host "Localized musl source is ready: $cargoRoot"
+    exit 0
 }
 $toolchain = Get-RepoToolchain -CargoRoot $cargoRoot
 Ensure-RustTarget -Toolchain $toolchain -RustTarget $Target

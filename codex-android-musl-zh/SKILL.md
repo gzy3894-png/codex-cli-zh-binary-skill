@@ -94,6 +94,22 @@ Create a `.tar.gz` next to the copied binary:
 powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\skills\codex-android-musl-zh\scripts\build-codex-android-musl-zh.ps1" -PackageTarGz
 ```
 
+Prepare localized musl source without installing Windows-only cross-build
+prerequisites or starting Cargo:
+
+```powershell
+pwsh -File "$HOME/.codex/skills/codex-android-musl-zh/scripts/build-codex-android-musl-zh.ps1" `
+  -SourceRoot /path/to/codex `
+  -RepoRef rust-v0.144.1 `
+  -CodexZhSkillRoot "$HOME/.codex/skills/codex-cli-zh" `
+  -PrepareSourceOnly
+```
+
+`-PrepareSourceOnly` is cross-platform under PowerShell 7. It applies the
+shared Chinese maps, installs the ARM64 musl code-mode stub, refreshes
+`Cargo.lock`, and exits before Zig, Perl, or Cargo build setup. GitHub Actions
+and Linux builders can then use `cargo-zigbuild` or `cross` natively.
+
 ## Supported Versions
 
 - Verified artifact baseline: Codex CLI `0.142.4` for `aarch64-unknown-linux-musl`.

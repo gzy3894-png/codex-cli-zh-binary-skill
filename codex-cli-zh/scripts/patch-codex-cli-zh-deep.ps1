@@ -280,8 +280,8 @@ function Resolve-SourceLayout {
     }
 
     $rootPath = (Resolve-Path -LiteralPath $Root -ErrorAction Stop).Path
-    $repoCandidate = Join-Path $rootPath "codex-rs\tui\src"
-    $rsCandidate = Join-Path $rootPath "tui\src"
+    $repoCandidate = Join-Path $rootPath "codex-rs/tui/src"
+    $rsCandidate = Join-Path $rootPath "tui/src"
 
     if (Test-Path -LiteralPath $repoCandidate) {
         return [pscustomobject]@{
@@ -308,9 +308,11 @@ function Resolve-TargetFile {
         [Parameter(Mandatory = $true)][string]$RelativePath
     )
 
-    $normalized = $RelativePath -replace "/", "\"
-    if ($normalized.StartsWith("codex-rs\", [System.StringComparison]::OrdinalIgnoreCase)) {
-        $withoutPrefix = $normalized.Substring("codex-rs\".Length)
+    $separator = [System.IO.Path]::DirectorySeparatorChar
+    $normalized = $RelativePath.Replace("\", $separator).Replace("/", $separator)
+    $codexPrefix = "codex-rs$separator"
+    if ($normalized.StartsWith($codexPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $withoutPrefix = $normalized.Substring($codexPrefix.Length)
         $candidate = Join-Path $Layout.CodexRsRoot $withoutPrefix
     }
     else {
@@ -537,7 +539,7 @@ function Apply-TargetPatch {
 function Apply-KeymapActionLabelPatch {
     param([string]$CodexRsRoot)
 
-    $file = Join-Path $CodexRsRoot "tui\src\keymap_setup\actions.rs"
+    $file = Join-Path $CodexRsRoot "tui/src/keymap_setup/actions.rs"
     if (-not (Test-Path -LiteralPath $file)) {
         return [pscustomobject]@{
             Changed = $false

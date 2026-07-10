@@ -159,10 +159,10 @@ function Assert-SourceMatchesRef {
         [Parameter(Mandatory = $true)][string]$Ref
     )
 
-    $hasRepoLayout = Test-Path -LiteralPath (Join-Path $Path "codex-rs\Cargo.toml")
+    $hasRepoLayout = Test-Path -LiteralPath (Join-Path $Path "codex-rs/Cargo.toml")
     $hasRsLayout = (
         (Test-Path -LiteralPath (Join-Path $Path "Cargo.toml")) -and
-        (Test-Path -LiteralPath (Join-Path $Path "tui\src"))
+        (Test-Path -LiteralPath (Join-Path $Path "tui/src"))
     )
     if (-not $hasRepoLayout -and -not $hasRsLayout) {
         throw "Existing source is incomplete or is not a Codex Rust checkout: $Path"

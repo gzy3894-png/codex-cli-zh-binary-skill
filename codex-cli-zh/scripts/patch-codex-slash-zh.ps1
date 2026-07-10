@@ -240,8 +240,8 @@ function Resolve-SourceLayout {
     param([string]$Root)
 
     $rootPath = (Resolve-Path -LiteralPath $Root -ErrorAction Stop).Path
-    $candidateFromRepo = Join-Path $rootPath "codex-rs\tui\src\slash_command.rs"
-    $candidateFromRustRoot = Join-Path $rootPath "tui\src\slash_command.rs"
+    $candidateFromRepo = Join-Path $rootPath "codex-rs/tui/src/slash_command.rs"
+    $candidateFromRustRoot = Join-Path $rootPath "tui/src/slash_command.rs"
 
     if (Test-Path -LiteralPath $candidateFromRepo) {
         return [pscustomobject]@{
