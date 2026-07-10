@@ -10,14 +10,34 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2.0
 
+function Resolve-UserHomeDirectory {
+    $candidates = @(
+        $env:USERPROFILE,
+        $env:HOME,
+        [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::UserProfile)
+    )
+
+    foreach ($candidate in $candidates) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$candidate)) {
+            return [System.IO.Path]::GetFullPath(
+                [System.Environment]::ExpandEnvironmentVariables([string]$candidate)
+            )
+        }
+    }
+
+    throw "Could not resolve the user home directory from USERPROFILE, HOME, or .NET."
+}
+
+$script:UserHomeDirectory = Resolve-UserHomeDirectory
+
 if (-not $ConfigPath) {
-    $ConfigPath = Join-Path $env:USERPROFILE ".codex\config.toml"
+    $ConfigPath = Join-Path $script:UserHomeDirectory ".codex/config.toml"
 }
 if (-not $MapFile) {
     $MapFile = Join-Path $PSScriptRoot "deep-translations.zh.json"
 }
 if (-not $BackupDirectory) {
-    $BackupDirectory = Join-Path $env:USERPROFILE ".codex\backups\model-catalog-zh"
+    $BackupDirectory = Join-Path $script:UserHomeDirectory ".codex/backups/model-catalog-zh"
 }
 
 function Write-Step {
@@ -116,10 +136,10 @@ function Resolve-CatalogFile {
 
     $expanded = [System.Environment]::ExpandEnvironmentVariables($rawPath)
     if ($expanded -eq "~") {
-        $expanded = $env:USERPROFILE
+        $expanded = $script:UserHomeDirectory
     }
     elseif ($expanded.StartsWith("~\") -or $expanded.StartsWith("~/")) {
-        $expanded = Join-Path $env:USERPROFILE $expanded.Substring(2)
+        $expanded = Join-Path $script:UserHomeDirectory $expanded.Substring(2)
     }
     if (-not [System.IO.Path]::IsPathRooted($expanded)) {
         $expanded = Join-Path $baseDirectory $expanded

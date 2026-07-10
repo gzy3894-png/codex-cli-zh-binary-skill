@@ -102,6 +102,7 @@ bash "$HOME/.codex/skills/codex-cli-zh/scripts/build-codex-cli-zh-macos.sh" --re
 - Prefer `-UseWrapperOverride` for install. It edits `C:\Users\Administrator\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js` so `codex` starts the patched E-drive binary.
 - When `config.toml` sets `model_catalog_json`, add `-PatchModelCatalog` to the combined apply/install command. Pass `-ModelCatalogPath` to override auto-discovery or run `patch-codex-model-catalog-zh.ps1` for a catalog-only repair.
 - The catalog patch is exact-value, JSON-validating, idempotent, and backed up under `~/.codex/backups/model-catalog-zh`. Start a new Codex session afterward because the catalog is loaded only at startup.
+- The catalog patch resolves the home directory through `USERPROFILE`, `HOME`, or .NET, so explicit and config-discovered catalog paths work under both Windows PowerShell and PowerShell 7 on Linux/macOS runners.
 - Do not build into the target directory of a currently running `codex.exe`. Windows locks live executables and Cargo can fail at the final replace step. Use an inactive target such as `E:\cz\target-zh-0.142.2` or `E:\cz\target-zh-0.142.2-next`.
 - `npm update -g @openai/codex` updates the npm global package and may overwrite the wrapper override. Re-run this skill after npm updates before expecting Chinese UI to remain active.
 - Keep old E-drive targets as rollback unless the user explicitly asks to delete them.

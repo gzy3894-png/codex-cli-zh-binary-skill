@@ -78,10 +78,17 @@ $tempBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 $tempRoot = Join-Path $tempBase ("codex-cli-zh-model-catalog-test-" + [guid]::NewGuid().ToString("N"))
 $catalogPath = Join-Path $tempRoot "catalog.json"
 $backupDirectory = Join-Path $tempRoot "backups"
+$portableHome = Join-Path $tempRoot "home"
+$originalUserProfile = $env:USERPROFILE
+$originalHome = $env:HOME
 
 New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 
 try {
+    New-Item -ItemType Directory -Force -Path $portableHome | Out-Null
+    Remove-Item Env:USERPROFILE -ErrorAction SilentlyContinue
+    $env:HOME = $portableHome
+
     $fixture = @'
 {
   "models": [
@@ -207,6 +214,19 @@ try {
     Write-Host "PASS: model catalog patch dry-run, mutation, backup, encoding, and idempotency"
 }
 finally {
+    if ($null -eq $originalUserProfile) {
+        Remove-Item Env:USERPROFILE -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:USERPROFILE = $originalUserProfile
+    }
+    if ($null -eq $originalHome) {
+        Remove-Item Env:HOME -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:HOME = $originalHome
+    }
+
     $resolvedTempRoot = [System.IO.Path]::GetFullPath($tempRoot)
     $safePrefix = $tempBase.TrimEnd("\", "/") + [System.IO.Path]::DirectorySeparatorChar
     $safeLeaf = Split-Path -Leaf $resolvedTempRoot
