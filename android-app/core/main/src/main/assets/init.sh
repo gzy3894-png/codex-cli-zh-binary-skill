@@ -310,6 +310,12 @@ enter_interactive_shell() {
   # Drop any residual non-interactive flags from bootstrap/upgrade.
   set +e +u +v +x 2>/dev/null || true
 
+  # Pure shell home: never leave the user in Codex workspace after guide text.
+  # Workspace is still exported for `codex` launcher to avoid project-local config noise.
+  if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
+    cd "$HOME" 2>/dev/null || true
+  fi
+
   if command -v stty >/dev/null 2>&1; then
     # Prefer the controlling tty when stdin is not already a tty.
     if [ -t 0 ]; then
@@ -325,6 +331,9 @@ enter_interactive_shell() {
   shell_rc="${TMPDIR:-/tmp}/codex-for-tui-shell-rc.$$"
   cat >"$shell_rc" <<'EOF' 2>/dev/null || true
 # Codex for TUI interactive shell handoff (auto-generated, safe to ignore).
+if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
+  cd "$HOME" 2>/dev/null || true
+fi
 if command -v stty >/dev/null 2>&1; then
   stty sane 2>/dev/null || true
   stty echo icanon icrnl onlcr ixon 2>/dev/null || true
@@ -349,12 +358,12 @@ EOF
 if [ "$#" -eq 0 ]; then
   [ ! -r /etc/profile ] || . /etc/profile
   export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"
-  # Prefer a dedicated workspace so Codex does not treat $HOME/.codex as project-local config.
+  # Dedicated workspace is for Codex launches only (see codex-zh-local.sh).
+  # Keep the interactive shell at $HOME so normal commands (claude/cloud/etc.) start cleanly.
   workspace="${CODEX_FOR_TUI_WORKSPACE:-$HOME/workspace}"
   mkdir -p "$workspace" 2>/dev/null || true
-  if [ -d "$workspace" ]; then
-    cd "$workspace" 2>/dev/null || cd "$HOME" 2>/dev/null || true
-  else
+  export CODEX_FOR_TUI_WORKSPACE="$workspace"
+  if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
     cd "$HOME" 2>/dev/null || true
   fi
   # Default shell-first; App setting may export CODEX_FOR_TUI_AUTO_START=1.

@@ -36,9 +36,11 @@ class App : Application() {
         TerminalUtils.init(this)
 
         GlobalScope.launch(Dispatchers.IO) {
-            getTempDir(this@App).apply {
-                if (exists() && listFiles().isNullOrEmpty().not()) {
-                    deleteRecursively()
+            // Only clear loose leftover files under cache/tmp. Do not wipe session
+            // subdirs that may still be needed by live terminal / proot processes.
+            getTempDir(this@App).listFiles()?.forEach { child ->
+                if (child.isFile) {
+                    child.delete()
                 }
             }
         }

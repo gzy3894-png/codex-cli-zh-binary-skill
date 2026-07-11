@@ -1,5 +1,17 @@
 # Changelog
 
+## Codex for TUI 2.4.8
+
+Codex for TUI 2.4.8 是 2.4.7 的前滚热修：引导结束后的纯 shell 固定落在 `$HOME`，并扩大 proot 噪声过滤。
+
+- 交互 shell 交接前 `cd "$HOME"`（ENV rc 再断言一次）；`CODEX_FOR_TUI_WORKSPACE` 仍只给 `codex` launcher 用。
+- 过滤 proot `ptrace` / `can't set tracee registers` / `Please set PROOT_TMP_DIR` 警告，避免污染 TUI/shell。
+- `PROOT_TMP_DIR` 放到 `$PREFIX/local/proot-tmp/<session>/`；App 启动只清理 `cache/tmp` 零散文件，不再整树删除。
+- SQLite build key 使用 `apk-2.4.8` runtime epoch；Codex 二进制仍为固定 `0.144.1-zh.1`。
+- Release 校验 `versionCode=63`、`versionName=2.4.8`；发布说明见 `docs/codex-for-tui-2.4.8-release-notes.md`。
+- Android 不能普通覆盖降级安装；从 2.4.8（`versionCode=63`）回到更低版本必须使用更高 versionCode 的前滚修复包，或卸载重装。
+
+
 ## Codex for TUI 2.4.7
 
 Codex for TUI 2.4.7 是 2.4.6 的前滚体验热修：引导结束后干净进入纯 shell，文件托盘支持多选与类型编号短名。

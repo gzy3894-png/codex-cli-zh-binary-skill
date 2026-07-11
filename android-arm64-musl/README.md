@@ -26,7 +26,7 @@
 
 普通启动不会自动联网更新脚本，不会请求 `/models`，不会覆盖 `~/.codex/config.toml`。
 
-Codex for TUI 2.4.7 APK 内置固定 `0.144.1-zh.1` 二进制、launcher、完整受管脚本和模型能力目录。已安装旧版的用户覆盖安装 APK 并打开 App 后，会在 Codex 启动前自动完成离线、事务型环境升级：根配置成为活动 V2 profile，旧配置独立保留，runtime/session/SQLite 按站点隔离，`/model` 直接显示完整普通模型页，推理等级与 `rust-v0.144.1` 一致。升级失败会回滚并阻止启动，下次打开自动重试；2.4.3 起清除 musl 上不可用的 `code_mode_only`；2.4.4 恢复文件托盘发送附言；2.4.5 默认进入 shell（`CODEX_FOR_TUI_AUTO_START=0`）、过滤 proot 噪声并以 `/root/workspace` 为 cwd；2.4.6 多行就绪引导并修正 shell 输入实时回显；2.4.7 引导后纯 shell 交接，文件托盘多选与类型编号短名。不需要手动运行更新、修复 launcher、配置模式或设置 `CODEX_HOME`。
+Codex for TUI 2.4.8 APK 内置固定 `0.144.1-zh.1` 二进制、launcher、完整受管脚本和模型能力目录。已安装旧版的用户覆盖安装 APK 并打开 App 后，会在 Codex 启动前自动完成离线、事务型环境升级：根配置成为活动 V2 profile，旧配置独立保留，runtime/session/SQLite 按站点隔离，`/model` 直接显示完整普通模型页，推理等级与 `rust-v0.144.1` 一致。升级失败会回滚并阻止启动，下次打开自动重试；2.4.3 起清除 musl 上不可用的 `code_mode_only`；2.4.4 恢复文件托盘发送附言；2.4.5 默认进入 shell（`CODEX_FOR_TUI_AUTO_START=0`）、过滤 proot 噪声；2.4.6 多行就绪引导并修正 shell 输入实时回显；2.4.7 引导后纯 shell 交接，文件托盘多选与类型编号短名；2.4.8 纯 shell 固定 `$HOME`，`CODEX_FOR_TUI_WORKSPACE` 仅用于 codex launcher，并扩大 proot 噪声过滤。不需要手动运行更新、修复 launcher、配置模式或设置 `CODEX_HOME`。
 
 只有在不更新 APK、明确只想热更新脚本时，才手动运行：
 

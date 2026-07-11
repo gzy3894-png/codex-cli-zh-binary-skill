@@ -159,7 +159,14 @@ chmod 1777 "$ALPINE_DIR/tmp" 2>/dev/null || true
 ARGS="$ARGS -b $ALPINE_DIR/tmp:/dev/shm"
 ARGS="$ARGS -r $ALPINE_DIR -0 --link2symlink --sysvipc -L"
 
-# Filter known-harmless proot bind races ("can't sanitize binding /proc/.../fd").
+# proot needs a writable private tmp; fall back if session env was wiped/missing.
+if [ -z "${PROOT_TMP_DIR:-}" ] || ! mkdir -p "$PROOT_TMP_DIR" 2>/dev/null; then
+  PROOT_TMP_DIR="${PREFIX:-/data/data/com.gzy3894.codexfortui}/local/proot-tmp/$$"
+  export PROOT_TMP_DIR
+  mkdir -p "$PROOT_TMP_DIR" 2>/dev/null || true
+fi
+
+# Filter known-harmless proot noise that otherwise corrupts TUI/shell output.
 # Keep stdout on the session PTY; only route stderr through a line filter.
 # Codex TUI uses the tty/stdout path, so this does not break the interface.
 if [ "${CODEX_FOR_TUI_FILTER_PROOT_WARNINGS:-1}" = "1" ] &&
@@ -174,6 +181,11 @@ then
         case "$line" in
           *"proot warning: can't sanitize binding"*) ;;
           *"proot warning: can"*"t sanitize binding"*) ;;
+          *"proot warning: ptrace("*) ;;
+          *"proot warning: can't set tracee registers"*) ;;
+          *"proot warning: can"*"t set tracee registers"*) ;;
+          *"proot info: Please set PROOT_TMP_DIR"*) ;;
+          *"Please set PROOT_TMP_DIR env"*) ;;
           *) printf '%s\n' "$line" ;;
         esac
       done < "$fifo" >&2

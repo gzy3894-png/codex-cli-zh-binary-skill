@@ -120,7 +120,8 @@ object MkSession {
                 "PKG=${packageName}",
                 "RISH_APPLICATION_ID=${packageName}",
                 "PKG_PATH=${applicationInfo.sourceDir}",
-                "PROOT_TMP_DIR=${sessionTempDir(this, sessionId).also { if (it.exists().not()) it.mkdirs() }}",
+                // Keep proot private tmp under localDir so App temp cleanup cannot wipe it mid-session.
+                "PROOT_TMP_DIR=${localDir().child("proot-tmp").child(sanitizeSessionId(sessionId)).also { if (it.exists().not()) it.mkdirs() }.absolutePath}",
                 "TMPDIR=${getTempDir(this).absolutePath}",
                 "PROOT_LOADER=${applicationInfo.nativeLibraryDir}/libloader.so",
                 "PROOT=${applicationInfo.nativeLibraryDir}/libproot.so",
