@@ -111,6 +111,9 @@ EOF
   }
 
   assert_file_contains "$tmp/stdout" "环境就绪"
+  assert_file_contains "$tmp/stdout" "可输入命令"
+  assert_file_contains "$tmp/stdout" "启动 Codex TUI"
+  assert_file_contains "$tmp/stdout" "管理站点、模型与压缩策略"
   assert_file_not_contains "$tmp/stdout" "codex-ran"
   [ ! -e "$tmp/home/network.log" ] || fail "normal startup called network fetch"
   [ ! -e "$tmp/home/.codex-for-tui/remote/install-reterminal-alpine.sh" ] || fail "normal startup refreshed scripts"

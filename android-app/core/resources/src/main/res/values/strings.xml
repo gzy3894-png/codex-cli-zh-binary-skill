@@ -63,9 +63,9 @@
     <string name="input_mode">Input Mode</string>
     <string name="input_mode_desc">Configure how the terminal communicates with input methods</string>
     <string name="input_mode_default">Default (Recommended)</string>
-    <string name="input_mode_default_desc">Compatible with all IMEs including CJK input</string>
+    <string name="input_mode_default_desc">Live key input with shell echo; best for typing commands</string>
     <string name="input_mode_type_null">Strict Terminal</string>
-    <string name="input_mode_type_null_desc">Semantically correct but may break some IMEs</string>
+    <string name="input_mode_type_null_desc">Same TYPE_NULL path as Default; may break some IMEs</string>
     <string name="input_mode_visible_password">Legacy Workaround</string>
-    <string name="input_mode_visible_password_desc">Fixes Samsung keyboard echo; may break Gboard CJK input</string>
+    <string name="input_mode_visible_password_desc">Samsung keyboard char-based mode; try if Default has no live echo</string>
 </resources>

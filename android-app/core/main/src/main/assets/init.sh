@@ -303,6 +303,23 @@ EOF
 ensure_codex_preview
 export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"
 
+# Enter an interactive login-like shell with sane tty flags so local echo works.
+# Non-interactive `exec /bin/ash` can leave the PTY without echo/icanon on some paths.
+enter_interactive_shell() {
+  if [ -t 0 ] && command -v stty >/dev/null 2>&1; then
+    stty sane 2>/dev/null || true
+    stty echo icanon icrnl ixon 2>/dev/null || true
+  fi
+  # Prefer interactive ash so job control / line editing match a normal terminal.
+  if [ -x /bin/ash ]; then
+    exec /bin/ash -i
+  fi
+  if [ -x /bin/sh ]; then
+    exec /bin/sh -i
+  fi
+  exec /bin/sh
+}
+
 if [ "$#" -eq 0 ]; then
   [ ! -r /etc/profile ] || . /etc/profile
   export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"
@@ -323,17 +340,17 @@ if [ "$#" -eq 0 ]; then
       ! command -v python3 >/dev/null 2>&1
     then
       printf '%s\n' "错误: 无法准备 APK 环境升级所需的 python3，已阻止 Codex 启动。" >&2
-      exec /bin/ash
+      enter_interactive_shell
     fi
   fi
   apk_upgrade="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin/codex-apk-upgrade"
   if [ ! -x "$apk_upgrade" ]; then
     printf '%s\n' "错误: APK 环境升级入口缺失，已阻止 Codex 启动。" >&2
-    exec /bin/ash
+    enter_interactive_shell
   fi
   if ! HOME=/root CODEX_HOME=/root/.codex sh "$apk_upgrade"; then
     printf '%s\n' "错误: APK 环境升级未完成，已回滚并阻止 Codex 启动；下次打开 App 会自动重试。" >&2
-    exec /bin/ash
+    enter_interactive_shell
   fi
   if [ -s "$bootstrap" ]; then
     HOME=/root CODEX_HOME=/root/.codex \
@@ -342,7 +359,7 @@ if [ "$#" -eq 0 ]; then
       sh "$bootstrap" ||
       printf '%s\n' "警告: Codex for TUI 启动引导失败，已回到 shell。" >&2
   fi
-  exec /bin/ash
+  enter_interactive_shell
 fi
 
 exec "$@"

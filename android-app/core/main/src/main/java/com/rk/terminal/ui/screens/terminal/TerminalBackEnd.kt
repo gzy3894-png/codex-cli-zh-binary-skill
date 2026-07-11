@@ -15,6 +15,7 @@ import com.blankj.utilcode.util.KeyboardUtils
 import com.rk.libcommons.child
 import com.rk.settings.Settings
 import com.rk.terminal.ui.activities.terminal.MainActivity
+import com.rk.terminal.ui.screens.settings.InputMode
 import com.rk.terminal.ui.screens.terminal.virtualkeys.SpecialButton
 import com.termux.terminal.TerminalEmulator
 import com.termux.terminal.TerminalSession
@@ -337,7 +338,13 @@ class TerminalBackEnd(
     }
 
     override fun shouldBackButtonBeMappedToEscape(): Boolean = false
-    override fun shouldEnforceCharBasedInput(): Boolean = Settings.input_mode != 1
+    // Stock termux TerminalView only exposes a boolean:
+    // true  → TYPE_TEXT_VARIATION_VISIBLE_PASSWORD (Samsung char-based workaround)
+    // false → TYPE_NULL (preferred; key events / live echo for most IMEs)
+    // DEFAULT and TYPE_NULL both use TYPE_NULL so typing is visible char-by-char.
+    // Only the explicit "Legacy Workaround" setting opts into VISIBLE_PASSWORD.
+    override fun shouldEnforceCharBasedInput(): Boolean =
+        Settings.input_mode == InputMode.VISIBLE_PASSWORD
     override fun shouldUseCtrlSpaceWorkaround(): Boolean = true
     override fun isTerminalViewSelected(): Boolean = true
     override fun copyModeChanged(copyMode: Boolean) {}

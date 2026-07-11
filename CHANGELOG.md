@@ -1,5 +1,16 @@
 # Changelog
 
+## Codex for TUI 2.4.6
+
+Codex for TUI 2.4.6 是 2.4.5 的前滚体验热修：多行就绪引导，并修复 shell 输入过程中不回显。
+
+- 就绪提示改为多行：列出 `codex` / `codex 配置模式` / `codex 官方登录` 及各自结果。
+- 进入交互 shell：`stty sane` + `ash -i`，保证 PTY 本地回显与行编辑。
+- 修正默认输入模式映射：默认/严格终端用 `TYPE_NULL` 即时送键；「旧版兼容」才用 VISIBLE_PASSWORD。
+- SQLite build key 使用 `apk-2.4.6` runtime epoch；Codex 二进制仍为固定 `0.144.1-zh.1`。
+- Release 校验 `versionCode=61`、`versionName=2.4.6`；发布说明见 `docs/codex-for-tui-2.4.6-release-notes.md`。
+- Android 不能普通覆盖降级安装；从 2.4.6（`versionCode=61`）回到更低版本必须使用更高 versionCode 的前滚修复包，或卸载重装。
+
 ## Codex for TUI 2.4.5
 
 Codex for TUI 2.4.5 优化冷启动：默认 shell、减少噪声、加快日常升级检查，并写清新/老用户流程。
