@@ -164,6 +164,9 @@ jobs:
     needs:
       - script-smoke
       - rtk-arm64-musl
+    env:
+      CODEX_TUI_EXPECTED_VERSION_CODE: "62"
+      CODEX_TUI_EXPECTED_VERSION_NAME: 2.4.7
     defaults:
       run:
         working-directory: android-app
