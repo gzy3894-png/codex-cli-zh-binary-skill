@@ -203,6 +203,7 @@ fun TerminalScreen(
                     onClear = mainActivity::dismissMediaPreview,
                     onRemove = mainActivity::removeMediaPreview,
                     onSendToAi = mainActivity::sendPreviewToAi,
+                    onSendManyToAi = mainActivity::sendPreviewsToAi,
                     onSendText = mainActivity::sendComposerTextToAi,
                     onPreviewOpened = mainActivity::mediaPreviewOpened,
                     onPreviewClosed = mainActivity::mediaPreviewClosed,

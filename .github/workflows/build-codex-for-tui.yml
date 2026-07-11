@@ -286,8 +286,8 @@ jobs:
       ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
       CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc
       CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui
-      CODEX_TUI_EXPECTED_VERSION_CODE: "61"
-      CODEX_TUI_EXPECTED_VERSION_NAME: 2.4.6
+      CODEX_TUI_EXPECTED_VERSION_CODE: "62"
+      CODEX_TUI_EXPECTED_VERSION_NAME: 2.4.7
 
     steps:
       - name: Checkout
@@ -607,7 +607,7 @@ jobs:
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          body_path: docs/codex-for-tui-2.4.6-release-notes.md
+          body_path: docs/codex-for-tui-2.4.7-release-notes.md
           files: |
             /tmp/codex-for-tui-release/*.apk
             /tmp/codex-for-tui-release/SHA256SUMS

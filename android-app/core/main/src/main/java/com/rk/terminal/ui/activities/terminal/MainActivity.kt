@@ -42,6 +42,8 @@ import com.rk.terminal.ui.screens.terminal.TerminalRenderPerformanceMetrics
 import com.rk.terminal.ui.screens.terminal.TerminalSessionFoldItem
 import com.rk.terminal.ui.screens.terminal.TerminalSessionFoldItemKind
 import com.rk.terminal.ui.screens.terminal.TerminalViewModel
+import com.rk.terminal.ui.screens.terminal.buildPreviewDisplayNames
+import com.rk.terminal.ui.screens.terminal.shortPreviewDisplayName
 import com.rk.terminal.ui.theme.KarbonTheme
 import com.termux.terminal.TerminalSession
 import java.io.File
@@ -1057,52 +1059,74 @@ class MainActivity : ComponentActivity() {
     }
 
     fun sendPreviewToAi(preview: TerminalMediaPreview, userMessage: String) {
+        sendPreviewsToAi(listOf(preview), userMessage)
+    }
+
+    fun sendPreviewsToAi(previews: List<TerminalMediaPreview>, userMessage: String) {
+        if (previews.isEmpty()) {
+            toast("请先勾选要发送的文件")
+            return
+        }
         val session = terminalViewModel.terminalView?.currentSession
         if (session == null) {
             toast("当前终端会话不可用")
             return
         }
 
-        val refId = previewReferenceId(preview)
-        val refWritten = runCatching {
-            writePreviewReference(preview, refId)
-        }.onFailure { error ->
-            toast("无法创建文件引用：${error.message}")
-        }.isSuccess
-        if (!refWritten) return
-
+        val displayNames = buildPreviewDisplayNames(terminalViewModel.mediaPreviews.toList())
         val cleanMessage = collapseTerminalText(userMessage)
+        val sentLabels = mutableListOf<String>()
         val prompt = buildString {
-            append("文件[").append(refId).append("] ")
-            if (cleanMessage.isNotBlank()) {
-                append(cleanMessage).append("。")
+            previews.forEachIndexed { index, preview ->
+                val refId = previewReferenceId(preview)
+                val refWritten = runCatching {
+                    writePreviewReference(preview, refId)
+                }.onFailure { error ->
+                    toast("无法创建文件引用：${error.message}")
+                }.isSuccess
+                if (!refWritten) return@forEachIndexed
+
+                val label = displayNames[preview.stamp] ?: shortPreviewDisplayName(preview, index + 1)
+                if (isNotEmpty()) append('\n')
+                append(label).append("[").append(refId).append("] ")
+                if (index == 0 && cleanMessage.isNotBlank()) {
+                    append(cleanMessage).append("。")
+                }
+                append("路径：codex-preview path ").append(refId)
+
+                writeAgentPanelEvent(
+                    source = "files",
+                    type = "user_sent_file",
+                    state = "done",
+                    reason = cleanMessage,
+                    itemId = refId,
+                    extra = mediaPreviewExtras(preview) + mapOf("display_name" to label)
+                )
+                writeAgentPanelStatus(
+                    source = "files",
+                    state = "done",
+                    reason = "sent_to_terminal",
+                    itemId = refId
+                )
+                appendActiveSessionFoldItem(
+                    kind = TerminalSessionFoldItemKind.FILE,
+                    title = label,
+                    summary = cleanMessage,
+                    path = preview.path,
+                    status = "done",
+                    itemId = refId
+                )
+                sentLabels.add(label)
             }
-            append("路径：codex-preview path ").append(refId)
         }
+        if (prompt.isBlank() || sentLabels.isEmpty()) return
         submitPromptToSession(session, prompt)
-        writeAgentPanelEvent(
-            source = "files",
-            type = "user_sent_file",
-            state = "done",
-            reason = cleanMessage,
-            itemId = refId,
-            extra = mediaPreviewExtras(preview)
-        )
-        writeAgentPanelStatus(
-            source = "files",
-            state = "done",
-            reason = "sent_to_terminal",
-            itemId = refId
-        )
-        appendActiveSessionFoldItem(
-            kind = TerminalSessionFoldItemKind.FILE,
-            title = preview.name,
-            summary = cleanMessage,
-            path = preview.path,
-            status = "done",
-            itemId = refId
-        )
-        toast("已发送：${shortenForTerminal(preview.name, 24)}")
+        val toastLabel = if (sentLabels.size == 1) {
+            sentLabels.first()
+        } else {
+            sentLabels.take(3).joinToString("、") + if (sentLabels.size > 3) " 等${sentLabels.size}项" else ""
+        }
+        toast("已发送：$toastLabel")
     }
 
     fun mediaPreviewOpened(preview: TerminalMediaPreview) {
@@ -1160,7 +1184,8 @@ class MainActivity : ComponentActivity() {
         val previewDir = localDir().child("media-preview")
         val mediaDir = previewDir.child("files")
         val stamp = "${System.currentTimeMillis()}.${(0..9999).random()}"
-        val target = mediaDir.child("$stamp-user-text.txt")
+        // Keep on-disk names short; UI renumbers as 文本N for display.
+        val target = mediaDir.child("$stamp-text.txt")
         val written = runCatching {
             mediaDir.mkdirs()
             target.writeText(text.replace("\r\n", "\n"), Charsets.UTF_8)
@@ -1169,9 +1194,12 @@ class MainActivity : ComponentActivity() {
         }.isSuccess
         if (!written) return false
 
+        val textIndex = terminalViewModel.mediaPreviews.count {
+            it.kind == TerminalMediaPreviewKind.TEXT
+        } + 1
         val preview = TerminalMediaPreview(
             path = target.absolutePath,
-            name = "用户文本-$stamp.txt",
+            name = "文本$textIndex",
             kind = TerminalMediaPreviewKind.TEXT,
             stamp = stamp,
             sizeBytes = target.length(),
@@ -2953,10 +2981,16 @@ class MainActivity : ComponentActivity() {
         }
 
         val stamp = "${System.currentTimeMillis()}.${(0..9999).random()}"
-        val safeName = sanitizeFileName(info.name).ifBlank {
-            "picked-${kind.name.lowercase(Locale.ROOT)}.${extensionFromMime(info.mimeType).ifBlank { "bin" }}"
+        val ext = extensionFromMime(info.mimeType).ifBlank {
+            sanitizeFileName(info.name).substringAfterLast('.', missingDelimiterValue = "").take(12)
+        }.ifBlank { "bin" }
+        val kindToken = when (kind) {
+            TerminalMediaPreviewKind.IMAGE -> "img"
+            TerminalMediaPreviewKind.VIDEO -> "vid"
+            TerminalMediaPreviewKind.TEXT -> "txt"
         }
-        val target = mediaDir.child("$stamp-$safeName")
+        // Disk cache: stamp + short type token only (no long original names).
+        val target = mediaDir.child("$stamp-$kindToken.$ext")
         val copiedBytes = withContext(Dispatchers.IO) {
             mediaDir.mkdirs()
             runCatching {
@@ -2986,9 +3020,19 @@ class MainActivity : ComponentActivity() {
             null
         }
 
+        val displayIndex = terminalViewModel.mediaPreviews.count { it.kind == kind } + 1
+        val displayName = shortPreviewDisplayName(
+            TerminalMediaPreview(
+                path = target.absolutePath,
+                name = "",
+                kind = kind,
+                stamp = stamp
+            ),
+            displayIndex
+        )
         val preview = TerminalMediaPreview(
             path = target.absolutePath,
-            name = info.name.ifBlank { target.name },
+            name = displayName,
             kind = kind,
             stamp = stamp,
             width = bounds?.first,

@@ -265,8 +265,8 @@ case "${1:-}" in
 esac
 
 print_ready_shell_hint() {
-  # Multi-line daily tip on stdout (not stderr) so it is not styled as a warning.
-  # Remind users what to type and what each command does.
+  # Print a short daily tip on stdout, then return so init can hand off to a pure interactive shell.
+  # Keep this non-interactive: no prompts, no leftover "guide mode" state.
   profile_hint=""
   if [ -r "${CODEX_HOME:-$HOME/.codex}/config-profiles-v2/index.json" ]; then
     profile_hint="$(sed -n 's/.*"active_profile_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
@@ -276,11 +276,12 @@ print_ready_shell_hint() {
   if [ -n "$profile_hint" ]; then
     printf '%s\n' "活动配置: $profile_hint"
   fi
-  printf '%s\n' "可输入命令（输入过程应实时显示，回车执行）："
+  printf '%s\n' "常用命令："
   printf '%s\n' "  codex              → 启动 Codex TUI"
   printf '%s\n' "  codex 配置模式     → 管理站点、模型与压缩策略"
   printf '%s\n' "  codex 官方登录     → 设备码登录官方账号（可选）"
   printf '%s\n' "设置里可开启「启动时自动进入 Codex」。"
+  printf '%s\n' "引导结束，进入 shell。"
 }
 
 # Default is shell-first. Set CODEX_FOR_TUI_AUTO_START=1 (App setting) to restore old behavior.

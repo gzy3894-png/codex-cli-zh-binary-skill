@@ -111,7 +111,8 @@ EOF
   }
 
   assert_file_contains "$tmp/stdout" "环境就绪"
-  assert_file_contains "$tmp/stdout" "可输入命令"
+  assert_file_contains "$tmp/stdout" "常用命令"
+  assert_file_contains "$tmp/stdout" "引导结束，进入 shell。"
   assert_file_contains "$tmp/stdout" "启动 Codex TUI"
   assert_file_contains "$tmp/stdout" "管理站点、模型与压缩策略"
   assert_file_not_contains "$tmp/stdout" "codex-ran"

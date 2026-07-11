@@ -303,14 +303,40 @@ EOF
 ensure_codex_preview
 export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"
 
-# Enter an interactive login-like shell with sane tty flags so local echo works.
+# Hand off to a pure interactive shell after bootstrap guide text.
 # Non-interactive `exec /bin/ash` can leave the PTY without echo/icanon on some paths.
+# Also install a one-shot interactive rc via ENV so ash re-applies stty after startup.
 enter_interactive_shell() {
-  if [ -t 0 ] && command -v stty >/dev/null 2>&1; then
-    stty sane 2>/dev/null || true
-    stty echo icanon icrnl ixon 2>/dev/null || true
+  # Drop any residual non-interactive flags from bootstrap/upgrade.
+  set +e +u +v +x 2>/dev/null || true
+
+  if command -v stty >/dev/null 2>&1; then
+    # Prefer the controlling tty when stdin is not already a tty.
+    if [ -t 0 ]; then
+      stty sane 2>/dev/null || true
+      stty echo icanon icrnl onlcr ixon 2>/dev/null || true
+    elif [ -r /dev/tty ] && [ -w /dev/tty ]; then
+      stty sane < /dev/tty 2>/dev/null || true
+      stty echo icanon icrnl onlcr ixon < /dev/tty 2>/dev/null || true
+    fi
   fi
-  # Prefer interactive ash so job control / line editing match a normal terminal.
+
+  # ash/bash-compatible interactive startup: re-assert echo once the shell owns the TTY.
+  shell_rc="${TMPDIR:-/tmp}/codex-for-tui-shell-rc.$$"
+  cat >"$shell_rc" <<'EOF' 2>/dev/null || true
+# Codex for TUI interactive shell handoff (auto-generated, safe to ignore).
+if command -v stty >/dev/null 2>&1; then
+  stty sane 2>/dev/null || true
+  stty echo icanon icrnl onlcr ixon 2>/dev/null || true
+fi
+# Avoid double-sourcing if the shell restarts.
+unset ENV
+EOF
+  if [ -s "$shell_rc" ]; then
+    export ENV="$shell_rc"
+  fi
+
+  # Prefer interactive ash so line editing / echo match a normal terminal session.
   if [ -x /bin/ash ]; then
     exec /bin/ash -i
   fi

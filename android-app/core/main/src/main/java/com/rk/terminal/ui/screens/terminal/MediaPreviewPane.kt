@@ -39,6 +39,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -51,6 +52,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -187,6 +189,9 @@ fun TerminalMediaPreviewTray(
     onClear: () -> Unit,
     onRemove: (TerminalMediaPreview) -> Unit,
     onSendToAi: (TerminalMediaPreview, String) -> Unit,
+    onSendManyToAi: (List<TerminalMediaPreview>, String) -> Unit = { items, message ->
+        items.forEach { onSendToAi(it, message) }
+    },
     onSendText: (String) -> Boolean,
     onPreviewOpened: (TerminalMediaPreview) -> Unit,
     onPreviewClosed: (TerminalMediaPreview?) -> Unit,
@@ -196,11 +201,30 @@ fun TerminalMediaPreviewTray(
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val trayHeight = (screenHeight * 0.42f).coerceIn(220.dp, 420.dp)
     var dialogState by remember { mutableStateOf<PreviewDialogState?>(null) }
-    var sendTarget by remember { mutableStateOf<TerminalMediaPreview?>(null) }
+    var showBatchSendDialog by remember { mutableStateOf(false) }
+    var selectedStamps by remember { mutableStateOf(setOf<String>()) }
+    val displayNames = remember(previews.toList()) { buildPreviewDisplayNames(previews) }
     val imagePreviews = previews.filter { it.kind == TerminalMediaPreviewKind.IMAGE }
+    val selectedPreviews = previews.filter { selectedStamps.contains(it.stamp) }
     val openPreview = { preview: TerminalMediaPreview, state: PreviewDialogState ->
         dialogState = state
         onPreviewOpened(preview)
+    }
+    val toggleSelected = { preview: TerminalMediaPreview ->
+        selectedStamps = if (selectedStamps.contains(preview.stamp)) {
+            selectedStamps - preview.stamp
+        } else {
+            selectedStamps + preview.stamp
+        }
+    }
+
+    // Drop selections for items that no longer exist in the tray.
+    val liveStamps = previews.map { it.stamp }.toSet()
+    LaunchedEffect(liveStamps) {
+        val pruned = selectedStamps.intersect(liveStamps)
+        if (pruned != selectedStamps) {
+            selectedStamps = pruned
+        }
     }
 
     Surface(
@@ -216,9 +240,27 @@ fun TerminalMediaPreviewTray(
         Column {
             PreviewTrayHeader(
                 count = previews.size,
+                selectedCount = selectedPreviews.size,
                 onCollapse = onCollapse,
                 onPickFile = onPickFile,
-                onClear = onClear
+                onClear = {
+                    selectedStamps = emptySet()
+                    onClear()
+                },
+                onSend = {
+                    if (selectedPreviews.isEmpty()) {
+                        toast("请先勾选要发送的文件")
+                    } else {
+                        showBatchSendDialog = true
+                    }
+                },
+                onSelectAll = {
+                    selectedStamps = if (selectedStamps.size == previews.size && previews.isNotEmpty()) {
+                        emptySet()
+                    } else {
+                        previews.map { it.stamp }.toSet()
+                    }
+                }
             )
             HorizontalDivider(
                 color = DividerDefaults.color.copy(alpha = 0.7f),
@@ -238,12 +280,18 @@ fun TerminalMediaPreviewTray(
                     items = previews,
                     key = { item -> item.stamp }
                 ) { preview ->
+                    val displayName = displayNames[preview.stamp] ?: shortPreviewDisplayName(preview, 1)
                     PreviewThumbTile(
                         preview = preview,
+                        displayName = displayName,
+                        selected = selectedStamps.contains(preview.stamp),
                         imagePreviews = imagePreviews,
                         onOpen = { openPreview(preview, it) },
-                        onRemove = { onRemove(preview) },
-                        onSendToAi = { sendTarget = preview },
+                        onRemove = {
+                            selectedStamps = selectedStamps - preview.stamp
+                            onRemove(preview)
+                        },
+                        onToggleSelect = { toggleSelected(preview) },
                         onShare = { onPreviewShared(preview) }
                     )
                 }
@@ -262,36 +310,45 @@ fun TerminalMediaPreviewTray(
         )
     }
 
-    sendTarget?.let { preview ->
-        SendPreviewDialog(
-            preview = preview,
-            onDismiss = { sendTarget = null },
+    if (showBatchSendDialog) {
+        SendSelectedPreviewsDialog(
+            previews = selectedPreviews,
+            displayNames = displayNames,
+            onDismiss = { showBatchSendDialog = false },
             onConfirm = { message ->
-                onSendToAi(preview, message)
-                sendTarget = null
+                onSendManyToAi(selectedPreviews, message)
+                selectedStamps = emptySet()
+                showBatchSendDialog = false
             }
         )
     }
 }
 
 @Composable
-private fun SendPreviewDialog(
-    preview: TerminalMediaPreview,
+private fun SendSelectedPreviewsDialog(
+    previews: List<TerminalMediaPreview>,
+    displayNames: Map<String, String>,
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit
 ) {
-    var message by remember(preview.stamp) { mutableStateOf("") }
+    var message by remember(previews.map { it.stamp }.joinToString()) { mutableStateOf("") }
+    val labels = previews.map { displayNames[it.stamp] ?: shortPreviewDisplayName(it, 1) }
+    val summary = when {
+        labels.isEmpty() -> "未选择文件"
+        labels.size <= 3 -> labels.joinToString("、")
+        else -> labels.take(3).joinToString("、") + " 等 ${labels.size} 项"
+    }
     val send = { onConfirm(message.trim()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("发送文件") },
+        title = { Text("发送已选文件") },
         text = {
             Column {
                 Text(
-                    text = preview.name,
+                    text = summary,
                     style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(10.dp))
@@ -307,7 +364,7 @@ private fun SendPreviewDialog(
             }
         },
         confirmButton = {
-            Button(onClick = send) {
+            Button(onClick = send, enabled = previews.isNotEmpty()) {
                 Text("发送")
             }
         },
@@ -317,6 +374,26 @@ private fun SendPreviewDialog(
             }
         }
     )
+}
+
+internal fun buildPreviewDisplayNames(previews: List<TerminalMediaPreview>): Map<String, String> {
+    val counters = mutableMapOf<TerminalMediaPreviewKind, Int>()
+    val names = linkedMapOf<String, String>()
+    previews.forEach { preview ->
+        val index = (counters[preview.kind] ?: 0) + 1
+        counters[preview.kind] = index
+        names[preview.stamp] = shortPreviewDisplayName(preview, index)
+    }
+    return names
+}
+
+internal fun shortPreviewDisplayName(preview: TerminalMediaPreview, index: Int): String {
+    val kindLabel = when (preview.kind) {
+        TerminalMediaPreviewKind.IMAGE -> "图片"
+        TerminalMediaPreviewKind.VIDEO -> "视频"
+        TerminalMediaPreviewKind.TEXT -> "文本"
+    }
+    return "$kindLabel$index"
 }
 
 @Composable
@@ -380,40 +457,71 @@ private fun TextComposerTile(onSendText: (String) -> Boolean) {
 @Composable
 private fun PreviewTrayHeader(
     count: Int,
+    selectedCount: Int,
     onCollapse: () -> Unit,
     onPickFile: () -> Unit,
-    onClear: () -> Unit
+    onClear: () -> Unit,
+    onSend: () -> Unit,
+    onSelectAll: () -> Unit
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(44.dp)
-            .padding(start = 12.dp, end = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 2.dp)
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "文件",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1
-            )
-            Text(
-                text = "共 $count 个项目，可添加图片、视频、文本并发送到当前会话",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(36.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "文件",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+                Text(
+                    text = if (selectedCount > 0) {
+                        "已选 $selectedCount / $count"
+                    } else {
+                        "共 $count 项 · 勾选后点发送"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Button(
+                onClick = onSend,
+                enabled = selectedCount > 0,
+                modifier = Modifier.height(32.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp)
+            ) {
+                Text(if (selectedCount > 0) "发送($selectedCount)" else "发送")
+            }
         }
-        TextButton(onClick = onPickFile) {
-            Text("添加")
-        }
-        TextButton(onClick = onCollapse) {
-            Text("折叠")
-        }
-        TextButton(onClick = onClear) {
-            Text("清空")
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(32.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.End
+        ) {
+            TextButton(onClick = onSelectAll, enabled = count > 0) {
+                Text(if (selectedCount == count && count > 0) "取消全选" else "全选")
+            }
+            TextButton(onClick = onPickFile) {
+                Text("添加")
+            }
+            TextButton(onClick = onCollapse) {
+                Text("折叠")
+            }
+            TextButton(onClick = onClear) {
+                Text("清空")
+            }
         }
     }
 }
@@ -445,10 +553,12 @@ private fun EmptyPreviewTray(onPickFile: () -> Unit) {
 @Composable
 private fun PreviewThumbTile(
     preview: TerminalMediaPreview,
+    displayName: String,
+    selected: Boolean,
     imagePreviews: List<TerminalMediaPreview>,
     onOpen: (PreviewDialogState) -> Unit,
     onRemove: () -> Unit,
-    onSendToAi: () -> Unit,
+    onToggleSelect: () -> Unit,
     onShare: () -> Unit
 ) {
     val context = LocalContext.current
@@ -475,8 +585,17 @@ private fun PreviewThumbTile(
             .fillMaxWidth()
             .height(154.dp),
         shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
-        tonalElevation = 1.dp
+        color = if (selected) {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f)
+        },
+        tonalElevation = 1.dp,
+        border = if (selected) {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f))
+        } else {
+            null
+        }
     ) {
         Column(modifier = Modifier.padding(6.dp)) {
             Box(
@@ -497,7 +616,7 @@ private fun PreviewThumbTile(
                     .background(MaterialTheme.colorScheme.surface),
                 contentAlignment = Alignment.Center
             ) {
-                PreviewThumbContent(preview = preview)
+                PreviewThumbContent(preview = preview, displayName = displayName)
                 Text(
                     text = sourceLabel,
                     modifier = Modifier
@@ -512,11 +631,21 @@ private fun PreviewThumbTile(
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1
                 )
+                Checkbox(
+                    checked = selected,
+                    onCheckedChange = { onToggleSelect() },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(28.dp)
+                        .padding(2.dp)
+                )
             }
             Spacer(modifier = Modifier.height(5.dp))
             Text(
-                text = preview.name,
-                modifier = Modifier.fillMaxWidth(),
+                text = displayName,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggleSelect),
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
@@ -524,16 +653,9 @@ private fun PreviewThumbTile(
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(
-                    onClick = onSendToAi,
-                    modifier = Modifier.height(32.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp)
-                ) {
-                    Text("发送", style = MaterialTheme.typography.labelSmall)
-                }
                 IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
                     Icon(
                         imageVector = Icons.Filled.Close,
@@ -547,7 +669,7 @@ private fun PreviewThumbTile(
 }
 
 @Composable
-private fun PreviewThumbContent(preview: TerminalMediaPreview) {
+private fun PreviewThumbContent(preview: TerminalMediaPreview, displayName: String = preview.name) {
     when (preview.kind) {
         TerminalMediaPreviewKind.IMAGE -> {
             val mediaFile = remember(preview.path) { File(preview.path) }
@@ -555,12 +677,12 @@ private fun PreviewThumbContent(preview: TerminalMediaPreview) {
                 factory = { viewContext ->
                     ImageView(viewContext).apply {
                         scaleType = ImageView.ScaleType.CENTER_CROP
-                        contentDescription = preview.name
+                        contentDescription = displayName
                         load(mediaFile) { crossfade(true) }
                     }
                 },
                 update = { imageView ->
-                    imageView.contentDescription = preview.name
+                    imageView.contentDescription = displayName
                     imageView.load(mediaFile) { crossfade(true) }
                 },
                 modifier = Modifier.fillMaxSize()
@@ -568,7 +690,7 @@ private fun PreviewThumbContent(preview: TerminalMediaPreview) {
         }
         TerminalMediaPreviewKind.VIDEO -> {
             Text(
-                text = "视频",
+                text = displayName.ifBlank { "视频" },
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
@@ -578,7 +700,7 @@ private fun PreviewThumbContent(preview: TerminalMediaPreview) {
         TerminalMediaPreviewKind.TEXT -> {
             Text(
                 text = preview.textPreview.orEmpty()
-                    .ifBlank { "文本" },
+                    .ifBlank { displayName.ifBlank { "文本" } },
                 modifier = Modifier.padding(8.dp),
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.labelSmall,

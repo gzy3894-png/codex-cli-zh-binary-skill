@@ -1,5 +1,17 @@
 # Changelog
 
+## Codex for TUI 2.4.7
+
+Codex for TUI 2.4.7 是 2.4.6 的前滚体验热修：引导结束后干净进入纯 shell，文件托盘支持多选与类型编号短名。
+
+- 就绪引导输出完毕后明确「引导结束，进入 shell」，bootstrap 退出后由 `init.sh` 交接纯交互 shell。
+- 加强 `enter_interactive_shell`：`stty` 回退到 `/dev/tty`，并用 `ENV` 一次性 rc 在 ash 启动后再次启用 echo。
+- 文件托盘：每项可勾选、顶部统一发送、支持全选；批量发送共用一条附加说明。
+- 临时文件展示名改为 `图片N` / `视频N` / `文本N`；磁盘缓存改为 `$stamp-img|vid|txt.ext` 短路径。
+- SQLite build key 使用 `apk-2.4.7` runtime epoch；Codex 二进制仍为固定 `0.144.1-zh.1`。
+- Release 校验 `versionCode=62`、`versionName=2.4.7`；发布说明见 `docs/codex-for-tui-2.4.7-release-notes.md`。
+- Android 不能普通覆盖降级安装；从 2.4.7（`versionCode=62`）回到更低版本必须使用更高 versionCode 的前滚修复包，或卸载重装。
+
 ## Codex for TUI 2.4.6
 
 Codex for TUI 2.4.6 是 2.4.5 的前滚体验热修：多行就绪引导，并修复 shell 输入过程中不回显。
