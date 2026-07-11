@@ -129,9 +129,18 @@ class SessionService : Service() {
     }
 
     /**
-     * Close a terminal window: stop its PTY and drop live + label metadata.
+     * Close a terminal window: drop live + label metadata, then stop its PTY.
      * Agent CLI history/UUID lives outside this map; closing a window must not
      * be treated as deleting a codex/claude conversation.
+     *
+     * Order is crash-critical for 2.5.0–2.5.4 legacy windows:
+     * 1) Snapshot remaining + switch [currentSession]
+     * 2) Remove from live maps so the drawer updates immediately
+     * 3) Persist registry drop ([notifyTerminated]) BEFORE native PTY teardown
+     * 4) Best-effort [finishIfRunning] last
+     *
+     * Older builds killed the PTY first; a native crash there left registry rows
+     * intact, so cold restore resurrected "undeletable" side-drawer windows.
      *
      * Always leaves [currentSession] pointing at a still-live id when any remain.
      * Avoids [stopSelf] on last-window close while UI may still be bound
@@ -151,7 +160,7 @@ class SessionService : Service() {
                 else -> remainingBefore.lastOrNull()
             }
 
-            // Point current away from the dying id before killing PTY.
+            // Point current away from the dying id before any map/registry drop.
             if (nextCurrent != null) {
                 val mode = sessionList[nextCurrent] ?: com.rk.settings.Settings.working_Mode
                 currentSession.value = nextCurrent to mode
@@ -161,22 +170,28 @@ class SessionService : Service() {
                 currentSession.value = "" to com.rk.settings.Settings.working_Mode
             }
 
-            sessions[id]?.let { session ->
-                runCatching { session.finishIfRunning() }
-            }
-            sessions.remove(id)
+            // Detach the session object first so later finishIfRunning cannot
+            // re-enter UI against a still-listed id.
+            val dying = sessions.remove(id)
             sessionList.remove(id)
-            cleanupSessionTempDir(id)
+
+            // Persist chrome drop BEFORE native teardown. If finishIfRunning
+            // SIGSEGVs, cold restore must not resurrect this window.
             // Window chrome only — not agent-session lifecycle / not clearAll.
             runCatching { SessionIsolationHooks.notifyTerminated(id) }
-
             if (nextCurrent != null) {
                 runCatching { SessionIsolationHooks.notifyCurrent(nextCurrent) }
             }
             runCatching { updateNotification() }
+
+            // Kill PTY last; never let native teardown block registry truth.
+            runCatching { dying?.finishIfRunning() }
+            cleanupSessionTempDir(id)
             nextCurrent
         }.getOrElse {
             android.util.Log.e("SessionService", "terminateSession failed for $id", it)
+            // Even on failure, try not to leave a deleted id as current.
+            runCatching { SessionIsolationHooks.notifyTerminated(id) }
             sessionList.keys.lastOrNull()
         }
     }

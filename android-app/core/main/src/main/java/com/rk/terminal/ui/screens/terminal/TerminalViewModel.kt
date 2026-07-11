@@ -282,10 +282,12 @@ class TerminalViewModel : ViewModel() {
      * Close one terminal window (kill its PTY). PowerShell multi-window model:
      * the drawer entry is a process/window, not an agent conversation row.
      *
-     * Order matters for crash safety:
+     * Order matters for crash safety (2.5.5):
      * 1) Switch/detach UI off the dying PTY while Compose click is still active.
-     * 2) Defer finishIfRunning to the next main-loop turn so drawer recomposition
-     *    does not run against a session mid-teardown (2.5.3 still crashed here).
+     * 2) Defer terminateSession to the next main-loop turn so drawer recomposition
+     *    does not run against a session mid-teardown.
+     * 3) terminateSession itself persists registry drop BEFORE native finishIfRunning,
+     *    so a PTY crash cannot resurrect legacy 2.5.0–2.5.4 windows on cold restore.
      */
     fun closeWindow(context: Context, sessionBinder: SessionService.SessionBinder, sessionId: String) {
         val service = sessionBinder.getService()
@@ -308,13 +310,14 @@ class TerminalViewModel : ViewModel() {
                     val terminal = terminalView
                     if (session != null && terminal != null && terminal.currentSession === session) {
                         // Best-effort: keep view attached but stop client work.
-                        // Actual map removal happens in terminateSession below.
+                        // Actual map/registry removal happens in terminateSession below.
                     }
                 }
             }
         }
 
-        // Defer kill until after the current Compose frame / click handler returns.
+        // Defer terminate until after the current Compose frame / click handler returns.
+        // terminateSession drops registry before native PTY kill (legacy undelete fix).
         Handler(Looper.getMainLooper()).post {
             runCatching {
                 sessionBinder.terminateSession(sessionId)

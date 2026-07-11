@@ -165,8 +165,8 @@ test_apk_upgrade_guards() {
   assert_nonempty_file "$MODEL_PTY_SMOKE"
   python3 -m py_compile "$MODEL_PTY_SMOKE" || fail "model PTY smoke Python syntax failed"
 
-  assert_file_contains "$APK_UPGRADER" 'RELEASE="2.5.4"'
-  assert_file_contains "$APK_UPGRADER" 'VERSION_CODE="70"'
+  assert_file_contains "$APK_UPGRADER" 'RELEASE="2.5.5"'
+  assert_file_contains "$APK_UPGRADER" 'VERSION_CODE="71"'
   assert_file_contains "$APK_UPGRADER" 'EXPECTED_ARCHIVE_SHA256="1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61"'
   assert_file_contains "$APK_UPGRADER" 'EXPECTED_BINARY_SHA256="0cde6d6bad02855732ee0ee2867005408d169c46753d414e6a487884d49e0767"'
   assert_file_contains "$APK_UPGRADER" 'LOCK_DIR="$STATE_ROOT/apk-upgrade.lock"'
@@ -184,8 +184,8 @@ test_apk_upgrade_guards() {
   assert_file_contains "$APK_UPGRADER" 'best_effort_refresh'
   assert_file_contains "$APK_UPGRADER" '第三方模型目录联网刷新失败，已保留离线重建结果。'
 
-  assert_file_contains "$APK_PAYLOAD_PREPARE" 'RELEASE="2.5.4"'
-  assert_file_contains "$APK_PAYLOAD_PREPARE" 'VERSION_CODE="70"'
+  assert_file_contains "$APK_PAYLOAD_PREPARE" 'RELEASE="2.5.5"'
+  assert_file_contains "$APK_PAYLOAD_PREPARE" 'VERSION_CODE="71"'
   assert_file_contains "$APK_PAYLOAD_PREPARE" "tar \\"
   assert_file_contains "$APK_PAYLOAD_PREPARE" "--sort=name"
   assert_file_contains "$APK_PAYLOAD_PREPARE" "--mtime='UTC 1970-01-01'"
@@ -301,6 +301,38 @@ test_apk_upgrade_guards() {
   if awk '/private fun terminateSession/,/^    private fun |^    override |^}/' "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/service/SessionService.kt" | grep -n 'clearAll\|clearRegistry' >/dev/null 2>&1; then
     fail "SessionService.terminateSession must not clear isolation registry (would wipe windows after crash)"
   fi
+  # 2.5.5: registry/map drop must happen before native finishIfRunning so crash cannot resurrect windows.
+  # Extract function body by brace depth (awk start/end ranges are unreliable here).
+  TERM_FN="$(
+    python3 - "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/service/SessionService.kt" <<'PY'
+import sys
+path = sys.argv[1]
+lines = open(path, encoding="utf-8").read().splitlines()
+out = []
+depth = 0
+grab = False
+for line in lines:
+    if (not grab) and "private fun terminateSession(" in line:
+        grab = True
+    if not grab:
+        continue
+    out.append(line)
+    depth += line.count("{") - line.count("}")
+    if any("{" in x for x in out) and depth <= 0:
+        break
+print("\n".join(out))
+PY
+  )"
+  printf '%s\n' "$TERM_FN" | grep -E 'SessionIsolationHooks\.notifyTerminated|notifyTerminated\(' >/dev/null 2>&1 ||
+    fail "SessionService.terminateSession must call notifyTerminated"
+  printf '%s\n' "$TERM_FN" | grep -E 'dying\?\.finishIfRunning\(|finishIfRunning\(\)' >/dev/null 2>&1 ||
+    fail "SessionService.terminateSession must call finishIfRunning"
+  # Compare real call sites only — comments also mention finishIfRunning.
+  nt_line="$(printf '%s\n' "$TERM_FN" | grep -nE 'SessionIsolationHooks\.notifyTerminated|notifyTerminated\(' | head -n1 | cut -d: -f1)"
+  fi_line="$(printf '%s\n' "$TERM_FN" | grep -nE 'dying\?\.finishIfRunning\(|finishIfRunning\(\)' | head -n1 | cut -d: -f1)"
+  [ -n "$nt_line" ] && [ -n "$fi_line" ] || fail "terminateSession must contain notifyTerminated and finishIfRunning"
+  [ "$nt_line" -lt "$fi_line" ] || fail "notifyTerminated must run before finishIfRunning (persist registry drop first)"
+  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/service/SessionService.kt" 'Persist chrome drop BEFORE native teardown'
   # 2.5.4: config profiles share conversation sessions/history under control CODEX_HOME
   assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'Share conversation state across config profiles'
   assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" '_link_shared("history.jsonl"'
@@ -336,13 +368,13 @@ test_apk_upgrade_guards() {
     'test_bootstrap_dependency_cancel_does_not_install'
 
   assert_file_contains "$APP_BUILD_GRADLE" 'val verifyCodexUpgradePayload by tasks.registering'
-  assert_file_contains "$APP_BUILD_GRADLE" 'release"] != "2.5.4"'
-  assert_file_contains "$APP_BUILD_GRADLE" 'version_code"] != "70"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'release"] != "2.5.5"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'version_code"] != "71"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex APK manifest SHA256 mismatch'
   assert_file_contains "$APP_BUILD_GRADLE" 'AAPT strips that asset suffix; use .tgz'
   assert_file_contains "$APP_BUILD_GRADLE" 'dependsOn(verifyCodexUpgradePayload)'
-  assert_file_contains "$CODEX_COMMON" ': "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.5.4}"'
-  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'epoch="${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.4}"'
+  assert_file_contains "$CODEX_COMMON" ': "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.5.5}"'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'epoch="${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.5}"'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" '配置引擎未返回独立运行目录；未启动 Codex。'
   assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'config-profiles/current'
   assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'if model.get("tool_mode") == "code_mode_only":'
@@ -370,16 +402,16 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 70'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.5.4"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 71'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.5.5"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" '- "release/codex-for-tui-*"'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "70"'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.5.4'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "71"'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.5.5'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -419,7 +451,7 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'sha256sum *.apk > SHA256SUMS'
   assert_file_contains "$BUILD_WORKFLOW" 'android-app/app/build/outputs/apk/release/SHA256SUMS'
   assert_file_contains "$BUILD_WORKFLOW" 'softprops/action-gh-release@v2'
-  assert_file_contains "$BUILD_WORKFLOW" 'body_path: docs/codex-for-tui-2.5.4-release-notes.md'
+  assert_file_contains "$BUILD_WORKFLOW" 'body_path: docs/codex-for-tui-2.5.5-release-notes.md'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Publish verified GitHub release'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Download verified release assets'
   assert_file_order "$BUILD_WORKFLOW" 'name: Promote verified tag to installer channel' 'name: Publish verified GitHub release'
@@ -1686,7 +1718,7 @@ EOF
     fail "normal codex did not use an isolated profile runtime"
   printf '%s\n' "$output" | grep -F '/sqlite-builds/' >/dev/null 2>&1 ||
     fail "normal codex did not isolate SQLite by binary build"
-  printf '%s\n' "$output" | grep -F 'apk-2.5.4' >/dev/null 2>&1 ||
+  printf '%s\n' "$output" | grep -F 'apk-2.5.5' >/dev/null 2>&1 ||
     fail "normal codex did not include the APK runtime epoch in SQLite isolation"
   printf '%s\n' "$output" | grep -F "$tmp/prefix/local/bin" >/dev/null 2>&1 || fail "normal codex did not carry app bridge bin in PATH"
   printf '%s\n' "$output" | grep -F 'update-ran' >/dev/null 2>&1 && fail "normal codex invoked update path"

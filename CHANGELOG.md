@@ -1,3 +1,15 @@
+## Codex for TUI 2.5.5
+
+Codex for TUI 2.5.5：关窗「先落盘再杀 PTY」，修复 2.5.0–2.5.4 老窗口删不掉。
+
+- `terminateSession`：先切 `currentSession`、移出 live map、`notifyTerminated` 写 registry，**最后** `finishIfRunning`。
+- 根因：旧路径先杀 PTY，native 崩溃时 registry 未更新，冷恢复把侧栏窗口复活。
+- 保留 2.5.4：配置共享 sessions、统一 workspace、关窗不 `clearAll`/`stopSelf`。
+- SQLite epoch `apk-2.5.5`；`versionCode=71`、`versionName=2.5.5`。
+- 发布说明见 `docs/codex-for-tui-2.5.5-release-notes.md`。
+
+
+
 # Changelog
 
 ## Codex for TUI 2.5.4
