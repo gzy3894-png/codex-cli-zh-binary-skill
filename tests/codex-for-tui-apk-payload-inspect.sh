@@ -64,9 +64,11 @@ support_archive="$(manifest_value support_archive)"
 binary_archive="$(manifest_value binary_archive)"
 case "$support_archive" in
   ""|*/*|*..*) fail "unsafe support archive name: $support_archive" ;;
+  *.gz) fail "support archive uses an AAPT-unsafe .gz asset suffix" ;;
 esac
 case "$binary_archive" in
   ""|*/*|*..*) fail "unsafe binary archive name: $binary_archive" ;;
+  *.gz) fail "binary archive uses an AAPT-unsafe .gz asset suffix" ;;
 esac
 
 unzip -p "$APK" "assets/codex-upgrade/$support_archive" > "$work/$support_archive" ||

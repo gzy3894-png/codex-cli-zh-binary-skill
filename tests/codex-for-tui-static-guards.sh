@@ -189,6 +189,8 @@ test_apk_upgrade_guards() {
   assert_file_contains "$APK_PAYLOAD_PREPARE" "tar \\"
   assert_file_contains "$APK_PAYLOAD_PREPARE" "--sort=name"
   assert_file_contains "$APK_PAYLOAD_PREPARE" "--mtime='UTC 1970-01-01'"
+  assert_file_contains "$APK_PAYLOAD_PREPARE" 'support_archive="codex-support-$RELEASE.tgz"'
+  assert_file_contains "$APK_PAYLOAD_PREPARE" 'binary_archive="codex-${CODEX_ZH_VERSION}-zh-${CODEX_ZH_TARGET}.tgz"'
   assert_file_contains "$APK_PAYLOAD_PREPARE" 'binary_archive_sha256=$archive_sha'
   assert_file_contains "$APK_PAYLOAD_PREPARE" 'binary_sha256=$binary_sha'
 
@@ -216,6 +218,7 @@ test_apk_upgrade_guards() {
   assert_file_contains "$APP_BUILD_GRADLE" 'release"] != "2.4.2"'
   assert_file_contains "$APP_BUILD_GRADLE" 'version_code"] != "57"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex APK manifest SHA256 mismatch'
+  assert_file_contains "$APP_BUILD_GRADLE" 'AAPT strips that asset suffix; use .tgz'
   assert_file_contains "$APP_BUILD_GRADLE" 'dependsOn(verifyCodexUpgradePayload)'
   assert_file_contains "$CODEX_COMMON" ': "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.4.2}"'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'epoch="${CODEX_ZH_RUNTIME_EPOCH:-apk-2.4.2}"'
@@ -231,6 +234,7 @@ test_apk_upgrade_guards() {
   assert_file_contains "$APK_UPGRADE_SMOKE" 'test_stale_empty_lock_is_recovered'
   assert_file_contains "$APK_UPGRADE_SMOKE" 'test_concurrent_upgrade_is_serialized'
   assert_file_contains "$APK_PAYLOAD_INSPECT" 'assets/codex-upgrade/manifest.properties'
+  assert_file_contains "$APK_PAYLOAD_INSPECT" 'AAPT-unsafe .gz asset suffix'
   assert_file_contains "$APK_PAYLOAD_INSPECT" 'APK is too small to contain the fixed offline payload'
   assert_file_contains "$MODEL_PTY_SMOKE" 'Paste-burst protection must expire before Enter submits the command.'
   assert_file_contains "$MODEL_PTY_SMOKE" '选择模型和推理等级'

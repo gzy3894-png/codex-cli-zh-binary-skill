@@ -70,6 +70,9 @@ val verifyCodexUpgradePayload by tasks.registering {
         }
         val support = payloadDir.resolve(values["support_archive"] ?: "")
         val binary = payloadDir.resolve(values["binary_archive"] ?: "")
+        if (support.name.endsWith(".gz") || binary.name.endsWith(".gz")) {
+            throw GradleException("Codex APK archives must not end in .gz because AAPT strips that asset suffix; use .tgz")
+        }
         if (!support.isFile || sha256(support) != values["support_sha256"]) {
             throw GradleException("Codex APK support archive SHA256 mismatch")
         }

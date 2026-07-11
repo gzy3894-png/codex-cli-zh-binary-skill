@@ -64,8 +64,8 @@ printf 'fake-codex:%s:%s\n' "${CODEX_HOME:-}" "${CODEX_SQLITE_HOME:-}" >> "${COD
 EOF
   chmod 755 "$fake_binary"
 
-  support_archive="codex-support-2.4.2.tar.gz"
-  binary_archive="codex-test-0.144.1.tar.gz"
+  support_archive="codex-support-2.4.2.tgz"
+  binary_archive="codex-test-0.144.1.tgz"
   tar -czf "$payload/$support_archive" -C "$support" .
   tar -czf "$payload/$binary_archive" -C "$binary_root" .
   support_sha="$(sha256_file "$payload/$support_archive")"
@@ -577,7 +577,7 @@ test_corrupt_payload_is_rejected_before_install() {
   bad_payload="$root/payload"
   mkdir -p "$home" "$install" "$bad_payload"
   cp "$TMP_ROOT/payload"/* "$bad_payload/"
-  printf '%s\n' corrupt >> "$bad_payload/codex-test-0.144.1.tar.gz"
+  printf '%s\n' corrupt >> "$bad_payload/codex-test-0.144.1.tgz"
   printf '%s\n' '#!/usr/bin/env sh' 'printf old' > "$install/codex"
   chmod 755 "$install/codex"
 

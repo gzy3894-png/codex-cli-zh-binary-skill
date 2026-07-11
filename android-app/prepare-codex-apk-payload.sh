@@ -62,8 +62,10 @@ done
 [ "$(sha256_file "$binary")" = "$(printf '%s' "$CODEX_ZH_BIN_SHA256" | tr '[:upper:]' '[:lower:]')" ] ||
   fail "Codex 二进制 SHA256 不匹配"
 
-support_archive="codex-support-$RELEASE.tar.gz"
-binary_archive="$CODEX_ZH_ARCHIVE"
+# AAPT strips the final ".gz" suffix from packaged assets. Use ".tgz" names so
+# the manifest path and compressed bytes remain unchanged inside the APK.
+support_archive="codex-support-$RELEASE.tgz"
+binary_archive="codex-${CODEX_ZH_VERSION}-zh-${CODEX_ZH_TARGET}.tgz"
 tar \
   --sort=name \
   --mtime='UTC 1970-01-01' \
