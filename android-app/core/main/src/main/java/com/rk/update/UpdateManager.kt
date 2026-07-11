@@ -4,7 +4,6 @@ import android.content.Context
 import com.rk.libcommons.child
 import com.rk.libcommons.createFileIfNot
 import com.rk.libcommons.localBinDir
-import com.rk.terminal.BuildConfig
 import java.io.File
 
 class UpdateManager(private val context: Context) {
@@ -28,8 +27,17 @@ class UpdateManager(private val context: Context) {
             }
 
             val stampFile = binDir.child(stampName)
+            val pkgInfo = packageManager.getPackageInfo(packageName, 0)
+            val versionCode =
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    pkgInfo.longVersionCode
+                } else {
+                    @Suppress("DEPRECATION")
+                    pkgInfo.versionCode.toLong()
+                }
+            val versionName = pkgInfo.versionName ?: "unknown"
             val expected =
-                "versionCode=${BuildConfig.VERSION_CODE}\nversionName=${BuildConfig.VERSION_NAME}\n"
+                "versionCode=$versionCode\nversionName=$versionName\n"
             val stampMatches = stampFile.exists() &&
                 runCatching { stampFile.readText() }.getOrNull() == expected
             val missing = criticalScripts.values.any { name ->

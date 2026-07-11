@@ -59,8 +59,23 @@ object MkSession {
     fun sessionTempDir(context: Context, sessionId: String): File =
         getTempDir(context).child(sanitizeSessionId(sessionId))
 
-    private fun Context.managedScriptsStampValue(): String =
-        "versionCode=${BuildConfig.VERSION_CODE}\nversionName=${BuildConfig.VERSION_NAME}\ncount=${managedScripts.size}\n"
+    private fun Context.appVersionFields(): Pair<Long, String> {
+        val info = packageManager.getPackageInfo(packageName, 0)
+        val code =
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                info.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                info.versionCode.toLong()
+            }
+        val name = info.versionName ?: "unknown"
+        return code to name
+    }
+
+    private fun Context.managedScriptsStampValue(): String {
+        val (code, name) = appVersionFields()
+        return "versionCode=$code\nversionName=$name\ncount=${managedScripts.size}\n"
+    }
 
     private fun Context.syncManagedScripts() {
         val binDir = localBinDir()

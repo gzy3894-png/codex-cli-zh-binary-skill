@@ -254,6 +254,12 @@ test_apk_upgrade_guards() {
   assert_file_contains "$INIT_ASSET" 'sanitize_profile_d'
   assert_file_contains "$MKSESSION" 'MANAGED_SCRIPTS_STAMP'
   assert_file_contains "$MKSESSION" 'managedScriptsStampValue'
+  assert_file_contains "$MKSESSION" 'packageManager.getPackageInfo'
+  assert_file_contains "$UPDATE_MANAGER" 'packageManager.getPackageInfo'
+  # library module has no application BuildConfig.VERSION_*; must not regress
+  if grep -n 'BuildConfig.VERSION_CODE\|BuildConfig.VERSION_NAME' "$MKSESSION" "$UPDATE_MANAGER" >/dev/null 2>&1; then
+    fail "MkSession/UpdateManager must not use library BuildConfig.VERSION_* (unresolved in :core:main)"
+  fi
   assert_file_contains "$MKSESSION" 'openFd'
   assert_file_contains "$APK_UPGRADER" 'rm -rf "$WORK_ROOT"'
   assert_file_contains "$UPDATE_MANAGER" 'update-manager-stamp'
