@@ -209,13 +209,57 @@ resume_runner() {
   return 1
 }
 
+prepare_apk_upgrade_deps() {
+  python_command="${CODEX_FOR_TUI_PYTHON3_COMMAND:-python3}"
+  have "$python_command" && return 0
+  codex_command="${CODEX_FOR_TUI_CODEX_COMMAND:-codex}"
+  if ! has_local_state && ! have "$codex_command"; then
+    confirm_first_install
+  fi
+  apk_command="${CODEX_FOR_TUI_APK_COMMAND:-apk}"
+  { [ -x "$apk_command" ] || have "$apk_command"; } || {
+    warn "当前 rootfs 缺少 apk，无法自动安装 APK 环境升级所需的 python3。"
+    return 1
+  }
+  max_attempts="${CODEX_FOR_TUI_DEPS_MAX_ATTEMPTS:-3}"
+  retry_delay="${CODEX_FOR_TUI_DEPS_RETRY_DELAY_SECONDS:-2}"
+  case "$max_attempts" in
+    ""|*[!0-9]*|0) max_attempts=3 ;;
+  esac
+  case "$retry_delay" in
+    ""|*[!0-9]*) retry_delay=2 ;;
+  esac
+  attempt=1
+  while :; do
+    info "正在准备 APK 环境升级依赖：python3（第 $attempt/$max_attempts 次）"
+    if "$apk_command" add --no-cache python3; then
+      break
+    fi
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      warn "python3 依赖安装失败；下次打开 App 会自动重试。"
+      return 1
+    fi
+    warn "python3 依赖安装失败，准备重试。"
+    [ "$retry_delay" -eq 0 ] || sleep "$retry_delay"
+    attempt=$((attempt + 1))
+  done
+  have "$python_command" || {
+    warn "python3 安装完成后仍不可用。"
+    return 1
+  }
+}
+
 case "${1:-}" in
+  --prepare-apk-upgrade-deps)
+    prepare_apk_upgrade_deps
+    exit $?
+    ;;
   --update-scripts|update)
     refresh_remote_scripts
     exit 0
     ;;
   --help|-h)
-    printf '%s\n' "用法: codex-for-tui-bootstrap.sh [--update-scripts]" >&2
+    printf '%s\n' "用法: codex-for-tui-bootstrap.sh [--prepare-apk-upgrade-deps|--update-scripts]" >&2
     exit 0
     ;;
 esac

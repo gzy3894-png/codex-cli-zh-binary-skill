@@ -307,8 +307,29 @@ if [ "$#" -eq 0 ]; then
   [ ! -r /etc/profile ] || . /etc/profile
   export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"
   cd "$HOME" 2>/dev/null || true
-  if [ -s "${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin/codex-for-tui-bootstrap.sh" ]; then
-    sh "${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin/codex-for-tui-bootstrap.sh" || echo "警告: Codex for TUI 启动失败，已回到 shell。"
+  bootstrap="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin/codex-for-tui-bootstrap.sh"
+  if ! command -v python3 >/dev/null 2>&1; then
+    if [ ! -s "$bootstrap" ] ||
+      ! HOME=/root CODEX_HOME=/root/.codex sh "$bootstrap" --prepare-apk-upgrade-deps ||
+      ! command -v python3 >/dev/null 2>&1
+    then
+      printf '%s\n' "错误: 无法准备 APK 环境升级所需的 python3，已阻止 Codex 启动。" >&2
+      exec /bin/ash
+    fi
+  fi
+  apk_upgrade="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin/codex-apk-upgrade"
+  if [ ! -x "$apk_upgrade" ]; then
+    printf '%s\n' "错误: APK 环境升级入口缺失，已阻止 Codex 启动。" >&2
+    exec /bin/ash
+  fi
+  if ! HOME=/root CODEX_HOME=/root/.codex sh "$apk_upgrade"; then
+    printf '%s\n' "错误: APK 环境升级未完成，已回滚并阻止 Codex 启动；下次打开 App 会自动重试。" >&2
+    exec /bin/ash
+  fi
+  if [ -s "$bootstrap" ]; then
+    HOME=/root CODEX_HOME=/root/.codex \
+      sh "$bootstrap" ||
+      echo "警告: Codex for TUI 启动失败，已回到 shell。"
   fi
   exec /bin/ash
 fi

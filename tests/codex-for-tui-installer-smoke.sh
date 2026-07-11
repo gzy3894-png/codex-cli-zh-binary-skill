@@ -101,6 +101,7 @@ EOF
   (
     export HOME="$tmp/home"
     export PREFIX="$tmp/prefix"
+    export CODEX_HOME="$tmp/home/.codex"
     export PATH="/bin:/usr/bin"
     sh "$BOOTSTRAP" >"$tmp/stdout" 2>"$tmp/stderr"
   ) || {
@@ -144,6 +145,7 @@ EOF
   (
     export HOME="$tmp/home"
     export PREFIX="$tmp/prefix"
+    export CODEX_HOME="$tmp/home/.codex"
     export PATH="/bin:/usr/bin"
     export CODEX_ZH_SCRIPT_BASE_URL="https://raw.example.test/repo/android-arm64-musl"
     export CODEX_ZH_SCRIPT_RELEASE_BASE_URL=""
@@ -161,6 +163,146 @@ EOF
   [ -x "$tmp/home/.local/bin/codex-self-test" ] || fail "codex-self-test command was not installed"
   [ -x "$tmp/home/.local/bin/codex-test" ] || fail "codex-test command was not installed"
   assert_file_contains "$tmp/stdout" "已更新：install-reterminal-alpine.sh"
+  rm -rf "$tmp"
+}
+
+write_fake_apk_command() {
+  target="$1"
+  cat > "$target" <<'EOF'
+#!/usr/bin/env sh
+count_file="$HOME/apk-attempts"
+count=0
+[ ! -s "$count_file" ] || count="$(sed -n '1p' "$count_file")"
+count=$((count + 1))
+printf '%s\n' "$count" > "$count_file"
+printf '%s\n' "$*" >> "$HOME/apk-args"
+fail_before="${CODEX_TEST_APK_FAILS_BEFORE_SUCCESS:-0}"
+if [ "$count" -le "$fail_before" ]; then
+  exit 42
+fi
+python_command="${CODEX_FOR_TUI_PYTHON3_COMMAND:-python3}"
+target="$HOME/.local/bin/$python_command"
+printf '%s\n' '#!/usr/bin/env sh' 'exit 0' > "$target"
+chmod 755 "$target"
+EOF
+  chmod 755 "$target"
+}
+
+test_bootstrap_prepares_python_dependency_with_retry() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-bootstrap-deps-success.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.local/bin" "$tmp/prefix"
+  write_fake_apk_command "$tmp/home/.local/bin/apk-test"
+  printf '%s\n' 1 > "$tmp/input"
+
+  (
+    export HOME="$tmp/home"
+    export PREFIX="$tmp/prefix"
+    export CODEX_HOME="$tmp/home/.codex"
+    export PATH="/bin:/usr/bin"
+    export CODEX_ZH_FORCE_STDIN=1
+    export CODEX_FOR_TUI_PYTHON3_COMMAND=python3-test
+    export CODEX_FOR_TUI_CODEX_COMMAND=codex-bootstrap-missing-test-command
+    export CODEX_FOR_TUI_APK_COMMAND="$tmp/home/.local/bin/apk-test"
+    export CODEX_FOR_TUI_DEPS_RETRY_DELAY_SECONDS=0
+    export CODEX_TEST_APK_FAILS_BEFORE_SUCCESS=1
+    sh "$BOOTSTRAP" --prepare-apk-upgrade-deps \
+      < "$tmp/input" > "$tmp/stdout" 2> "$tmp/stderr"
+  ) || {
+    sed -n '1,200p' "$tmp/stderr" >&2 || true
+    fail "bootstrap dependency preparation should recover after one retry"
+  }
+
+  assert_file_contains "$tmp/home/apk-attempts" "2"
+  assert_file_contains "$tmp/home/apk-args" "add --no-cache python3"
+  [ -x "$tmp/home/.local/bin/python3-test" ] ||
+    fail "bootstrap dependency preparation did not expose python3"
+  [ -s "$tmp/home/.codex-for-tui/install-consent" ] ||
+    fail "bootstrap dependency preparation did not preserve first-install consent"
+  assert_file_contains "$tmp/stdout" "第 2/3 次"
+  rm -rf "$tmp"
+}
+
+test_bootstrap_dependency_failure_retries_on_next_start() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-bootstrap-deps-retry.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.local/bin" "$tmp/prefix"
+  write_fake_apk_command "$tmp/home/.local/bin/apk-test"
+  printf '%s\n' 1 > "$tmp/input"
+
+  set +e
+  (
+    export HOME="$tmp/home"
+    export PREFIX="$tmp/prefix"
+    export CODEX_HOME="$tmp/home/.codex"
+    export PATH="/bin:/usr/bin"
+    export CODEX_ZH_FORCE_STDIN=1
+    export CODEX_FOR_TUI_PYTHON3_COMMAND=python3-test
+    export CODEX_FOR_TUI_CODEX_COMMAND=codex-bootstrap-missing-test-command
+    export CODEX_FOR_TUI_APK_COMMAND="$tmp/home/.local/bin/apk-test"
+    export CODEX_FOR_TUI_DEPS_RETRY_DELAY_SECONDS=0
+    export CODEX_TEST_APK_FAILS_BEFORE_SUCCESS=99
+    sh "$BOOTSTRAP" --prepare-apk-upgrade-deps \
+      < "$tmp/input" > "$tmp/first.stdout" 2> "$tmp/first.stderr"
+  )
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "bootstrap dependency preparation unexpectedly ignored repeated failure"
+  assert_file_contains "$tmp/home/apk-attempts" "3"
+  assert_file_contains "$tmp/first.stderr" "下次打开 App 会自动重试"
+  [ ! -e "$tmp/home/.local/bin/python3-test" ] ||
+    fail "failed dependency preparation left a fake python3"
+
+  (
+    export HOME="$tmp/home"
+    export PREFIX="$tmp/prefix"
+    export CODEX_HOME="$tmp/home/.codex"
+    export PATH="/bin:/usr/bin"
+    export CODEX_ZH_FORCE_STDIN=1
+    export CODEX_FOR_TUI_PYTHON3_COMMAND=python3-test
+    export CODEX_FOR_TUI_CODEX_COMMAND=codex-bootstrap-missing-test-command
+    export CODEX_FOR_TUI_APK_COMMAND="$tmp/home/.local/bin/apk-test"
+    export CODEX_FOR_TUI_DEPS_RETRY_DELAY_SECONDS=0
+    export CODEX_TEST_APK_FAILS_BEFORE_SUCCESS=0
+    sh "$BOOTSTRAP" --prepare-apk-upgrade-deps \
+      </dev/null > "$tmp/second.stdout" 2> "$tmp/second.stderr"
+  ) || {
+    sed -n '1,200p' "$tmp/second.stderr" >&2 || true
+    fail "bootstrap dependency preparation did not retry on next start"
+  }
+  assert_file_contains "$tmp/home/apk-attempts" "4"
+  [ -x "$tmp/home/.local/bin/python3-test" ] ||
+    fail "next-start dependency retry did not install python3"
+  rm -rf "$tmp"
+}
+
+test_bootstrap_dependency_cancel_does_not_install() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-bootstrap-deps-cancel.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp/home/.local/bin" "$tmp/prefix"
+  write_fake_apk_command "$tmp/home/.local/bin/apk-test"
+  printf '%s\n' 2 > "$tmp/input"
+
+  (
+    export HOME="$tmp/home"
+    export PREFIX="$tmp/prefix"
+    export CODEX_HOME="$tmp/home/.codex"
+    export PATH="/bin:/usr/bin"
+    export CODEX_ZH_FORCE_STDIN=1
+    export CODEX_FOR_TUI_PYTHON3_COMMAND=python3-test
+    export CODEX_FOR_TUI_CODEX_COMMAND=codex-bootstrap-missing-test-command
+    export CODEX_FOR_TUI_APK_COMMAND="$tmp/home/.local/bin/apk-test"
+    sh "$BOOTSTRAP" --prepare-apk-upgrade-deps \
+      < "$tmp/input" > "$tmp/stdout" 2> "$tmp/stderr"
+  ) || fail "canceling first-install dependency preparation should exit cleanly"
+
+  [ ! -e "$tmp/home/apk-attempts" ] ||
+    fail "canceling first install invoked apk"
+  [ ! -e "$tmp/home/.codex-for-tui/install-consent" ] ||
+    fail "canceling first install wrote consent"
+  [ ! -e "$tmp/home/.local/bin/python3-test" ] ||
+    fail "canceling first install created python3"
+  assert_file_contains "$tmp/stdout" "已退出安装"
   rm -rf "$tmp"
 }
 
@@ -637,6 +779,9 @@ test_no_startup_auto_refresh_symbols_remain() {
 run_step test_syntax_and_asset_sync
 run_step test_bootstrap_normal_start_does_not_fetch_when_codex_exists
 run_step test_bootstrap_explicit_update_fetches_scripts
+run_step test_bootstrap_prepares_python_dependency_with_retry
+run_step test_bootstrap_dependency_failure_retries_on_next_start
+run_step test_bootstrap_dependency_cancel_does_not_install
 run_step test_generated_launcher_has_no_preflight_or_profile_refresh
 run_step test_install_scripts_do_not_create_default_agents_md
 run_step test_config_v2_smoke

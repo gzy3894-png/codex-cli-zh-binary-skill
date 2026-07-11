@@ -12,6 +12,7 @@ CODEX_ZH_COMMON_LOADED=1
 : "${CODEX_ZH_INSTALL_NAME:=codex}"
 : "${CODEX_ZH_PROVIDER_ID:=custom}"
 : "${CODEX_ZH_PROVIDER_NAME:=OpenAI}"
+: "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.4.2}"
 
 CODEX_ZH_ARCHIVE="codex-${CODEX_ZH_VERSION}-zh-${CODEX_ZH_TARGET}.tar.gz"
 CODEX_ZH_ARCHIVE_SHA256="${CODEX_ZH_ARCHIVE_SHA256:-1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61}"
@@ -170,6 +171,7 @@ EOF
 
 codex_support_file_list() {
   cat <<'EOF'
+codex-apk-upgrade.sh
 codex-for-tui-bootstrap.sh
 codex-for-tui-self-test.sh
 codex-local-resume.sh
@@ -235,6 +237,7 @@ codex_verify_sha256() {
 
 codex_persist_path() {
   dir="$1"
+  [ "${CODEX_ZH_SKIP_PERSIST_PATH:-0}" != "1" ] || return 0
   mkdir -p "$dir"
   for profile_file in "$HOME/.profile" "$HOME/.ashrc" "$HOME/.bashrc"; do
     [ -f "$profile_file" ] || : > "$profile_file" 2>/dev/null || continue
@@ -258,9 +261,10 @@ codex_persist_path() {
 codex_install_case_variants() {
   dir="$1"
   target="$2"
+  target_name="$(basename "$target")"
   for c in c C; do for o in o O; do for d in d D; do for e in e E; do for x in x X; do
     link="$dir/$c$o$d$e$x"
     [ "$link" = "$target" ] && continue
-    ln -sf "$target" "$link" 2>/dev/null || true
+    ln -sf "$target_name" "$link" 2>/dev/null || true
   done; done; done; done; done
 }

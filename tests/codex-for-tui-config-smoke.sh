@@ -71,11 +71,24 @@ write_launcher() {
   )
 }
 
+prepare_v2_profile() {
+  tmp="$1"
+  PYTHONNOUSERSITE=1 python3 "$SCRIPT_DIR/libexec/codex-config-engine.py" \
+    --codex-home "$tmp/home/.codex" \
+    profile create \
+    --name existing \
+    --mode official \
+    --model gpt-5.4 \
+    --activate >/dev/null
+}
+
 test_normal_codex_start_preserves_existing_config() {
   tmp="${TMPDIR:-/tmp}/codex-tui-config-normal-readonly.$$"
   rm -rf "$tmp"
   mkdir -p "$tmp/bin" "$tmp/home/.codex"
   printf '%s\n' 'configured = true' > "$tmp/home/.codex/config.toml"
+  prepare_v2_profile "$tmp"
+  before_config="$(sha256sum "$tmp/home/.codex/config.toml" | awk '{print $1}')"
   write_real_codex_stub "$tmp/bin"
   write_launcher "$tmp"
 
@@ -93,9 +106,10 @@ test_normal_codex_start_preserves_existing_config() {
 
   assert_file_contains "$tmp/stdout" "real-codex-ran"
   assert_file_contains "$tmp/home/.codex/config.toml" "configured = true"
+  [ "$before_config" = "$(sha256sum "$tmp/home/.codex/config.toml" | awk '{print $1}')" ] ||
+    fail "normal Codex startup changed the control config"
   assert_file_missing "$tmp/home/.codex/auth.json"
   assert_file_missing "$tmp/home/.codex/model_catalog.json"
-  assert_file_missing "$tmp/home/.codex/install-state/official-login-mode"
   rm -rf "$tmp"
 }
 
@@ -105,6 +119,7 @@ test_hook_quick_auth_writes_only_after_explicit_choice_and_backs_up() {
   mkdir -p "$tmp/bin" "$tmp/home/.codex" "$tmp/etc"
   req="$tmp/etc/requirements.toml"
   printf '%s\n' 'configured = true' > "$tmp/home/.codex/config.toml"
+  prepare_v2_profile "$tmp"
   write_real_codex_stub "$tmp/bin"
   write_hook_tool_stubs "$tmp/bin"
   write_hook_tool_stubs "$tmp/home/.local/bin"
@@ -166,7 +181,8 @@ test_hook_quick_auth_writes_only_after_explicit_choice_and_backs_up() {
   assert_file_contains "$req" 'command = "codex-rtk hook"'
   assert_file_contains "$req" 'command = "codex-context hook"'
   assert_file_contains "$tmp/home/.codex/config.toml" "configured = true"
-  find "$tmp/home/.codex/install-state/backups" -type f -name requirements.toml -exec grep -l 'existing_requirement = true' {} \; |
+  find "$tmp/home/.codex" -type f -path '*/install-state/backups/*/requirements.toml' \
+    -exec grep -l 'existing_requirement = true' {} \; |
     grep . >/dev/null 2>&1 || fail "requirements.toml backup was not recoverable"
   if find "$tmp" \( -name '*.tmp.*' -o -name '*.strip-*' \) -print | grep . >/dev/null 2>&1; then
     fail "temporary config files should not remain after atomic writes"

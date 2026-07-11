@@ -18,6 +18,7 @@ class UpdateManager(private val context: Context) {
             mapOf(
                 "init-host.sh" to "init-host",
                 "init.sh" to "init",
+                "codex-apk-upgrade.sh" to "codex-apk-upgrade",
                 "codex-for-tui-bootstrap.sh" to "codex-for-tui-bootstrap.sh",
             ).forEach { (assetName, outputName) ->
                 val file: File = localBinDir().child(outputName)

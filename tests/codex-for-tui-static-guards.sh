@@ -12,6 +12,12 @@ INIT_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/init.sh"
 INIT_HOST_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/init-host.sh"
 APP_BUILD_GRADLE="$ROOT_DIR/android-app/app/build.gradle.kts"
 APP_MANIFEST="$ROOT_DIR/android-app/app/src/main/AndroidManifest.xml"
+APK_UPGRADER="$SCRIPT_DIR/codex-apk-upgrade.sh"
+APK_PAYLOAD_PREPARE="$ROOT_DIR/android-app/prepare-codex-apk-payload.sh"
+APK_UPGRADE_SMOKE="$ROOT_DIR/tests/codex-for-tui-apk-upgrade-smoke.sh"
+APK_PAYLOAD_INSPECT="$ROOT_DIR/tests/codex-for-tui-apk-payload-inspect.sh"
+MODEL_PTY_SMOKE="$ROOT_DIR/tests/codex-for-tui-model-pty-smoke.py"
+UPDATE_MANAGER="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/update/UpdateManager.kt"
 RELEASE_KEYSTORE="$ROOT_DIR/android-app/app/codex-for-tui-2x-release.keystore"
 LEGACY_DEBUG_KEYSTORE="$ROOT_DIR/android-app/app/testkey.keystore"
 BOOTSTRAP="$SCRIPT_DIR/codex-for-tui-bootstrap.sh"
@@ -96,6 +102,18 @@ assert_nonempty_file() {
   [ -s "$file" ] || fail "expected non-empty file: $file"
 }
 
+assert_file_order() {
+  file="$1"
+  first="$2"
+  second="$3"
+  first_line="$(grep -n -F -m 1 -- "$first" "$file" | cut -d: -f1)"
+  second_line="$(grep -n -F -m 1 -- "$second" "$file" | cut -d: -f1)"
+  [ -n "$first_line" ] && [ -n "$second_line" ] ||
+    fail "could not compare pattern order in $file"
+  [ "$first_line" -lt "$second_line" ] ||
+    fail "expected '$first' before '$second' in $file"
+}
+
 run_step() {
   name="$1"
   printf 'RUN %s\n' "$name"
@@ -139,20 +157,100 @@ test_bootstrap_asset_is_synced() {
   cmp "$BOOTSTRAP" "$BOOTSTRAP_ASSET" >/dev/null 2>&1 || fail "bootstrap source and APK asset differ"
 }
 
+test_apk_upgrade_guards() {
+  for script in "$APK_UPGRADER" "$APK_PAYLOAD_PREPARE" "$APK_UPGRADE_SMOKE" "$APK_PAYLOAD_INSPECT"; do
+    assert_nonempty_file "$script"
+    sh -n "$script" || fail "$(basename "$script") shell syntax failed"
+  done
+  assert_nonempty_file "$MODEL_PTY_SMOKE"
+  python3 -m py_compile "$MODEL_PTY_SMOKE" || fail "model PTY smoke Python syntax failed"
+
+  assert_file_contains "$APK_UPGRADER" 'RELEASE="2.4.2"'
+  assert_file_contains "$APK_UPGRADER" 'VERSION_CODE="57"'
+  assert_file_contains "$APK_UPGRADER" 'EXPECTED_ARCHIVE_SHA256="1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61"'
+  assert_file_contains "$APK_UPGRADER" 'EXPECTED_BINARY_SHA256="0cde6d6bad02855732ee0ee2867005408d169c46753d414e6a487884d49e0767"'
+  assert_file_contains "$APK_UPGRADER" 'LOCK_DIR="$STATE_ROOT/apk-upgrade.lock"'
+  assert_file_contains "$APK_UPGRADER" 'process_start_token'
+  assert_file_contains "$APK_UPGRADER" '"$LOCK_DIR/start"'
+  assert_file_contains "$APK_UPGRADER" '[ "$waited" -ge 2 ]'
+  assert_file_contains "$APK_UPGRADER" 'JOURNAL="$RELEASE_STATE/transaction"'
+  assert_file_contains "$APK_UPGRADER" 'rollback_config'
+  assert_file_contains "$APK_UPGRADER" 'restore_managed'
+  assert_file_contains "$APK_UPGRADER" 'apk-upgrade --release "$RELEASE"'
+  assert_file_contains "$APK_UPGRADER" 'apk-rollback --backup "$CONFIG_BACKUP"'
+  assert_file_contains "$APK_UPGRADER" 'profile launch'
+  assert_file_contains "$APK_UPGRADER" 'runtime == home'
+  assert_file_contains "$APK_UPGRADER" 'slug.startswith("codex-auto-")'
+  assert_file_contains "$APK_UPGRADER" 'best_effort_refresh'
+  assert_file_contains "$APK_UPGRADER" '第三方模型目录联网刷新失败，已保留离线重建结果。'
+
+  assert_file_contains "$APK_PAYLOAD_PREPARE" 'RELEASE="2.4.2"'
+  assert_file_contains "$APK_PAYLOAD_PREPARE" 'VERSION_CODE="57"'
+  assert_file_contains "$APK_PAYLOAD_PREPARE" "tar \\"
+  assert_file_contains "$APK_PAYLOAD_PREPARE" "--sort=name"
+  assert_file_contains "$APK_PAYLOAD_PREPARE" "--mtime='UTC 1970-01-01'"
+  assert_file_contains "$APK_PAYLOAD_PREPARE" 'binary_archive_sha256=$archive_sha'
+  assert_file_contains "$APK_PAYLOAD_PREPARE" 'binary_sha256=$binary_sha'
+
+  assert_file_contains "$INIT_ASSET" 'APK 环境升级入口缺失，已阻止 Codex 启动。'
+  assert_file_contains "$INIT_ASSET" '--prepare-apk-upgrade-deps'
+  assert_file_contains "$INIT_ASSET" '无法准备 APK 环境升级所需的 python3'
+  assert_file_contains "$INIT_ASSET" 'HOME=/root CODEX_HOME=/root/.codex sh "$apk_upgrade"'
+  assert_file_contains "$INIT_ASSET" 'APK 环境升级未完成，已回滚并阻止 Codex 启动'
+  assert_file_order "$INIT_ASSET" '--prepare-apk-upgrade-deps' 'sh "$apk_upgrade"'
+  assert_file_order "$INIT_ASSET" 'sh "$apk_upgrade"' 'sh "$bootstrap" ||'
+  assert_file_contains "$MKSESSION" '"codex-apk-upgrade.sh" to "codex-apk-upgrade"'
+  assert_file_contains "$UPDATE_MANAGER" '"codex-apk-upgrade.sh" to "codex-apk-upgrade"'
+  assert_file_contains "$BOOTSTRAP" 'prepare_apk_upgrade_deps'
+  assert_file_contains "$BOOTSTRAP" '"$apk_command" add --no-cache python3'
+  assert_file_contains "$BOOTSTRAP" 'CODEX_FOR_TUI_DEPS_MAX_ATTEMPTS'
+  assert_file_contains "$BOOTSTRAP" '下次打开 App 会自动重试'
+  assert_file_contains "$ROOT_DIR/tests/codex-for-tui-installer-smoke.sh" \
+    'test_bootstrap_prepares_python_dependency_with_retry'
+  assert_file_contains "$ROOT_DIR/tests/codex-for-tui-installer-smoke.sh" \
+    'test_bootstrap_dependency_failure_retries_on_next_start'
+  assert_file_contains "$ROOT_DIR/tests/codex-for-tui-installer-smoke.sh" \
+    'test_bootstrap_dependency_cancel_does_not_install'
+
+  assert_file_contains "$APP_BUILD_GRADLE" 'val verifyCodexUpgradePayload by tasks.registering'
+  assert_file_contains "$APP_BUILD_GRADLE" 'release"] != "2.4.2"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'version_code"] != "57"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'Codex APK manifest SHA256 mismatch'
+  assert_file_contains "$APP_BUILD_GRADLE" 'dependsOn(verifyCodexUpgradePayload)'
+  assert_file_contains "$CODEX_COMMON" ': "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.4.2}"'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'epoch="${CODEX_ZH_RUNTIME_EPOCH:-apk-2.4.2}"'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" '配置引擎未返回独立运行目录；未启动 Codex。'
+  assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'config-profiles/current'
+  assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'legacy_profile_already_imported'
+  assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'seed_runtime_state('
+  assert_file_not_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'runtime_home=legacy_dir'
+
+  assert_file_contains "$APK_UPGRADE_SMOKE" 'after-config-upgrade'
+  assert_file_contains "$APK_UPGRADE_SMOKE" 'before-complete'
+  assert_file_contains "$APK_UPGRADE_SMOKE" 'test_v1_runtime_is_unchanged_after_late_rollback'
+  assert_file_contains "$APK_UPGRADE_SMOKE" 'test_stale_empty_lock_is_recovered'
+  assert_file_contains "$APK_UPGRADE_SMOKE" 'test_concurrent_upgrade_is_serialized'
+  assert_file_contains "$APK_PAYLOAD_INSPECT" 'assets/codex-upgrade/manifest.properties'
+  assert_file_contains "$APK_PAYLOAD_INSPECT" 'APK is too small to contain the fixed offline payload'
+  assert_file_contains "$MODEL_PTY_SMOKE" 'Paste-burst protection must expire before Enter submits the command.'
+  assert_file_contains "$MODEL_PTY_SMOKE" '选择模型和推理等级'
+  assert_file_contains "$MODEL_PTY_SMOKE" '("低（默认）", "中", "高", "极高", "Max", "Ultra")'
+}
+
 test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 56'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.4.1"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 57'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.4.2"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" '- "release/codex-for-tui-*"'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "56"'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.4.1'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "57"'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.4.2'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -163,6 +261,7 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-config-smoke.sh'
   assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-config-v2-smoke.sh'
   assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-config-v2-ui-smoke.sh'
+  assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-apk-upgrade-smoke.sh'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Dev transfer smoke tests'
   assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-dev-transfer-smoke.sh'
   assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-dev-transfer-security-smoke.sh'
@@ -191,13 +290,17 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'sha256sum *.apk > SHA256SUMS'
   assert_file_contains "$BUILD_WORKFLOW" 'android-app/app/build/outputs/apk/release/SHA256SUMS'
   assert_file_contains "$BUILD_WORKFLOW" 'softprops/action-gh-release@v2'
+  assert_file_contains "$BUILD_WORKFLOW" 'body_path: docs/codex-for-tui-2.4.2-release-notes.md'
+  assert_file_contains "$BUILD_WORKFLOW" 'name: Publish verified GitHub release'
+  assert_file_contains "$BUILD_WORKFLOW" 'name: Download verified release assets'
+  assert_file_order "$BUILD_WORKFLOW" 'name: Promote verified tag to installer channel' 'name: Publish verified GitHub release'
   assert_file_contains "$BUILD_WORKFLOW" 'artifact_name=codex-for-tui-release-apk'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Build RTK aarch64 musl'
   assert_file_contains "$BUILD_WORKFLOW" 'repository: rtk-ai/rtk'
   assert_file_contains "$BUILD_WORKFLOW" 'ref: v0.43.0'
   assert_file_contains "$BUILD_WORKFLOW" 'cross build --release --target aarch64-unknown-linux-musl'
   assert_file_contains "$BUILD_WORKFLOW" 'qemu-aarch64 /tmp/rtk --version'
-  assert_file_contains "$BUILD_WORKFLOW" 'name: Verify Codex config parser under qemu'
+  assert_file_contains "$BUILD_WORKFLOW" 'name: Verify fixed Codex under qemu'
   assert_file_contains "$BUILD_WORKFLOW" '. android-arm64-musl/lib/codex-zh-common.sh'
   assert_file_contains "$BUILD_WORKFLOW" 'archive_url="${CODEX_ZH_ARCHIVE_URL:-$CODEX_ZH_BINARY_BASE_URL/$CODEX_ZH_ARCHIVE}"'
   assert_file_contains "$BUILD_WORKFLOW" 'codex_verify_sha256 "$archive" "$CODEX_ZH_ARCHIVE_SHA256"'
@@ -205,6 +308,14 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'exec qemu-aarch64 "$CODEX_QEMU_BINARY" "$@"'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_BIN="$wrapper"'
   assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-config-v2-codex-parser-smoke.sh'
+  assert_file_contains "$BUILD_WORKFLOW" 'python3 tests/codex-for-tui-model-pty-smoke.py'
+  assert_file_contains "$BUILD_WORKFLOW" '--qemu "$(command -v qemu-aarch64)"'
+  assert_file_contains "$BUILD_WORKFLOW" 'name: Upload verified Codex archive'
+  assert_file_contains "$BUILD_WORKFLOW" 'name: Prepare offline Codex upgrade payload'
+  assert_file_contains "$BUILD_WORKFLOW" './prepare-codex-apk-payload.sh'
+  assert_file_contains "$BUILD_WORKFLOW" 'name: Verify test APK offline payload'
+  assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release APK offline payload'
+  assert_file_contains "$BUILD_WORKFLOW" '../tests/codex-for-tui-apk-payload-inspect.sh "$apk"'
   assert_file_not_contains "$BUILD_WORKFLOW" '0.142.4'
   assert_file_contains "$CODEX_COMMON" ': "${CODEX_ZH_VERSION:=0.144.1}"'
   assert_file_contains "$CODEX_COMMON" 'releases/download/v0.144.1-zh.1'
@@ -1390,6 +1501,14 @@ EOF
   chmod +x "$tmp/bin/codex-update"
   cp "$tmp/bin/codex-update" "$tmp/home/.local/bin/codex-update"
 
+  PYTHONNOUSERSITE=1 python3 "$SCRIPT_DIR/libexec/codex-config-engine.py" \
+    --codex-home "$tmp/home/.codex" \
+    profile create \
+    --name normal \
+    --mode official \
+    --model gpt-5.4 \
+    --activate >/dev/null
+
   (
     . "$SCRIPT_DIR/lib/codex-zh-common.sh"
     . "$SCRIPT_DIR/lib/codex-zh-local.sh"
@@ -1427,8 +1546,12 @@ EOF
     fail "normal codex launcher command failed"
   fi
   printf '%s\n' "$output" | grep -F 'real-codex:' >/dev/null 2>&1 || fail "normal codex did not run real binary"
-  printf '%s\n' "$output" | grep -F "$tmp/home/.codex/sqlite-builds/" >/dev/null 2>&1 ||
+  printf '%s\n' "$output" | grep -F '/.codex/config-runtimes/' >/dev/null 2>&1 ||
+    fail "normal codex did not use an isolated profile runtime"
+  printf '%s\n' "$output" | grep -F '/sqlite-builds/' >/dev/null 2>&1 ||
     fail "normal codex did not isolate SQLite by binary build"
+  printf '%s\n' "$output" | grep -F 'apk-2.4.2' >/dev/null 2>&1 ||
+    fail "normal codex did not include the APK runtime epoch in SQLite isolation"
   printf '%s\n' "$output" | grep -F "$tmp/prefix/local/bin" >/dev/null 2>&1 || fail "normal codex did not carry app bridge bin in PATH"
   printf '%s\n' "$output" | grep -F 'update-ran' >/dev/null 2>&1 && fail "normal codex invoked update path"
   printf '%s\n' "$output" | grep -F ':/root:' >/dev/null 2>&1 && fail "test did not isolate HOME"
@@ -1508,7 +1631,7 @@ EOF
   rm -rf "$tmp"
 }
 
-test_generated_launcher_does_not_start_after_migration_failure() {
+test_generated_launcher_blocks_unupgraded_v1() {
   tmp="${TMPDIR:-/tmp}/codex-tui-static-migration-failure.$$"
   rm -rf "$tmp"
   mkdir -p "$tmp/home/.codex/config-profiles/broken" "$tmp/bin"
@@ -1540,17 +1663,15 @@ EOF
   )
 
   set +e
-  printf '1\n' |
-    HOME="$tmp/home" \
+  HOME="$tmp/home" \
     CODEX_HOME="$tmp/home/.codex" \
     CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR" \
-    CODEX_ZH_FORCE_STDIN=1 \
     PATH="$tmp/bin:/bin:/usr/bin" \
-    "$tmp/bin/codex" 配置模式 >"$tmp/stdout" 2>"$tmp/stderr"
+    "$tmp/bin/codex" should-not-run >"$tmp/stdout" 2>"$tmp/stderr"
   rc=$?
   set -e
-  [ "$rc" -ne 0 ] || fail "migration failure should return a non-zero status"
-  assert_file_contains "$tmp/stderr" "配置模式未完成，未启动 Codex"
+  [ "$rc" -ne 0 ] || fail "unupgraded V1 state should return a non-zero status"
+  assert_file_contains "$tmp/stderr" "旧配置结构但 APK 环境升级尚未完成；未启动 Codex"
   assert_file_not_contains "$tmp/stdout" "real-codex-should-not-run:"
   assert_file_not_contains "$tmp/stderr" "real-codex-should-not-run:"
   rm -rf "$tmp"
@@ -1894,6 +2015,7 @@ test_installer_does_not_manage_agents_md() {
 run_step test_android_session_uses_root_codex_home
 run_step test_android_lifecycle_rootfs_guards
 run_step test_bootstrap_asset_is_synced
+run_step test_apk_upgrade_guards
 run_step test_debug_build_uses_test_package_name
 run_step test_release_workflow_signature_gate
 run_step test_android_security_guards
@@ -1908,7 +2030,7 @@ run_step test_codex_rtk_bridge_asset
 run_step test_codex_context_bridge_asset
 run_step test_codex_config_default_hooks_survive_profile_use
 run_step test_generated_launcher_entrypoints_and_normal_path
-run_step test_generated_launcher_does_not_start_after_migration_failure
+run_step test_generated_launcher_blocks_unupgraded_v1
 run_step test_generated_launcher_isolates_parallel_profiles
 run_step test_generated_launcher_first_run_configures_then_runs
 run_step test_update_apply_installs_self_test_script_and_aliases

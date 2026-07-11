@@ -97,10 +97,11 @@ codex_local_install_binary() {
 
 codex_local_write_launcher() {
   install_dir="$(codex_install_dir)"
-  real_bin="$(codex_real_bin_path)"
+  real_bin="${CODEX_ZH_LAUNCHER_REAL_BIN:-$(codex_real_bin_path)}"
+  build_bin="${CODEX_ZH_LAUNCHER_BUILD_BIN:-$real_bin}"
   launcher="$(codex_launcher_path)"
   mkdir -p "$install_dir"
-  [ -x "$real_bin" ] || codex_die "缺少 Codex 二进制：$real_bin"
+  [ -x "$build_bin" ] || codex_die "缺少 Codex 二进制：$build_bin"
   real_q="$(codex_shell_quote "$real_bin")"
   {
     printf '%s\n' '#!/usr/bin/env sh'
@@ -189,7 +190,10 @@ codex_for_tui_binary_build_key() {
     [0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]) ;;
     *) return 1 ;;
   esac
-  printf '%s-%s\n' "$version" "$digest"
+  epoch="${CODEX_ZH_RUNTIME_EPOCH:-apk-2.4.2}"
+  epoch="$(printf '%s' "$epoch" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-32)"
+  [ -n "$epoch" ] || epoch="runtime"
+  printf '%s-%s-%s\n' "$version" "$epoch" "$digest"
 }
 
 codex_for_tui_prepare_runtime() {
@@ -242,7 +246,10 @@ codex_for_tui_prepare_runtime() {
             ;;
         esac
         ;;
-      1) ;;
+      1)
+        printf '%s\n' "错误: 检测到旧配置结构但 APK 环境升级尚未完成；未启动 Codex。" >&2
+        return 1
+        ;;
       *)
         printf '%s\n' "错误: 配置引擎返回了未知结构版本；未启动 Codex。" >&2
         return 1
@@ -253,21 +260,10 @@ codex_for_tui_prepare_runtime() {
     return 1
   fi
 
-  if [ "$runtime_home" = "$control_home" ]; then
-    current_file="$control_home/config-profiles/current"
-    if [ -s "$current_file" ]; then
-      current_name="$(sed -n '1p' "$current_file" 2>/dev/null | tr -d '\r')"
-      case "$current_name" in
-        ""|"."|".."|*/*|*\\*|*[!A-Za-z0-9._-]*) current_name="" ;;
-      esac
-      if [ -n "$current_name" ] &&
-        [ -s "$control_home/config-profiles/$current_name/config.toml" ]
-      then
-        runtime_home="$control_home/config-profiles/$current_name"
-      fi
-    fi
-  fi
-
+  [ "$runtime_home" != "$control_home" ] || {
+    printf '%s\n' "错误: 配置引擎未返回独立运行目录；未启动 Codex。" >&2
+    return 1
+  }
   mkdir -p "$runtime_home"
   [ -n "$sqlite_home" ] || sqlite_home="$runtime_home/sqlite-builds/$build_key"
   mkdir -p "$sqlite_home"

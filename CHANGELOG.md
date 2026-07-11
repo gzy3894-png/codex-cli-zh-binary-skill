@@ -1,5 +1,34 @@
 # Changelog
 
+## Codex for TUI 2.4.2
+
+Codex for TUI 2.4.2 将 APK 覆盖安装升级为离线、原子、可回滚的完整用户环境升级，修复 2.4.0/2.4.1 中 App、Codex 二进制、launcher、配置引擎、模型目录和 SQLite 版本漂移。
+
+### 修复
+
+- APK 内置并校验固定 `0.144.1-zh.1` Codex 归档、完整受管脚本和配置引擎；老用户覆盖安装并打开 App 后自动完成升级，不再要求运行 `codex 更新`、`codex-local repair-launcher`、配置模式或手工设置 `CODEX_HOME`。
+- 升级器使用锁、事务日志、受管文件备份和配置恢复点；失败恢复二进制、launcher、脚本和配置，阻止 Codex 启动，并在下次打开时重试。
+- 全新 rootfs 或旧环境缺少 Python 时，首次安装确认后自动安装 `python3` 再执行 APK 升级，避免 bootstrap 与升级器互相等待。
+- Android 会话统一固定 `HOME=/root`、`CODEX_HOME=/root/.codex`；根配置成为活动 V2 profile，旧 V1 current 只保留为独立历史配置，不再覆盖根配置。
+- V1 profile 导入新的独立 runtime，旧目录不再被发布前 launch-check 改写；V1/V2 混合状态会补迁尚未导入的 V1 profile。
+- 删除 launcher 的 V1 fallback；配置引擎未返回独立 runtime 时失败关闭。
+- SQLite build key 新增 `apk-2.4.2` runtime epoch；每个 profile 的配置、会话和 SQLx 数据库继续相互隔离，相同 Codex 版本和二进制也不会复用旧版数据库。
+- 所有第三方模型目录使用随包 `rust-v0.144.1` 能力离线重建；`codex-auto-*` 隐藏，`/model` 直接进入完整普通模型页。
+- `gpt-5.6-sol` 恢复 `372000` 上下文、默认 `low` 和 `low/medium/high/xhigh/max/ultra` 六档推理强度；不支持的旧推理值回落到上游默认并记录报告。
+- 根 sessions/history 迁入活动 profile 独立 runtime；SQLite、FIFO、软链接和插件临时对象不复制。
+- 旧 `220000` 压缩阈值迁移为跟随模型；其他固定值按 profile 保留。
+- 核心升级完成后只对当前第三方站点尽力刷新一次模型 ID，联网失败不阻塞离线升级结果。
+
+### 验证与发布
+
+- 新增 2.3.11 V1、2.4.0 中断/污染、2.4.1 故障现场、正常 V2、缺失二进制、损坏载荷、损坏状态、回滚和双终端并发升级矩阵。
+- 增加完成标记前的 V1 回滚、遗留空锁回收、旧 runtime 会话软链接拆分和 V1/V2 混合补迁门禁。
+- 新增真实 Codex PTY 门禁，确认 `/model` 首层直接显示普通模型页，且 `gpt-5.6-sol` 提供 `max` / `ultra`；CI 通过 QEMU 对固定 ARM64 归档重复验证。
+- Debug/Release APK 构建前必须生成并校验离线载荷；构建后检查 APK 内 manifest、归档和二进制 SHA。Release 继续校验包名、`versionCode=57`、`versionName=2.4.2`、非 debuggable 和正式签名证书。
+- 全部自动门禁通过后正式发布；真机覆盖测试在正式发布后执行。发现问题只前滚 2.4.3（`versionCode=58`），不删除 2.4.2 tag、不降级。
+- Tag 构建先推进已验证 installer channel，成功后才公开 GitHub Release，避免 Release 与安装渠道版本不一致。
+- Android 不能普通覆盖降级安装；从 2.4.2（`versionCode=57`）回到更低版本必须使用更高 versionCode 的前滚修复包，或卸载重装。
+
 ## Codex for TUI 2.4.1
 
 Codex for TUI 2.4.1 是 2.4.0 的配置、会话隔离和模型目录热修版。

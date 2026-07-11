@@ -564,6 +564,7 @@ def create_profile_directory(
     base_config_file: Path | None = None,
     existing_created_at: str | None = None,
     runtime_home: Path | None = None,
+    compact_policy: dict[str, Any] | None = None,
 ) -> Path:
     staged = paths.profiles_root / f".profile-{profile_id}-{uuid.uuid4().hex}"
     ensure_private_dir(staged)
@@ -575,6 +576,7 @@ def create_profile_directory(
         "mode": mode,
         "compatibility_model": compatibility_model,
         "runtime_home": str(runtime_home or default_runtime_home(paths, profile_id)),
+        "compact_policy": compact_policy or compact_policy_from_config(base_config_file),
         "created_at": existing_created_at or now,
         "updated_at": now,
     }
@@ -615,8 +617,38 @@ def create_profile_directory(
     return staged
 
 
-def apply_compact_policy(doc: TOMLDocument, index: dict[str, Any]) -> None:
-    policy = index.get("compact_policy") or {"mode": "follow-model"}
+def compact_policy_from_config(config_file: Path | None) -> dict[str, Any]:
+    if config_file is None or not config_file.is_file():
+        return {"mode": "follow-model"}
+    doc = read_toml(config_file)
+    value = doc.get("model_auto_compact_token_limit")
+    if isinstance(value, int) and value > 0 and value != 220000:
+        return {"mode": "fixed", "value": value}
+    return {"mode": "follow-model"}
+
+
+def profile_compact_policy(
+    meta: dict[str, Any] | None,
+    index: dict[str, Any],
+) -> dict[str, Any]:
+    policy = meta.get("compact_policy") if isinstance(meta, dict) else None
+    if not isinstance(policy, dict):
+        policy = index.get("compact_policy")
+    if not isinstance(policy, dict):
+        return {"mode": "follow-model"}
+    if policy.get("mode") == "fixed":
+        value = policy.get("value")
+        if isinstance(value, int) and value > 0:
+            return {"mode": "fixed", "value": value}
+    return {"mode": "follow-model"}
+
+
+def apply_compact_policy(
+    doc: TOMLDocument,
+    index: dict[str, Any],
+    meta: dict[str, Any] | None = None,
+) -> None:
+    policy = profile_compact_policy(meta, index)
     runtime_managed = index.setdefault("runtime_managed", {"provider_id": None, "root_keys": []})
     owned = set(runtime_managed.get("root_keys") or [])
     if policy.get("mode") == "fixed":
@@ -706,7 +738,7 @@ def materialize_profile(paths: Paths, meta: dict[str, Any], index: dict[str, Any
 
     runtime_managed["provider_id"] = new_provider
     runtime_managed["root_keys"] = sorted(new_owned | (previous_keys - set(MANAGED_ROOT_KEYS)))
-    apply_compact_policy(doc, index)
+    apply_compact_policy(doc, index, meta)
     atomic_write_text(paths.config, tomlkit.dumps(doc), 0o600)
     maybe_failpoint("after-runtime-config-write")
     index["active_profile_id"] = meta["id"]
@@ -864,6 +896,7 @@ def cmd_profile_update(paths: Paths, args: argparse.Namespace) -> None:
                 ),
                 existing_created_at=str(current.get("created_at", "")) or None,
                 runtime_home=runtime_home_for_profile(paths, current),
+                compact_policy=profile_compact_policy(current, load_index(paths, create=True)),
             )
             replace_directory(staged, directory)
             maybe_failpoint("after-profile-replace")
@@ -935,7 +968,11 @@ def import_runtime_profile(
     catalog = source_dir / "model_catalog.json"
     marker = source_dir / "install-state" / "official-login-mode"
     doc = read_toml(config)
-    mode = "official" if marker.is_file() else "third_party"
+    mode = (
+        "official"
+        if marker.is_file() or not str(doc.get("model_provider", "")).strip()
+        else "third_party"
+    )
     profile_id = profile_id or new_profile_id()
     provider_name = "OpenAI"
     base_url = ""
@@ -975,6 +1012,12 @@ def import_runtime_profile(
                 if existing_meta is not None
                 else default_runtime_home(paths, profile_id)
             )
+        ),
+        compact_policy=(
+            existing_meta.get("compact_policy")
+            if isinstance(existing_meta, dict)
+            and isinstance(existing_meta.get("compact_policy"), dict)
+            else compact_policy_from_config(config)
         ),
     )
     if existing_meta is not None:
@@ -1337,55 +1380,89 @@ def write_catalog_with_visibility_policy(source: Path, destination: Path) -> Non
     atomic_write_text(destination, text, 0o600)
 
 
+def build_catalog_value(
+    paths: Paths,
+    ids: list[str],
+    mappings: dict[str, Any] | None = None,
+    *,
+    offline: bool = False,
+    bundled_only: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if bundled_only:
+        mirror = bundled_catalog_path()
+        official = validate_catalog(read_json(mirror))
+        source_meta = {
+            "source": "bundled-mirror",
+            "path": str(mirror),
+            "sha256": sha256_file(mirror),
+        }
+    else:
+        official, source_meta = fetch_official_catalog(paths, offline=offline)
+    official_by_slug = {item["slug"]: item for item in official["models"]}
+    fallback_instruction_slug, fallback_instruction_text = fallback_instructions(official)
+    mappings = mappings or {}
+    if not isinstance(mappings, dict):
+        raise EngineError("模型映射文件必须是 JSON 对象", 2)
+    models: list[dict[str, Any]] = []
+    unknown: list[str] = []
+    mapped: dict[str, str] = {}
+    for slug in ids:
+        source_slug = slug if slug in official_by_slug else mappings.get(slug)
+        if isinstance(source_slug, str) and source_slug in official_by_slug:
+            model = copy.deepcopy(official_by_slug[source_slug])
+            model["slug"] = slug
+            if slug != source_slug:
+                model["display_name"] = slug
+                model["description"] = f"{slug} (compatible with {source_slug})"
+                mapped[slug] = source_slug
+        else:
+            model = conservative_unknown_model(slug, fallback_instruction_text)
+            unknown.append(slug)
+        apply_catalog_visibility_policy(model)
+        models.append(model)
+    result = {"models": models}
+    output_text = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    meta = {
+        "schema_version": 1,
+        "generated_at": utc_now(),
+        "provider_model_count": len(ids),
+        "known_model_count": len(ids) - len(unknown),
+        "unknown_models": unknown,
+        "unknown_model_instruction_source": (
+            fallback_instruction_slug if unknown else None
+        ),
+        "manual_mappings": mapped,
+        "upstream": source_meta,
+        "sha256": hashlib.sha256(output_text.encode("utf-8")).hexdigest(),
+    }
+    return result, meta
+
+
+def write_catalog_pair(
+    output: Path,
+    value: dict[str, Any],
+    meta: dict[str, Any],
+) -> None:
+    output_text = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    actual_meta = {**meta, "sha256": hashlib.sha256(output_text.encode("utf-8")).hexdigest()}
+    atomic_write_json(output.with_suffix(output.suffix + ".meta.json"), actual_meta)
+    maybe_failpoint("after-catalog-meta-write")
+    atomic_write_text(output, output_text, 0o600)
+
+
 def cmd_catalog_build(paths: Paths, args: argparse.Namespace) -> None:
     with engine_lock(paths):
         recover_transaction(paths)
         ids = provider_model_ids(Path(args.provider_json))
-        official, source_meta = fetch_official_catalog(paths, offline=args.offline)
-        official_by_slug = {item["slug"]: item for item in official["models"]}
-        fallback_instruction_slug, fallback_instruction_text = fallback_instructions(official)
         mappings = read_json(Path(args.mapping_file), {}) if args.mapping_file else {}
-        if mappings is None:
-            mappings = {}
-        if not isinstance(mappings, dict):
-            raise EngineError("模型映射文件必须是 JSON 对象", 2)
-        models: list[dict[str, Any]] = []
-        unknown: list[str] = []
-        mapped: dict[str, str] = {}
-        for slug in ids:
-            source_slug = slug if slug in official_by_slug else mappings.get(slug)
-            if isinstance(source_slug, str) and source_slug in official_by_slug:
-                model = copy.deepcopy(official_by_slug[source_slug])
-                model["slug"] = slug
-                if slug != source_slug:
-                    model["display_name"] = slug
-                    model["description"] = f"{slug} (compatible with {source_slug})"
-                    mapped[slug] = source_slug
-            else:
-                model = conservative_unknown_model(slug, fallback_instruction_text)
-                unknown.append(slug)
-            apply_catalog_visibility_policy(model)
-            models.append(model)
+        result, meta = build_catalog_value(
+            paths,
+            ids,
+            mappings,
+            offline=args.offline,
+        )
         output = Path(args.output)
-        result = {"models": models}
-        output_text = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-        output_sha = hashlib.sha256(output_text.encode("utf-8")).hexdigest()
-        meta = {
-            "schema_version": 1,
-            "generated_at": utc_now(),
-            "provider_model_count": len(ids),
-            "known_model_count": len(ids) - len(unknown),
-            "unknown_models": unknown,
-            "unknown_model_instruction_source": (
-                fallback_instruction_slug if unknown else None
-            ),
-            "manual_mappings": mapped,
-            "upstream": source_meta,
-            "sha256": output_sha,
-        }
-        atomic_write_json(output.with_suffix(output.suffix + ".meta.json"), meta)
-        maybe_failpoint("after-catalog-meta-write")
-        atomic_write_text(output, output_text, 0o600)
+        write_catalog_pair(output, result, meta)
     emit(True, output=str(output), **meta)
 
 
@@ -1495,8 +1572,14 @@ def cmd_compact_policy(paths: Paths, args: argparse.Namespace) -> None:
         paths.ensure_v2_dirs()
         recover_transaction(paths)
         index = load_index(paths, create=True)
+        active_ref = index.get("active_profile_id")
+        active_meta = (
+            profile_meta(paths, str(active_ref))
+            if isinstance(active_ref, str) and active_ref
+            else None
+        )
         if args.mode == "show":
-            emit(True, compact_policy=index.get("compact_policy"))
+            emit(True, compact_policy=profile_compact_policy(active_meta, index))
             return
         if args.mode == "follow-model":
             policy = {"mode": "follow-model"}
@@ -1508,7 +1591,10 @@ def cmd_compact_policy(paths: Paths, args: argparse.Namespace) -> None:
             index["compact_policy"] = policy
             active = index.get("active_profile_id")
             if active:
-                materialize_profile(paths, profile_meta(paths, str(active)), index)
+                meta = profile_meta(paths, str(active))
+                meta["compact_policy"] = policy
+                atomic_write_json(profile_dir(paths, str(active)) / "profile.json", meta)
+                materialize_profile(paths, meta, index)
             else:
                 doc = read_toml(paths.config)
                 apply_compact_policy(doc, index)
@@ -1526,6 +1612,28 @@ def legacy_profile_dirs(root: Path) -> list[Path]:
         for item in sorted(root.iterdir())
         if item.is_dir() and item.name not in reserved and (item / "config.toml").is_file()
     ]
+
+
+def legacy_profile_already_imported(
+    paths: Paths,
+    valid_profiles: list[dict[str, Any]],
+    legacy_dir: Path,
+) -> bool:
+    source = legacy_dir / "config.toml"
+    if not source.is_file():
+        return False
+    try:
+        source_bytes = source.read_bytes()
+    except OSError:
+        return False
+    for item in valid_profiles:
+        candidate = profile_dir(paths, str(item["id"])) / "legacy-config.toml"
+        try:
+            if candidate.is_file() and candidate.read_bytes() == source_bytes:
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def backup_v1(paths: Paths) -> Path:
@@ -1653,10 +1761,20 @@ def cmd_migrate_v1(paths: Paths, args: argparse.Namespace) -> None:
                     source_dir=old_dir,
                     runtime_home=paths.legacy_profiles_root / name,
                 )
+                meta["compact_policy"] = index["compact_policy"]
+                atomic_write_json(
+                    profile_dir(paths, str(meta["id"])) / "profile.json",
+                    meta,
+                )
                 imported.append(meta)
                 source_by_name[name] = meta
             if not imported and paths.config.is_file():
                 meta = import_runtime_profile(paths, name="default", source_dir=paths.home)
+                meta["compact_policy"] = index["compact_policy"]
+                atomic_write_json(
+                    profile_dir(paths, str(meta["id"])) / "profile.json",
+                    meta,
+                )
                 imported.append(meta)
                 source_by_name["default"] = meta
                 old_current = "default"
@@ -1706,6 +1824,550 @@ def cmd_rollback_v1(paths: Paths, _args: argparse.Namespace) -> None:
             restore_v1_backup(paths, backup)
             maybe_failpoint("after-v1-rollback-restore")
         emit(True, restored_backup=str(backup), archived_v2=str(archived))
+
+
+def list_profiles_tolerant(paths: Paths) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    valid: list[dict[str, Any]] = []
+    invalid: list[dict[str, str]] = []
+    if not paths.profiles.is_dir():
+        return valid, invalid
+    for directory in sorted(paths.profiles.iterdir()):
+        if not directory.is_dir():
+            continue
+        if not PROFILE_ID_RE.fullmatch(directory.name):
+            invalid.append({"path": str(directory), "reason": "invalid-directory-name"})
+            continue
+        try:
+            valid.append(profile_meta(paths, directory.name))
+        except EngineError as exc:
+            invalid.append({"path": str(directory), "reason": exc.message})
+    return (
+        sorted(valid, key=lambda item: (str(item.get("name", "")).lower(), item.get("id", ""))),
+        invalid,
+    )
+
+
+def unique_profile_name(paths: Paths, preferred: str, suffix: str = "imported") -> str:
+    base = preferred if PROFILE_NAME_RE.fullmatch(preferred) else "profile"
+    valid, _invalid = list_profiles_tolerant(paths)
+    names = {str(item.get("name", "")) for item in valid}
+    if base not in names:
+        return base
+    candidate = f"{base}-{suffix}"
+    if candidate not in names and PROFILE_NAME_RE.fullmatch(candidate):
+        return candidate
+    counter = 2
+    while True:
+        candidate = f"{base}-{suffix}-{counter}"
+        if candidate not in names and PROFILE_NAME_RE.fullmatch(candidate):
+            return candidate
+        counter += 1
+
+
+def archive_corrupt_file(source: Path, destination_dir: Path, label: str) -> str | None:
+    if not source.exists():
+        return None
+    ensure_private_dir(destination_dir)
+    destination = destination_dir / f"{label}-{dt.datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"
+    if source.is_file():
+        safe_copy(source, destination, 0o600)
+        source.unlink(missing_ok=True)
+    else:
+        os.replace(source, destination)
+    return str(destination)
+
+
+def snapshot_runtime_source(paths: Paths, destination: Path) -> None:
+    if destination.exists():
+        shutil.rmtree(destination)
+    ensure_private_dir(destination)
+    for source, relative in (
+        (paths.config, Path("config.toml")),
+        (paths.auth, Path("auth.json")),
+        (paths.catalog, Path("model_catalog.json")),
+        (
+            paths.official_marker,
+            Path("install-state") / "official-login-mode",
+        ),
+    ):
+        if source.is_file():
+            safe_copy(source, destination / relative, 0o600)
+
+
+def copy_regular_tree(source: Path, destination: Path) -> None:
+    if not source.is_dir():
+        return
+    ensure_private_dir(destination)
+    for root, directories, files in os.walk(source):
+        root_path = Path(root)
+        relative = root_path.relative_to(source)
+        target_root = destination / relative
+        ensure_private_dir(target_root)
+        directories[:] = [
+            name
+            for name in directories
+            if not (root_path / name).is_symlink()
+        ]
+        for name in files:
+            item = root_path / name
+            target = target_root / name
+            try:
+                mode = item.lstat().st_mode
+            except OSError:
+                continue
+            if not stat.S_ISREG(mode) or item.is_symlink() or target.exists():
+                continue
+            safe_copy(item, target, stat.S_IMODE(mode))
+
+
+def seed_runtime_state(source_home: Path, runtime_home: Path) -> list[str]:
+    if runtime_home.resolve(strict=False) == source_home.resolve(strict=False):
+        raise EngineError("配置运行目录未隔离", 7)
+    copied: list[str] = []
+    history = source_home / "history.jsonl"
+    runtime_history = runtime_home / "history.jsonl"
+    if runtime_history.is_symlink():
+        runtime_history.unlink()
+    if history.is_file() and not runtime_history.exists():
+        safe_copy(history, runtime_history, stat.S_IMODE(history.stat().st_mode))
+        copied.append("history.jsonl")
+    for name in ("sessions", "archived_sessions", "shell_snapshots"):
+        source = source_home / name
+        destination = runtime_home / name
+        if destination.is_symlink():
+            destination.unlink()
+        before = destination.exists()
+        copy_regular_tree(source, destination)
+        if source.is_dir() and not before and destination.exists():
+            copied.append(name)
+    return copied
+
+
+def seed_root_runtime_state(paths: Paths, runtime_home: Path) -> list[str]:
+    return seed_runtime_state(paths.home, runtime_home)
+
+
+def catalog_model_ids(path: Path) -> list[str]:
+    if not path.is_file():
+        return []
+    try:
+        value = read_json(path)
+    except EngineError:
+        return []
+    if not isinstance(value, dict) or not isinstance(value.get("models"), list):
+        return []
+    result: list[str] = []
+    for item in value["models"]:
+        slug = item.get("slug") if isinstance(item, dict) else None
+        if isinstance(slug, str) and slug and slug not in result:
+            result.append(slug)
+    return result
+
+
+def catalog_manual_mappings(directory: Path) -> dict[str, str]:
+    try:
+        meta = read_json(directory / "catalog.meta.json", {}) or {}
+    except EngineError:
+        return {}
+    mappings = meta.get("manual_mappings") if isinstance(meta, dict) else None
+    if not isinstance(mappings, dict):
+        return {}
+    return {
+        str(key): str(value)
+        for key, value in mappings.items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
+
+
+def catalog_by_slug(value: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        str(item["slug"]): item
+        for item in value.get("models", [])
+        if isinstance(item, dict) and isinstance(item.get("slug"), str)
+    }
+
+
+def normalize_profile_reasoning(
+    paths: Paths,
+    meta: dict[str, Any],
+    catalog: dict[str, Any],
+) -> dict[str, Any] | None:
+    directory = profile_dir(paths, str(meta["id"]))
+    managed_path = directory / "managed.toml"
+    managed = read_toml(managed_path)
+    model_slug = str(managed.get("model", ""))
+    current = (
+        str(managed["model_reasoning_effort"])
+        if "model_reasoning_effort" in managed
+        else None
+    )
+    if not current or not model_slug:
+        return None
+    model = catalog_by_slug(catalog).get(model_slug)
+    levels = (
+        [
+            str(item.get("effort"))
+            for item in model.get("supported_reasoning_levels", [])
+            if isinstance(item, dict) and isinstance(item.get("effort"), str)
+        ]
+        if isinstance(model, dict)
+        else []
+    )
+    if current in levels:
+        return None
+    fallback = model.get("default_reasoning_level") if isinstance(model, dict) else None
+    if not isinstance(fallback, str) or fallback not in levels:
+        fallback = None
+    if fallback:
+        managed["model_reasoning_effort"] = fallback
+    else:
+        managed.pop("model_reasoning_effort", None)
+    atomic_write_text(managed_path, tomlkit.dumps(managed), 0o600)
+    return {
+        "profile_id": meta["id"],
+        "profile_name": meta["name"],
+        "model": model_slug,
+        "from": current,
+        "to": fallback,
+        "supported": levels,
+    }
+
+
+def rebuild_profile_catalog(
+    paths: Paths,
+    meta: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    directory = profile_dir(paths, str(meta["id"]))
+    if meta.get("mode") == "official":
+        catalog = validate_catalog(read_json(bundled_catalog_path()))
+        return None, normalize_profile_reasoning(paths, meta, catalog)
+    summary = managed_summary(directory)
+    ids = catalog_model_ids(directory / "model_catalog.json")
+    selected_model = str(summary.get("model") or "")
+    if selected_model and selected_model not in ids:
+        ids.insert(0, selected_model)
+    if not ids:
+        raise EngineError(
+            "第三方配置缺少可重建的模型 ID",
+            7,
+            profile_id=meta["id"],
+        )
+    catalog, catalog_meta = build_catalog_value(
+        paths,
+        ids,
+        catalog_manual_mappings(directory),
+        offline=True,
+        bundled_only=True,
+    )
+    output_text = json.dumps(catalog, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    catalog_meta = {
+        **catalog_meta,
+        "sha256": hashlib.sha256(output_text.encode("utf-8")).hexdigest(),
+        "rebuilt_for_apk_upgrade": True,
+    }
+    atomic_write_text(directory / "model_catalog.json", output_text, 0o600)
+    atomic_write_json(directory / "catalog.meta.json", catalog_meta, 0o600)
+    fallback = normalize_profile_reasoning(paths, meta, catalog)
+    return catalog_meta, fallback
+
+
+def cmd_apk_upgrade(paths: Paths, args: argparse.Namespace) -> None:
+    release = validate_profile_name(args.release)
+    release_state = paths.home / "install-state" / "apk-upgrades" / release
+    corrupt_root = release_state / "corrupt"
+    root_source = release_state / "root-source"
+    recovered_transaction = False
+    archived_corruption: list[str] = []
+    with engine_lock(paths):
+        if paths.journal.is_file():
+            try:
+                recovered_transaction = recover_transaction(paths)
+            except EngineError:
+                archived = archive_corrupt_file(
+                    paths.journal,
+                    corrupt_root,
+                    "config-v2-transaction.json",
+                )
+                if archived:
+                    archived_corruption.append(archived)
+        snapshot_runtime_source(paths, root_source)
+        with transaction(paths, f"apk-upgrade-{release}", retain_backup=True) as backup:
+            paths.ensure_v2_dirs()
+            valid_index = False
+            try:
+                index = load_index(paths) if paths.index.is_file() else default_index()
+                valid_index = paths.index.is_file()
+            except EngineError:
+                archived = archive_corrupt_file(paths.index, corrupt_root, "index.json")
+                if archived:
+                    archived_corruption.append(archived)
+                index = default_index()
+
+            valid_profiles, invalid_profiles = list_profiles_tolerant(paths)
+            quarantined_profiles: list[dict[str, str]] = []
+            for item in invalid_profiles:
+                source = Path(item["path"])
+                archived = archive_corrupt_file(
+                    source,
+                    corrupt_root / "profiles",
+                    source.name,
+                )
+                quarantined_profiles.append(
+                    {**item, "archive": archived or ""}
+                )
+            valid_profiles, _ = list_profiles_tolerant(paths)
+
+            inherited_policy = profile_compact_policy(None, index)
+            for item in valid_profiles:
+                if not isinstance(item.get("compact_policy"), dict):
+                    item["compact_policy"] = inherited_policy
+                    atomic_write_json(
+                        profile_dir(paths, str(item["id"])) / "profile.json",
+                        item,
+                    )
+
+            imported_legacy: list[dict[str, Any]] = []
+            legacy_current = ""
+            current_file = paths.legacy_profiles_root / "current"
+            if current_file.is_file():
+                legacy_current = current_file.read_text(encoding="utf-8").strip()
+            for legacy_dir in legacy_profile_dirs(paths.legacy_profiles_root):
+                if legacy_profile_already_imported(paths, valid_profiles, legacy_dir):
+                    continue
+                preferred = validate_profile_name(legacy_dir.name)
+                name = unique_profile_name(paths, preferred, "legacy")
+                imported = import_runtime_profile(
+                    paths,
+                    name=name,
+                    source_dir=legacy_dir,
+                )
+                seed_runtime_state(
+                    legacy_dir,
+                    runtime_home_for_profile(paths, imported),
+                )
+                imported_legacy.append(imported)
+                valid_profiles.append(imported)
+
+            root_has_config = (root_source / "config.toml").is_file() or (
+                root_source / "install-state" / "official-login-mode"
+            ).is_file()
+            active_meta: dict[str, Any] | None = None
+            if root_has_config:
+                active_ref = index.get("active_profile_id") if valid_index else None
+                existing = None
+                if isinstance(active_ref, str):
+                    existing = next(
+                        (item for item in valid_profiles if item.get("id") == active_ref),
+                        None,
+                    )
+                if existing is not None:
+                    root_existing = dict(existing)
+                    root_existing["compact_policy"] = compact_policy_from_config(
+                        root_source / "config.toml"
+                    )
+                    active_meta = import_runtime_profile(
+                        paths,
+                        name=str(existing["name"]),
+                        source_dir=root_source,
+                        profile_id=str(existing["id"]),
+                        existing_meta=root_existing,
+                        runtime_home=runtime_home_for_profile(paths, existing),
+                    )
+                else:
+                    root_name = unique_profile_name(paths, "root", "apk")
+                    active_meta = import_runtime_profile(
+                        paths,
+                        name=root_name,
+                        source_dir=root_source,
+                    )
+            elif imported_legacy:
+                active_meta = next(
+                    (
+                        item
+                        for item in imported_legacy
+                        if item.get("name") == legacy_current
+                    ),
+                    imported_legacy[0],
+                )
+            elif valid_profiles:
+                active_ref = index.get("active_profile_id")
+                active_meta = next(
+                    (
+                        item
+                        for item in valid_profiles
+                        if item.get("id") == active_ref
+                    ),
+                    valid_profiles[0],
+                )
+
+            catalog_reports: list[dict[str, Any]] = []
+            effort_fallbacks: list[dict[str, Any]] = []
+            valid_profiles, _ = list_profiles_tolerant(paths)
+            for item in valid_profiles:
+                catalog_meta, fallback = rebuild_profile_catalog(paths, item)
+                if catalog_meta is not None:
+                    catalog_reports.append(
+                        {
+                            "profile_id": item["id"],
+                            "profile_name": item["name"],
+                            "known_model_count": catalog_meta["known_model_count"],
+                            "unknown_models": catalog_meta["unknown_models"],
+                            "sha256": catalog_meta["sha256"],
+                        }
+                    )
+                if fallback is not None:
+                    effort_fallbacks.append(fallback)
+
+            copied_runtime_state: list[str] = []
+            if active_meta is not None:
+                active_meta = profile_meta(paths, str(active_meta["id"]))
+                index["compact_policy"] = profile_compact_policy(active_meta, index)
+                materialize_profile(paths, active_meta, index)
+                copied_runtime_state = seed_root_runtime_state(
+                    paths,
+                    runtime_home_for_profile(paths, active_meta),
+                )
+            else:
+                index["active_profile_id"] = None
+                atomic_write_json(paths.index, index)
+
+            upgrades = index.setdefault("apk_upgrades", {})
+            upgrades[release] = {
+                "completed_at": utc_now(),
+                "root_profile_id": active_meta.get("id") if active_meta else None,
+                "root_priority": True,
+                "catalog_source": "bundled-rust-v0.144.1",
+            }
+            index["migration"] = {
+                **(index.get("migration") or {}),
+                "v1_completed": True,
+                "apk_release": release,
+            }
+            atomic_write_json(paths.index, index)
+            maybe_failpoint("after-apk-upgrade-index-write")
+
+        shutil.rmtree(root_source, ignore_errors=True)
+    emit(
+        True,
+        release=release,
+        backup=str(backup),
+        recovered_transaction=recovered_transaction,
+        archived_corruption=archived_corruption,
+        quarantined_profiles=quarantined_profiles,
+        imported_legacy_profiles=[
+            redact_profile(paths, item) for item in imported_legacy
+        ],
+        active_profile=(
+            redact_profile(paths, profile_meta(paths, str(active_meta["id"])))
+            if active_meta is not None
+            else None
+        ),
+        copied_runtime_state=copied_runtime_state,
+        catalog_reports=catalog_reports,
+        effort_fallbacks=effort_fallbacks,
+    )
+
+
+def validate_upgrade_backup(paths: Paths, backup_value: str) -> Path:
+    backup = Path(backup_value).expanduser().resolve()
+    root = paths.backups.resolve()
+    try:
+        backup.relative_to(root)
+    except ValueError as exc:
+        raise EngineError("升级恢复点不在受管目录内", 2, backup=str(backup)) from exc
+    if not backup.is_dir() or not (backup / "snapshot.json").is_file():
+        raise EngineError("升级恢复点不存在或已损坏", 4, backup=str(backup))
+    return backup
+
+
+def cmd_apk_rollback(paths: Paths, args: argparse.Namespace) -> None:
+    with engine_lock(paths):
+        recover_transaction(paths)
+        backup = validate_upgrade_backup(paths, args.backup)
+        with transaction(paths, "apk-upgrade-rollback", retain_backup=True) as archived:
+            restore_snapshot(paths, backup)
+    emit(True, restored_backup=str(backup), archived_current=str(archived))
+
+
+def fetch_provider_models_for_profile(
+    paths: Paths,
+    meta: dict[str, Any],
+    timeout: int,
+) -> list[str]:
+    directory = profile_dir(paths, str(meta["id"]))
+    summary = managed_summary(directory)
+    base_url = normalize_base_url(str(summary.get("base_url") or ""))
+    auth = read_json(directory / "auth.json", {}) or {}
+    key = auth.get("OPENAI_API_KEY") if isinstance(auth, dict) else None
+    if not isinstance(key, str) or not key:
+        raise EngineError("当前第三方配置缺少 API Key，跳过联网刷新", 4)
+    request = urllib.request.Request(
+        f"{base_url}/models",
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Accept": "application/json",
+            "User-Agent": "codex-for-tui-apk-upgrade/2.4.2",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = response.read(2 * 1024 * 1024 + 1)
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise EngineError("第三方模型目录刷新失败", 6) from exc
+    if len(data) > 2 * 1024 * 1024:
+        raise EngineError("第三方模型目录超过大小限制", 7)
+    try:
+        value = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise EngineError("第三方模型目录不是有效 JSON", 7) from exc
+    temporary = paths.home / "install-state" / "apk-refresh-provider.json"
+    atomic_write_json(temporary, value)
+    try:
+        return provider_model_ids(temporary)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def cmd_apk_refresh_active(paths: Paths, args: argparse.Namespace) -> None:
+    with engine_lock(paths):
+        recover_transaction(paths)
+        index = load_index(paths)
+        active = index.get("active_profile_id")
+        if not isinstance(active, str) or not active:
+            emit(True, refreshed=False, reason="no-active-profile")
+            return
+        meta = profile_meta(paths, active)
+        if meta.get("mode") != "third_party":
+            emit(True, refreshed=False, reason="official-profile")
+            return
+        ids = fetch_provider_models_for_profile(paths, meta, args.timeout)
+        directory = profile_dir(paths, active)
+        catalog, catalog_meta = build_catalog_value(
+            paths,
+            ids,
+            catalog_manual_mappings(directory),
+            offline=True,
+            bundled_only=True,
+        )
+        with transaction(paths, "apk-refresh-active"):
+            output_text = json.dumps(catalog, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+            catalog_meta = {
+                **catalog_meta,
+                "sha256": hashlib.sha256(output_text.encode("utf-8")).hexdigest(),
+                "provider_refreshed_at": utc_now(),
+            }
+            atomic_write_text(directory / "model_catalog.json", output_text, 0o600)
+            atomic_write_json(directory / "catalog.meta.json", catalog_meta, 0o600)
+            fallback = normalize_profile_reasoning(paths, meta, catalog)
+            materialize_profile(paths, profile_meta(paths, active), index)
+    emit(
+        True,
+        refreshed=True,
+        profile_id=active,
+        provider_model_count=len(ids),
+        catalog_sha256=catalog_meta["sha256"],
+        effort_fallback=fallback,
+    )
 
 
 def cmd_status(paths: Paths, _args: argparse.Namespace) -> None:
@@ -1829,6 +2491,15 @@ def build_parser() -> argparse.ArgumentParser:
     migrate.add_argument("--compact-policy", choices=("follow-model", "fixed"), required=True)
     migrate.set_defaults(handler=cmd_migrate_v1)
     sub.add_parser("rollback-v1").set_defaults(handler=cmd_rollback_v1)
+    apk_upgrade = sub.add_parser("apk-upgrade")
+    apk_upgrade.add_argument("--release", required=True)
+    apk_upgrade.set_defaults(handler=cmd_apk_upgrade)
+    apk_rollback = sub.add_parser("apk-rollback")
+    apk_rollback.add_argument("--backup", required=True)
+    apk_rollback.set_defaults(handler=cmd_apk_rollback)
+    apk_refresh = sub.add_parser("apk-refresh-active")
+    apk_refresh.add_argument("--timeout", type=int, default=8)
+    apk_refresh.set_defaults(handler=cmd_apk_refresh_active)
     return parser
 
 

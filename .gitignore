@@ -8,3 +8,5 @@ tmp/
 release/
 .DS_Store
 Thumbs.db
+android-app/core/main/src/main/assets/codex-upgrade/
+android-app/core/main/src/main/assets/codex-apk-upgrade.sh

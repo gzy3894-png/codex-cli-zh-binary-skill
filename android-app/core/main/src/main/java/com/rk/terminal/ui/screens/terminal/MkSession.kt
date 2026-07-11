@@ -20,6 +20,7 @@ object MkSession {
     private val managedScripts = mapOf(
         "init-host.sh" to "init-host",
         "init.sh" to "init",
+        "codex-apk-upgrade.sh" to "codex-apk-upgrade",
         "codex-for-tui-bootstrap.sh" to "codex-for-tui-bootstrap.sh",
         "codex-preview" to "codex-preview",
         "codex-push-image" to "codex-push-image",
