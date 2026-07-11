@@ -190,7 +190,7 @@ codex_for_tui_binary_build_key() {
     [0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]) ;;
     *) return 1 ;;
   esac
-  epoch="${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.0}"
+  epoch="${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.1}"
   epoch="$(printf '%s' "$epoch" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-32)"
   [ -n "$epoch" ] || epoch="runtime"
   printf '%s-%s-%s\n' "$version" "$epoch" "$digest"

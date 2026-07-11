@@ -1,5 +1,14 @@
 # Changelog
 
+## Codex for TUI 2.5.1
+
+Codex for TUI 2.5.1 是 2.5.0 启动闪退热修：`SessionNaming` 非法 Unicode 属性正则在 Android ICU 上于类加载阶段崩溃。
+
+- 根因：`SessionNaming` 类初始化编译了非法 Unicode 属性 Regex → `PatternSyntaxException` → `ExceptionInInitializerError`。
+- 修复：用 `isLetterOrDigit` 清洗标题；`onSessionCreated` 加 `runCatching` 兜底；静态门禁禁止再写旧 `nonLabel = Regex` 路径。
+- 会话隔离功能保留。SQLite epoch `apk-2.5.1`；`versionCode=67`、`versionName=2.5.1`。
+- 发布说明见 `docs/codex-for-tui-2.5.1-release-notes.md`。
+
 ## Codex for TUI 2.5.0
 
 Codex for TUI 2.5.0 在 2.4.10 之上交付 **会话隔离 P0**：终端标签显示名、固定 agent 前缀（codex/claude/shell）、注册表冷启动恢复、按 **UUID**（非显示名）绑定的 resume 注入。独立模块 `com.rk.terminal.session`，不改 MkSession / 全局 `CODEX_HOME`，不破坏 2.4.2+ 升级路径与 2.4.10 shell 交接。

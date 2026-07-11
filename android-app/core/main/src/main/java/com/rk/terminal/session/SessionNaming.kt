@@ -2,11 +2,15 @@ package com.rk.terminal.session
 
 /**
  * Pure helpers for session display names. No Android dependency.
+ *
+ * IMPORTANT: Do not compile Unicode property classes in Regex here.
+ * Android ICU rejects malformed property patterns and can crash during
+ * class init (PatternSyntaxException -> ExceptionInInitializerError on
+ * 2.5.0 cold start). Prefer Char.isLetterOrDigit / explicit allow-list.
  */
 object SessionNaming {
     private val unsafeChars = Regex("[\\r\\n\\t]+")
     private val multiSpace = Regex("\\s+")
-    private val nonLabel = Regex("[^\\p{L}\\p{N._\\-\\s]+")
 
     const val MAX_TITLE_LEN = 32
 
@@ -51,14 +55,27 @@ object SessionNaming {
     }
 
     fun sanitizeTitle(raw: String): String {
-        return raw
-            .replace(unsafeChars, " ")
-            .replace(nonLabel, " ")
+        val normalized = raw.replace(unsafeChars, " ")
+        val filtered = buildString(normalized.length) {
+            for (c in normalized) {
+                append(if (isAllowedTitleChar(c)) c else ' ')
+            }
+        }
+        return filtered
             .replace(multiSpace, " ")
             .trim()
             .trim('-', '.', '_')
             .take(MAX_TITLE_LEN)
             .trim()
+    }
+
+    /** Letters, digits, space, and a small punctuation allow-list for titles. */
+    private fun isAllowedTitleChar(c: Char): Boolean {
+        return c.isLetterOrDigit() ||
+            c.isWhitespace() ||
+            c == '.' ||
+            c == '_' ||
+            c == '-'
     }
 
     /** Legacy terminal ids: main, main1, main2... */

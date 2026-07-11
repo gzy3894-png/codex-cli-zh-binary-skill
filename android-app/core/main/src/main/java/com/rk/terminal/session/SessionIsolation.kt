@@ -95,45 +95,62 @@ object SessionIsolation {
         autoNamed: Boolean = true,
     ): SessionRecord? {
         if (!enabled) return null
-        ensureStore()
-        synchronized(lock) {
-            val existing = records[sessionId]
-            val rec = if (existing != null) {
-                val resolvedName = preferredDisplayName?.takeIf { it.isNotBlank() }
-                    ?: if (existing.agentKind != agentKind) {
-                        SessionNaming.buildDisplayName(
-                            agentKind,
+        // Never crash the terminal for naming/registry faults; fall back to raw id.
+        return runCatching {
+            ensureStore()
+            synchronized(lock) {
+                val existing = records[sessionId]
+                val rec = if (existing != null) {
+                    val resolvedName = preferredDisplayName?.takeIf { it.isNotBlank() }
+                        ?: if (existing.agentKind != agentKind) {
+                            SessionNaming.buildDisplayName(
+                                agentKind,
+                                existing.displayName
+                                    .removePrefix("${existing.agentKind.prefix}-")
+                                    .ifBlank { "新会话" },
+                            )
+                        } else {
                             existing.displayName
-                                .removePrefix("${existing.agentKind.prefix}-")
-                                .ifBlank { "新会话" },
-                        )
-                    } else {
-                        existing.displayName
-                    }
-                existing.copy(
-                    workingMode = workingMode,
-                    agentKind = agentKind,
-                    agentResumeId = agentResumeId.ifBlank { existing.agentResumeId },
-                    displayName = resolvedName,
-                    autoNamed = if (preferredDisplayName != null) autoNamed else existing.autoNamed,
-                ).touch()
-            } else {
-                val ordinal = records.size + 1
-                val rawName = preferredDisplayName?.takeIf { it.isNotBlank() }
-                    ?: SessionNaming.defaultTitle(agentKind, ordinal)
-                SessionRecord(
-                    id = sessionId,
-                    displayName = SessionNaming.buildDisplayName(agentKind, rawName),
-                    agentKind = agentKind,
-                    workingMode = workingMode,
-                    agentResumeId = agentResumeId,
-                    autoNamed = autoNamed,
-                )
+                        }
+                    existing.copy(
+                        workingMode = workingMode,
+                        agentKind = agentKind,
+                        agentResumeId = agentResumeId.ifBlank { existing.agentResumeId },
+                        displayName = resolvedName,
+                        autoNamed = if (preferredDisplayName != null) autoNamed else existing.autoNamed,
+                    ).touch()
+                } else {
+                    val ordinal = records.size + 1
+                    val rawName = preferredDisplayName?.takeIf { it.isNotBlank() }
+                        ?: SessionNaming.defaultTitle(agentKind, ordinal)
+                    SessionRecord(
+                        id = sessionId,
+                        displayName = SessionNaming.buildDisplayName(agentKind, rawName),
+                        agentKind = agentKind,
+                        workingMode = workingMode,
+                        agentResumeId = agentResumeId,
+                        autoNamed = autoNamed,
+                    )
+                }
+                putLocked(rec)
+                if (currentId.isBlank()) currentId = sessionId
+                persistLocked()
+                rec
             }
-            putLocked(rec)
-            if (currentId.isBlank()) currentId = sessionId
-            persistLocked()
-            return rec
+        }.getOrElse {
+            val fallback = SessionRecord(
+                id = sessionId,
+                displayName = "${agentKind.prefix}-$sessionId",
+                agentKind = agentKind,
+                workingMode = workingMode,
+                agentResumeId = agentResumeId,
+                autoNamed = autoNamed,
+            )
+            synchronized(lock) {
+                putLocked(fallback)
+                if (currentId.isBlank()) currentId = sessionId
+            }
+            fallback
         }
     }
 
