@@ -1,5 +1,15 @@
 # Changelog
 
+## Codex for TUI 2.4.4
+
+Codex for TUI 2.4.4 是 2.4.3 的前滚热修，恢复文件托盘发送时的「附加说明」对话框。
+
+- 2.3.9 为缩短发送路径误删 `SendPreviewDialog`；后端 `sendPreviewToAi(..., userMessage)` 一直保留，但 UI 点击“发送”会硬编码空字符串，导致附言入口消失多版。
+- 2.4.4 恢复文件卡片发送确认框：可填写「附加说明（可选）」，留空仍可直接发送；文本托盘输入框不受影响。
+- SQLite build key 使用 `apk-2.4.4` runtime epoch；Codex 二进制仍为固定 `0.144.1-zh.1`。
+- Release 校验 `versionCode=59`、`versionName=2.4.4`；发布说明见 `docs/codex-for-tui-2.4.4-release-notes.md`。
+- Android 不能普通覆盖降级安装；从 2.4.4（`versionCode=59`）回到更低版本必须使用更高 versionCode 的前滚修复包，或卸载重装。
+
 ## Codex for TUI 2.4.3
 
 Codex for TUI 2.4.3 是 2.4.2 的前滚热修，修复 aarch64-musl 上 `gpt-5.6-*` 因 `tool_mode=code_mode_only` 导致工具调用全面失败的问题。

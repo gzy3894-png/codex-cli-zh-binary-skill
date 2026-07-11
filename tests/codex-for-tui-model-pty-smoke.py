@@ -358,7 +358,7 @@ def write_runtime(root: Path, catalog_source: Path) -> tuple[Path, Path]:
     home = root / "home"
     runtime = root / "runtime"
     work = root / "work"
-    sqlite = runtime / "sqlite-builds" / "pty-apk-2.4.3"
+    sqlite = runtime / "sqlite-builds" / "pty-apk-2.4.4"
     runtime.mkdir(parents=True)
     work.mkdir()
     sqlite.mkdir(parents=True)
@@ -464,7 +464,7 @@ def main() -> int:
         {
             "HOME": str(home),
             "CODEX_HOME": str(runtime),
-            "CODEX_SQLITE_HOME": str(runtime / "sqlite-builds" / "pty-apk-2.4.3"),
+            "CODEX_SQLITE_HOME": str(runtime / "sqlite-builds" / "pty-apk-2.4.4"),
             "TERM": "xterm-256color",
             "COLORTERM": "truecolor",
             "LANG": "C.UTF-8",
