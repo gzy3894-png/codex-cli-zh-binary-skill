@@ -1,5 +1,17 @@
 # Changelog
 
+## Codex for TUI 2.5.2
+
+Codex for TUI 2.5.2：会话隔离语义修正 + 2.5.1 审查修复。
+
+- 去掉添加会话时的 Agent 前缀手选；默认 shell，启动 claude/codex 时自动改前缀。
+- 首条有效用户消息自动命名（软键盘 / 虚拟栏 / 托盘发送路径）。
+- 通知栏 EXIT 清空注册表；进程死亡仍可冷恢复。
+- 修复 createSession CODEX 覆盖、冷恢复旁路 main、changeSession resume 注入缺口。
+- SQLite epoch `apk-2.5.2`；`versionCode=68`、`versionName=2.5.2`。
+- 发布说明见 `docs/codex-for-tui-2.5.2-release-notes.md`。
+
+
 ## Codex for TUI 2.5.1
 
 Codex for TUI 2.5.1 是 2.5.0 启动闪退热修：`SessionNaming` 非法 Unicode 属性正则在 Android ICU 上于类加载阶段崩溃。

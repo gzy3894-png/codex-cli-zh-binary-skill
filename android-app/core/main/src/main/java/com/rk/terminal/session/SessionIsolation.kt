@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap
  * this module only for naming, persistence, and resume command resolution.
  *
  * Resume identity is always [SessionRecord.agentResumeId] (UUID), never displayName.
+ * Agent prefix is inferred from shell launches (claude/codex), not from a dialog chip.
  */
 object SessionIsolation {
     private val lock = Any()
@@ -23,6 +24,8 @@ object SessionIsolation {
     private var currentId: String = ""
     private var pendingRestore: List<SessionRecord> = emptyList()
     private var restoreConsumed = false
+    /** Set by clearAll (EXIT); blocks mid-lifecycle allRecords resurrect until process re-init. */
+    private var intentionallyWiped = false
     private val resumeInjected = ConcurrentHashMap.newKeySet<String>()
 
     /** Observable titles for Compose (sessionId → displayName). */
@@ -52,6 +55,7 @@ object SessionIsolation {
             currentId = snap.currentId
             pendingRestore = snap.sessions.toList()
             restoreConsumed = false
+            intentionallyWiped = false
             resumeInjected.clear()
             bumpLocked()
         }
@@ -84,15 +88,20 @@ object SessionIsolation {
 
     /**
      * Ensure metadata exists when a live terminal session is created.
-     * Does not change process behavior if isolation is disabled.
+     *
+     * Defaults to [AgentKind.SHELL] so create paths do not falsely stamp CODEX
+     * before a real agent is launched. Pass explicit agentKind/resume fields
+     * when restoring from registry.
      */
     fun onSessionCreated(
         sessionId: String,
         workingMode: Int,
-        agentKind: AgentKind = AgentKind.CODEX,
+        agentKind: AgentKind = AgentKind.SHELL,
         preferredDisplayName: String? = null,
         agentResumeId: String = "",
         autoNamed: Boolean = true,
+        /** When false, do not overwrite an existing record's agentKind/displayName. */
+        preserveExistingIdentity: Boolean = false,
     ): SessionRecord? {
         if (!enabled) return null
         // Never crash the terminal for naming/registry faults; fall back to raw id.
@@ -101,24 +110,26 @@ object SessionIsolation {
             synchronized(lock) {
                 val existing = records[sessionId]
                 val rec = if (existing != null) {
-                    val resolvedName = preferredDisplayName?.takeIf { it.isNotBlank() }
-                        ?: if (existing.agentKind != agentKind) {
-                            SessionNaming.buildDisplayName(
-                                agentKind,
+                    if (preserveExistingIdentity) {
+                        existing.copy(workingMode = workingMode).touch()
+                    } else {
+                        val resolvedName = preferredDisplayName?.takeIf { it.isNotBlank() }
+                            ?: if (existing.agentKind != agentKind) {
+                                SessionNaming.buildDisplayName(
+                                    agentKind,
+                                    SessionNaming.stripPrefix(existing.displayName),
+                                )
+                            } else {
                                 existing.displayName
-                                    .removePrefix("${existing.agentKind.prefix}-")
-                                    .ifBlank { "新会话" },
-                            )
-                        } else {
-                            existing.displayName
-                        }
-                    existing.copy(
-                        workingMode = workingMode,
-                        agentKind = agentKind,
-                        agentResumeId = agentResumeId.ifBlank { existing.agentResumeId },
-                        displayName = resolvedName,
-                        autoNamed = if (preferredDisplayName != null) autoNamed else existing.autoNamed,
-                    ).touch()
+                            }
+                        existing.copy(
+                            workingMode = workingMode,
+                            agentKind = agentKind,
+                            agentResumeId = agentResumeId.ifBlank { existing.agentResumeId },
+                            displayName = resolvedName,
+                            autoNamed = if (preferredDisplayName != null) autoNamed else existing.autoNamed,
+                        ).touch()
+                    }
                 } else {
                     val ordinal = records.size + 1
                     val rawName = preferredDisplayName?.takeIf { it.isNotBlank() }
@@ -168,9 +179,55 @@ object SessionIsolation {
         }
     }
 
+    /** Drop every registry row (notification EXIT / explicit wipe). */
+    fun clearAll() {
+        if (!enabled) return
+        synchronized(lock) {
+            records.clear()
+            displayNames.clear()
+            resumeInjected.clear()
+            currentId = ""
+            pendingRestore = emptyList()
+            restoreConsumed = true
+            intentionallyWiped = true
+            persistLocked()
+            bumpLocked()
+        }
+    }
+
+    /**
+     * Sessions to recreate when live map is empty.
+     * Cold snapshot first; if already consumed and not intentionally wiped,
+     * fall back to in-memory records (service restart mid-process).
+     */
+    fun pendingRestoreIfEmpty(liveSessionCount: Int): List<SessionRecord> {
+        if (!enabled) return emptyList()
+        if (liveSessionCount > 0) return emptyList()
+        synchronized(lock) {
+            if (intentionallyWiped) return emptyList()
+            if (!restoreConsumed) {
+                restoreConsumed = true
+                val list = pendingRestore
+                pendingRestore = emptyList()
+                if (list.isNotEmpty()) return list
+            }
+            return records.values.toList()
+        }
+    }
+
     fun onCurrentChanged(sessionId: String) {
         if (!enabled) return
         synchronized(lock) {
+            if (currentId == sessionId) {
+                // Still touch lastActive for restore preference, but skip redundant writes when possible.
+                records[sessionId]?.let {
+                    val next = it.touch()
+                    records[sessionId] = next
+                    // no displayNames change; still persist currentId if needed
+                }
+                persistLocked()
+                return
+            }
             currentId = sessionId
             records[sessionId]?.let { putLocked(it.touch()) }
             persistLocked()
@@ -182,34 +239,56 @@ object SessionIsolation {
      */
     fun rename(sessionId: String, title: String): SessionRecord? {
         if (!enabled) return null
-        synchronized(lock) {
-            val existing = records[sessionId] ?: return null
-            val next = existing.withDisplayName(
-                name = SessionNaming.buildDisplayName(existing.agentKind, title),
-                autoNamed = false,
-            )
-            putLocked(next)
-            persistLocked()
-            return next
-        }
+        return runCatching {
+            synchronized(lock) {
+                val existing = records[sessionId] ?: return null
+                val next = existing.withDisplayName(
+                    name = SessionNaming.buildDisplayName(existing.agentKind, title),
+                    autoNamed = false,
+                )
+                putLocked(next)
+                persistLocked()
+                next
+            }
+        }.getOrNull()
     }
 
     fun setAgentKind(sessionId: String, kind: AgentKind): SessionRecord? {
         if (!enabled) return null
-        synchronized(lock) {
-            val existing = records[sessionId] ?: return null
-            val body = existing.displayName
-                .removePrefix("${existing.agentKind.prefix}-")
-                .ifBlank { "新会话" }
-            val next = existing.copy(
-                agentKind = kind,
-                displayName = SessionNaming.buildDisplayName(kind, body),
-                lastActiveAt = System.currentTimeMillis(),
-            )
-            putLocked(next)
-            persistLocked()
-            return next
-        }
+        return runCatching {
+            synchronized(lock) {
+                val existing = records[sessionId] ?: return null
+                if (existing.agentKind == kind) return existing
+                val body = SessionNaming.stripPrefix(existing.displayName)
+                val next = existing.copy(
+                    agentKind = kind,
+                    displayName = SessionNaming.buildDisplayName(kind, body),
+                    lastActiveAt = System.currentTimeMillis(),
+                )
+                putLocked(next)
+                persistLocked()
+                next
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * Observe a user-submitted shell line:
+     * 1) If it launches claude/codex, update agent prefix (even mid-session).
+     * 2) Else if still autoNamed and not noise, name from first message.
+     */
+    fun onUserSubmittedLine(sessionId: String, text: String): Boolean {
+        if (!enabled) return false
+        val line = text.trim()
+        if (line.isEmpty()) return false
+        return runCatching {
+            val launch = AgentKind.detectLaunch(line)
+            if (launch != null) {
+                setAgentKind(sessionId, launch) != null
+            } else {
+                applyFirstUserMessage(sessionId, line)
+            }
+        }.getOrDefault(false)
     }
 
     /**
@@ -219,24 +298,22 @@ object SessionIsolation {
         if (!enabled) return false
         val text = message.trim()
         if (text.isEmpty()) return false
-        // Ignore pure shell noise / short control.
-        if (text.length < 2) return false
-        synchronized(lock) {
-            val existing = records[sessionId] ?: return false
-            if (!existing.autoNamed) return false
-            val nextName = SessionNaming.fromFirstUserMessage(existing.agentKind, text)
-            if (nextName == existing.displayName) {
-                // Mark consumed so we don't keep rewriting.
-                putLocked(existing.copy(autoNamed = false))
+        if (SessionNaming.isNoiseForAutoName(text)) return false
+        return runCatching {
+            synchronized(lock) {
+                val existing = records[sessionId] ?: return false
+                if (!existing.autoNamed) return false
+                val nextName = SessionNaming.fromFirstUserMessage(existing.agentKind, text)
+                if (nextName == existing.displayName) {
+                    putLocked(existing.copy(autoNamed = false))
+                    persistLocked()
+                    return false
+                }
+                putLocked(existing.withDisplayName(nextName, autoNamed = false))
                 persistLocked()
-                return false
+                true
             }
-            putLocked(
-                existing.withDisplayName(nextName, autoNamed = false)
-            )
-            persistLocked()
-            return true
-        }
+        }.getOrDefault(false)
     }
 
     fun bindAgentResumeId(sessionId: String, resumeId: String): SessionRecord? {
@@ -270,19 +347,9 @@ object SessionIsolation {
         return cmd
     }
 
-    /**
-     * Sessions to recreate after process death. Empty if already consumed or none saved.
-     * Caller must only use this when the live SessionService has zero sessions.
-     */
+    /** @deprecated Prefer [pendingRestoreIfEmpty]; kept for tests/callers. */
     fun consumePendingRestore(): List<SessionRecord> {
-        if (!enabled) return emptyList()
-        synchronized(lock) {
-            if (restoreConsumed) return emptyList()
-            restoreConsumed = true
-            val list = pendingRestore
-            pendingRestore = emptyList()
-            return list
-        }
+        return pendingRestoreIfEmpty(0)
     }
 
     fun preferredCurrentId(fallback: String): String {
@@ -339,6 +406,7 @@ object SessionIsolation {
             currentId = ""
             pendingRestore = emptyList()
             restoreConsumed = false
+            intentionallyWiped = false
             resumeInjected.clear()
             revision.value = 0
         }

@@ -32,7 +32,8 @@ class SessionService : Service() {
         fun getService(): SessionService = this@SessionService
 
         fun terminateAllSessions() {
-            this@SessionService.terminateAllSessions()
+            // Binder API: wipe live PTYs and registry (same as notification EXIT).
+            this@SessionService.terminateAllSessions(clearRegistry = true)
         }
 
         fun createSession(
@@ -71,7 +72,8 @@ class SessionService : Service() {
     override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onDestroy() {
-        terminateAllSessions(updateNotification = false)
+        // Process/service teardown: kill PTYs but keep isolation registry for cold restore.
+        terminateAllSessions(updateNotification = false, clearRegistry = false)
         super.onDestroy()
     }
 
@@ -91,23 +93,31 @@ class SessionService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "ACTION_EXIT") {
-            terminateAllSessions(updateNotification = false)
+            // User tapped EXIT: wipe tabs so next open does not resurrect them.
+            terminateAllSessions(updateNotification = false, clearRegistry = true)
             stopSelf()
             return START_NOT_STICKY
         }
         return START_STICKY
     }
 
-    private fun terminateAllSessions(updateNotification: Boolean = true) {
+    private fun terminateAllSessions(
+        updateNotification: Boolean = true,
+        clearRegistry: Boolean = false,
+    ) {
         sessions.keys.toList().forEach { id ->
             sessions[id]?.finishIfRunning()
             cleanupSessionTempDir(id)
         }
         sessions.clear()
         sessionList.clear()
-        // Keep registry on process/service exit so cold start can restore tabs.
         SessionIsolationHooks.ensureInit(this)
-        SessionIsolation.saveNow()
+        if (clearRegistry) {
+            SessionIsolationHooks.clearAll()
+        } else {
+            // Keep registry so cold start can restore tabs after process death.
+            SessionIsolation.saveNow()
+        }
         if (updateNotification) {
             updateNotification()
         }

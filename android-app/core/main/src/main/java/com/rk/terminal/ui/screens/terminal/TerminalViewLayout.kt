@@ -48,6 +48,7 @@ fun TerminalViewLayout(
 
                     // Cold restore before default "main" is created, so process death
                     // can bring back previous tabs without changing the normal first-run path.
+                    var restoredIds = emptySet<String>()
                     if (service.sessionList.isEmpty()) {
                         val pending = SessionIsolationHooks.pendingRestoreIfEmpty(0)
                         pending.forEach { rec ->
@@ -55,6 +56,7 @@ fun TerminalViewLayout(
                             if (sessionBinder.getSession(rec.id) == null) {
                                 sessionBinder.createSession(rec.id, restoreClient, rec.workingMode)
                             }
+                            // Re-apply full restored identity after createSession preserve path.
                             SessionIsolation.onSessionCreated(
                                 sessionId = rec.id,
                                 workingMode = rec.workingMode,
@@ -62,36 +64,69 @@ fun TerminalViewLayout(
                                 preferredDisplayName = rec.displayName,
                                 agentResumeId = rec.agentResumeId,
                                 autoNamed = rec.autoNamed,
+                                preserveExistingIdentity = false,
                             )
                         }
+                        restoredIds = pending.map { it.id }.toSet()
                         if (pending.isNotEmpty()) {
                             val preferred = SessionIsolation.preferredCurrentId(pending.first().id)
-                            if (service.sessionList.containsKey(preferred)) {
+                            val livePreferred = when {
+                                service.sessionList.containsKey(preferred) -> preferred
+                                else -> service.sessionList.keys.firstOrNull()
+                            }
+                            if (livePreferred != null) {
                                 service.currentSession.value =
-                                    preferred to (service.sessionList[preferred] ?: Settings.working_Mode)
+                                    livePreferred to (service.sessionList[livePreferred]
+                                        ?: Settings.working_Mode)
                             }
                         }
                     }
 
-                    val sessionId = service.currentSession.value.first
+                    // Prefer restored current; never invent a bare "main" beside restored tabs.
+                    val sessionId = service.currentSession.value.first.let { current ->
+                        when {
+                            service.sessionList.containsKey(current) -> current
+                            restoredIds.isNotEmpty() ->
+                                service.sessionList.keys.firstOrNull() ?: current
+                            else -> current
+                        }
+                    }
                     val client = TerminalBackEnd(this, mainActivity, sessionId)
 
                     val session = sessionBinder.getSession(sessionId)
-                        ?: sessionBinder.createSession(
-                            sessionId,
-                            client,
-                            Settings.working_Mode
-                        )
+                        ?: if (restoredIds.isEmpty()) {
+                            sessionBinder.createSession(
+                                sessionId,
+                                client,
+                                Settings.working_Mode
+                            )
+                        } else {
+                            // Restore produced live tabs but preferred id missing — attach first live.
+                            val fallbackId = service.sessionList.keys.first()
+                            service.currentSession.value =
+                                fallbackId to (service.sessionList[fallbackId] ?: Settings.working_Mode)
+                            sessionBinder.getSession(fallbackId)
+                                ?: sessionBinder.createSession(
+                                    fallbackId,
+                                    TerminalBackEnd(this, mainActivity, fallbackId),
+                                    Settings.working_Mode
+                                )
+                        }
 
-                    session.updateTerminalSessionClient(client)
+                    val activeId = service.currentSession.value.first
+                    val activeClient =
+                        if (activeId == sessionId) client
+                        else TerminalBackEnd(this, mainActivity, activeId)
+
+                    session.updateTerminalSessionClient(activeClient)
                     attachSession(session)
-                    setTerminalViewClient(client)
+                    setTerminalViewClient(activeClient)
                     setTypeface(TerminalUtils.typeface)
-                    SessionIsolationHooks.notifyCurrent(sessionId)
+                    SessionIsolationHooks.notifyCurrent(activeId)
 
                     // One-shot resume inject when UUID is known; no-op otherwise.
                     post {
-                        SessionIsolationHooks.maybeInjectResume(sessionId) { line ->
+                        SessionIsolationHooks.maybeInjectResume(activeId) { line ->
                             runCatching { session.write(line) }
                         }
                     }

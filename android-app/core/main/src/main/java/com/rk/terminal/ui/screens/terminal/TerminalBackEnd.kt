@@ -14,6 +14,7 @@ import com.blankj.utilcode.util.ClipboardUtils
 import com.blankj.utilcode.util.KeyboardUtils
 import com.rk.libcommons.child
 import com.rk.settings.Settings
+import com.rk.terminal.session.SessionIsolationHooks
 import com.rk.terminal.ui.activities.terminal.MainActivity
 import com.rk.terminal.ui.screens.settings.InputMode
 import com.rk.terminal.ui.screens.terminal.virtualkeys.SpecialButton
@@ -225,6 +226,10 @@ class TerminalBackEnd(
     private var screenUpdateScheduled = false
     private var pendingScreenUpdateDelayMs = TEXT_UPDATE_COALESCE_DELAY_MS
     @Volatile private var lastUserInputUptimeMs = 0L
+    /** Soft-keyboard / key input line buffer for agent-prefix + first-message naming. */
+    private val lineBuffer = StringBuilder()
+    /** Dedup Enter when both onCodePoint(\\r/\\n) and KEYCODE_ENTER fire. */
+    private var lastFlushUptimeMs = 0L
 
     private val screenUpdateRunnable = Runnable {
         val burst = synchronized(screenUpdateLock) {
@@ -353,20 +358,31 @@ class TerminalBackEnd(
         noteUserInput()
         val activity = activityRef.get() ?: return false
         if (KeyShortcutHandler.handle(keyCode, e, activity)) return true
-        
-        if (keyCode == KeyEvent.KEYCODE_ENTER && !session.isRunning) {
-            val binder = activity.viewModel.sessionBinder ?: return false
-            val service = binder.getService()
-            val currentId = service.currentSession.value.first
-            
-            binder.terminateSession(currentId)
-            
-            if (service.sessionList.isEmpty()) {
-                activity.finish()
-            } else {
-                terminalViewModel()?.changeSession(activity, binder, service.sessionList.keys.first())
+
+        if (keyCode == KeyEvent.KEYCODE_DEL || keyCode == KeyEvent.KEYCODE_FORWARD_DEL) {
+            if (lineBuffer.isNotEmpty()) {
+                lineBuffer.deleteCharAt(lineBuffer.length - 1)
             }
-            return true
+            return false
+        }
+
+        if (keyCode == KeyEvent.KEYCODE_ENTER) {
+            flushSubmittedLine()
+            if (!session.isRunning) {
+                val binder = activity.viewModel.sessionBinder ?: return false
+                val service = binder.getService()
+                val currentId = service.currentSession.value.first
+
+                binder.terminateSession(currentId)
+
+                if (service.sessionList.isEmpty()) {
+                    activity.finish()
+                } else {
+                    terminalViewModel()?.changeSession(activity, binder, service.sessionList.keys.first())
+                }
+                return true
+            }
+            return false
         }
         return false
     }
@@ -391,7 +407,38 @@ class TerminalBackEnd(
 
     override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean {
         noteUserInput()
+        if (ctrlDown) return false
+        when (codePoint) {
+            0x0A, 0x0D -> flushSubmittedLine() // \n / \r
+            0x08, 0x7F -> { // BS / DEL
+                if (lineBuffer.isNotEmpty()) lineBuffer.deleteCharAt(lineBuffer.length - 1)
+            }
+            else -> {
+                if (codePoint in 0x20..0x10FFFF && !Character.isISOControl(codePoint)) {
+                    if (lineBuffer.length < 512) {
+                        lineBuffer.appendCodePoint(codePoint)
+                    }
+                }
+            }
+        }
         return false
+    }
+
+    private fun flushSubmittedLine() {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastFlushUptimeMs < 40L) {
+            // Same Enter often delivered as code-point + key event.
+            lineBuffer.setLength(0)
+            return
+        }
+        lastFlushUptimeMs = now
+        if (lineBuffer.isEmpty()) return
+        val text = lineBuffer.toString()
+        lineBuffer.setLength(0)
+        val sid = sessionId
+            ?: activityRef.get()?.viewModel?.sessionBinder?.getService()?.currentSession?.value?.first
+            ?: return
+        SessionIsolationHooks.onUserSubmittedLine(sid, text)
     }
 
     override fun onEmulatorSet() {

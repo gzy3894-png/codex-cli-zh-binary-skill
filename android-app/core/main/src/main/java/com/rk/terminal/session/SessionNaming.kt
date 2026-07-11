@@ -27,6 +27,21 @@ object SessionNaming {
         }
     }
 
+    /** Strip a known agent prefix from a display name; returns body only. */
+    fun stripPrefix(displayName: String): String {
+        val cleaned = displayName.trim()
+        AgentKind.entries.forEach { k ->
+            val p = "${k.prefix}-"
+            if (cleaned.lowercase().startsWith(p)) {
+                return cleaned.substring(p.length).trim().ifBlank { "新会话" }
+            }
+            if (cleaned.equals(k.prefix, ignoreCase = true)) {
+                return "新会话"
+            }
+        }
+        return cleaned.ifBlank { "新会话" }
+    }
+
     /**
      * Build a prefixed display name. If [title] already has a known prefix, keep/normalize it.
      */
@@ -34,10 +49,7 @@ object SessionNaming {
         val cleaned = sanitizeTitle(title)
         if (cleaned.isEmpty()) return defaultTitle(kind)
         val lower = cleaned.lowercase()
-        val stripped = AgentKind.entries.fold(cleaned) { acc, k ->
-            val p = "${k.prefix}-"
-            if (acc.lowercase().startsWith(p)) acc.substring(p.length).trim() else acc
-        }.ifBlank { cleaned }
+        val stripped = stripPrefix(cleaned)
         // If user typed only a known prefix word, keep default body.
         if (AgentKind.entries.any { it.prefix == lower }) {
             return defaultTitle(kind)
@@ -76,6 +88,23 @@ object SessionNaming {
             c == '.' ||
             c == '_' ||
             c == '-'
+    }
+
+    /** Lines that should not become the session title (launch cmds / shell noise). */
+    fun isNoiseForAutoName(message: String): Boolean {
+        val t = message.trim()
+        if (t.length < 2) return true
+        if (AgentKind.detectLaunch(t) != null) return true
+        val first = t.substringBefore(' ').lowercase()
+        if (first in setOf(
+                "exit", "logout", "clear", "reset", "cd", "ls", "pwd",
+                "export", "unset", "source", ".", "bash", "sh", "zsh",
+                "history", "true", "false", ":",
+            )
+        ) {
+            return true
+        }
+        return false
     }
 
     /** Legacy terminal ids: main, main1, main2... */

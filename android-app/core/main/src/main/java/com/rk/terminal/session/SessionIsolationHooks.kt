@@ -14,9 +14,24 @@ object SessionIsolationHooks {
         SessionIsolation.init(context)
     }
 
-    fun notifyCreated(sessionId: String, workingMode: Int, agentKind: AgentKind = AgentKind.CODEX) {
+    /**
+     * Register a newly created live session.
+     * Default agent is SHELL; real claude/codex is applied when the user launches them.
+     * [preserveExistingIdentity] defaults true so createSession cannot clobber restored rows.
+     */
+    fun notifyCreated(
+        sessionId: String,
+        workingMode: Int,
+        agentKind: AgentKind = AgentKind.SHELL,
+        preserveExistingIdentity: Boolean = true,
+    ) {
         if (!SessionIsolation.enabled) return
-        SessionIsolation.onSessionCreated(sessionId, workingMode, agentKind)
+        SessionIsolation.onSessionCreated(
+            sessionId = sessionId,
+            workingMode = workingMode,
+            agentKind = agentKind,
+            preserveExistingIdentity = preserveExistingIdentity,
+        )
     }
 
     fun notifyTerminated(sessionId: String) {
@@ -41,19 +56,16 @@ object SessionIsolationHooks {
 
     fun onUserSubmittedLine(sessionId: String, text: String) {
         if (!SessionIsolation.enabled) return
-        SessionIsolation.applyFirstUserMessage(sessionId, text)
+        SessionIsolation.onUserSubmittedLine(sessionId, text)
     }
 
     /**
      * When the live session map is empty, return registry rows to recreate.
-     * Uses cold-start snapshot first; if the service died mid-process, falls back to in-memory records.
+     * See [SessionIsolation.pendingRestoreIfEmpty].
      */
     fun pendingRestoreIfEmpty(liveSessionCount: Int): List<SessionRecord> {
         if (!SessionIsolation.enabled) return emptyList()
-        if (liveSessionCount > 0) return emptyList()
-        val cold = SessionIsolation.consumePendingRestore()
-        if (cold.isNotEmpty()) return cold
-        return SessionIsolation.allRecords()
+        return SessionIsolation.pendingRestoreIfEmpty(liveSessionCount)
     }
 
     /**
@@ -64,5 +76,10 @@ object SessionIsolationHooks {
         if (!SessionIsolation.enabled) return
         val cmd = SessionIsolation.takeResumeCommandForInject(sessionId) ?: return
         write(cmd + "\n")
+    }
+
+    fun clearAll() {
+        if (!SessionIsolation.enabled) return
+        SessionIsolation.clearAll()
     }
 }

@@ -110,14 +110,20 @@ fun TerminalScreen(
     if (showAddDialog && sessionBinder != null) {
         AddSessionDialog(
             onDismiss = { showAddDialog = false },
-            onCreateSession = { mode, agentKind ->
+            onCreateSession = { mode ->
                 val sessionId = SessionIsolationHooks.nextId(
                     sessionBinder.getService().sessionList.keys.toList()
                 )
                 val terminal = terminalViewModel.terminalView ?: return@AddSessionDialog
                 val client = TerminalBackEnd(terminal, mainActivity, sessionId)
+                // New tabs start as shell; agent prefix updates when user launches claude/codex.
                 sessionBinder.createSession(sessionId, client, mode)
-                SessionIsolation.onSessionCreated(sessionId, mode, agentKind)
+                SessionIsolation.onSessionCreated(
+                    sessionId = sessionId,
+                    workingMode = mode,
+                    agentKind = AgentKind.SHELL,
+                    preserveExistingIdentity = false,
+                )
                 terminalViewModel.changeSession(context, sessionBinder, sessionId)
                 showAddDialog = false
             }
@@ -254,39 +260,19 @@ private fun BackgroundImage(viewModel: TerminalViewModel) {
 @Composable
 private fun AddSessionDialog(
     onDismiss: () -> Unit,
-    onCreateSession: (mode: Int, agentKind: AgentKind) -> Unit
+    onCreateSession: (mode: Int) -> Unit
 ) {
-    var agentKind by remember { mutableStateOf(AgentKind.CODEX) }
     BasicAlertDialog(onDismissRequest = onDismiss) {
         PreferenceGroup {
-            Text(
-                text = "Agent 前缀",
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-            )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                AgentKind.entries.forEach { kind ->
-                    FilterChip(
-                        selected = agentKind == kind,
-                        onClick = { agentKind = kind },
-                        label = { Text(kind.prefix) }
-                    )
-                }
-            }
             SettingsCard(
                 title = { Text("Alpine") },
                 description = { Text(stringResource(strings.alpine_desc)) },
-                onClick = { onCreateSession(WorkingMode.ALPINE, agentKind) }
+                onClick = { onCreateSession(WorkingMode.ALPINE) }
             )
             SettingsCard(
                 title = { Text("Android") },
                 description = { Text(stringResource(strings.android_desc)) },
-                onClick = { onCreateSession(WorkingMode.ANDROID, agentKind) }
+                onClick = { onCreateSession(WorkingMode.ANDROID) }
             )
         }
     }

@@ -1346,6 +1346,15 @@ class MainActivity : ComponentActivity() {
 
     private fun submitPromptToSession(session: TerminalSession, prompt: String) {
         val cleanPrompt = prompt.trimEnd('\r', '\n')
+        // File-tray / AI send path: also drive agent prefix + first-message naming.
+        val sid = terminalViewModel.sessionBinder
+            ?.getService()
+            ?.currentSession
+            ?.value
+            ?.first
+        if (sid != null && cleanPrompt.isNotBlank()) {
+            com.rk.terminal.session.SessionIsolationHooks.onUserSubmittedLine(sid, cleanPrompt)
+        }
         session.write(cleanPrompt)
 
         val terminalView = terminalViewModel.terminalView

@@ -256,6 +256,13 @@ class TerminalViewModel : ViewModel() {
         
         sessionBinder.getService().currentSession.value = Pair(sessionId, sessionBinder.getService().sessionList[sessionId]!!)
         SessionIsolationHooks.notifyCurrent(sessionId)
+
+        // Resume inject on switch as well (one-shot per session id in SessionIsolation).
+        terminal.post {
+            SessionIsolationHooks.maybeInjectResume(sessionId) { line ->
+                runCatching { session.write(line) }
+            }
+        }
     }
 }
 
