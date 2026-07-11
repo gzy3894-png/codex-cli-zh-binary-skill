@@ -37,6 +37,11 @@ fun TerminalDrawer(
     val isolationRevision = SessionIsolation.revision.value
     var renameTarget by remember { mutableStateOf<String?>(null) }
     var renameDraft by remember { mutableStateOf("") }
+    // Snapshot keys for LazyColumn — never iterate the live map during remove.
+    val sessions = sessionBinder?.getService()?.sessionList?.keys?.toList().orEmpty()
+    val currentId = sessionBinder?.getService()?.currentSession?.value?.first.orEmpty()
+    @Suppress("UNUSED_VARIABLE")
+    val _isolationTick = isolationRevision
 
     ModalDrawerSheet(modifier = Modifier.width(drawerWidth)) {
         Column(
@@ -71,51 +76,46 @@ fun TerminalDrawer(
                 }
             }
 
-            @Suppress("UNUSED_EXPRESSION")
-            isolationRevision
-
-            sessionBinder?.getService()?.sessionList?.keys?.toList()?.let { sessions ->
-                LazyColumn {
-                    items(sessions, key = { it }) { sessionId ->
-                        val isSelected = sessionId == sessionBinder.getService().currentSession.value.first
-                        val title = SessionIsolationHooks.titleOf(sessionId)
-                        SelectableCard(
-                            selected = isSelected,
-                            onSelect = { onSessionSelected(sessionId) },
-                            onLongClick = {
-                                renameTarget = sessionId
-                                val prefix = SessionIsolation.record(sessionId)?.agentKind?.prefix
-                                    ?: AgentKind.SHELL.prefix
-                                renameDraft = title
-                                    .removePrefix("$prefix-")
-                                    .ifBlank { title }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(8.dp)
+            LazyColumn {
+                items(sessions, key = { it }) { sessionId ->
+                    val isSelected = sessionId == currentId
+                    val title = SessionIsolationHooks.titleOf(sessionId)
+                    SelectableCard(
+                        selected = isSelected,
+                        onSelect = { onSessionSelected(sessionId) },
+                        onLongClick = {
+                            renameTarget = sessionId
+                            val prefix = SessionIsolation.record(sessionId)?.agentKind?.prefix
+                                ?: AgentKind.SHELL.prefix
+                            renameDraft = title
+                                .removePrefix("$prefix-")
+                                .ifBlank { title }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = title,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    modifier = Modifier.weight(1f)
-                                )
+                            Text(
+                                text = title,
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.weight(1f)
+                            )
 
-                                // Allow closing any window, including the selected one.
-                                // Closing = kill this PTY window only (PowerShell multi-window model).
-                                IconButton(
-                                    onClick = { onCloseWindow(sessionId) },
-                                    modifier = Modifier.size(24.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.Delete,
-                                        contentDescription = "关闭窗口",
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
+                            // Closing = kill this PTY window only (PowerShell multi-window model).
+                            // Capture id; do not close during composition of a removed key.
+                            IconButton(
+                                onClick = { onCloseWindow(sessionId) },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Delete,
+                                    contentDescription = "关闭窗口",
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
                         }
                     }

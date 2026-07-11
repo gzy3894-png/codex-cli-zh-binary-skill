@@ -140,31 +140,40 @@ class SessionService : Service() {
      */
     private fun terminateSession(id: String): String? {
         return runCatching {
+            // Snapshot remaining before mutation so Compose readers never see a
+            // half-removed map mid-click (crash path observed on 2.5.3).
+            val remainingBefore = sessionList.keys.filter { it != id }
+            val nextCurrent = when {
+                remainingBefore.isEmpty() -> null
+                currentSession.value.first == id -> remainingBefore.last()
+                sessionList.containsKey(currentSession.value.first) &&
+                    currentSession.value.first != id -> currentSession.value.first
+                else -> remainingBefore.lastOrNull()
+            }
+
+            // Point current away from the dying id before killing PTY.
+            if (nextCurrent != null) {
+                val mode = sessionList[nextCurrent] ?: com.rk.settings.Settings.working_Mode
+                currentSession.value = nextCurrent to mode
+            } else {
+                // No live windows left — keep a stable empty placeholder without
+                // inventing a fake "main" row or calling clearAll().
+                currentSession.value = "" to com.rk.settings.Settings.working_Mode
+            }
+
             sessions[id]?.let { session ->
                 runCatching { session.finishIfRunning() }
             }
             sessions.remove(id)
             sessionList.remove(id)
             cleanupSessionTempDir(id)
-            // Window chrome only — not agent-session lifecycle.
+            // Window chrome only — not agent-session lifecycle / not clearAll.
             runCatching { SessionIsolationHooks.notifyTerminated(id) }
 
-            val remaining = sessionList.keys.toList()
-            val nextCurrent = when {
-                remaining.isEmpty() -> null
-                currentSession.value.first == id -> remaining.last()
-                sessionList.containsKey(currentSession.value.first) -> currentSession.value.first
-                else -> remaining.last()
-            }
             if (nextCurrent != null) {
-                val mode = sessionList[nextCurrent] ?: com.rk.settings.Settings.working_Mode
-                currentSession.value = nextCurrent to mode
                 runCatching { SessionIsolationHooks.notifyCurrent(nextCurrent) }
-                updateNotification()
-            } else {
-                currentSession.value = "main" to com.rk.settings.Settings.working_Mode
-                updateNotification()
             }
+            runCatching { updateNotification() }
             nextCurrent
         }.getOrElse {
             android.util.Log.e("SessionService", "terminateSession failed for $id", it)

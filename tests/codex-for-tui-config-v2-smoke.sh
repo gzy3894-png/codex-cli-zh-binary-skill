@@ -258,15 +258,18 @@ test_profile_integrity_routing_and_secret_cleanup() {
     --sqlite-build-key codex-cli-0.144.1-test-build > "$home/third-launch.json"
   third_runtime="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["runtime_home"])' "$home/third-launch.json")"
   third_sqlite="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sqlite_home"])' "$home/third-launch.json")"
-  [ ! -L "$third_runtime/sessions" ] ||
-    fail "profile runtime reused the control-home sessions symlink"
-  [ ! -L "$third_runtime/history.jsonl" ] ||
-    fail "profile runtime reused the control-home history symlink"
-  [ ! -e "$third_runtime/sessions/control.jsonl" ] ||
-    fail "profile runtime inherited another profile's session rollout"
+  # Shared conversation state: sessions/history symlink to control CODEX_HOME.
+  [ -L "$third_runtime/sessions" ] ||
+    fail "profile runtime must symlink shared sessions to control home"
+  [ -L "$third_runtime/history.jsonl" ] ||
+    fail "profile runtime must symlink shared history to control home"
+  [ -e "$third_runtime/sessions/control.jsonl" ] ||
+    fail "profile runtime must see control-home session rollouts"
   assert_contains "$third_runtime/config.toml" "sqlite_home = \"$third_sqlite\""
-  mkdir -p "$third_runtime/sessions"
+  # Write via the shared sessions link so the rollout lives in control home.
   printf '%s\n' '{"session":"preserve-after-profile-delete"}' > "$third_runtime/sessions/keep.jsonl"
+  [ -s "$home/sessions/keep.jsonl" ] ||
+    fail "shared sessions write did not land in control home"
 
   sed -i "s#command = \".*print-openai-api-key.sh\"#command = \"/tmp/rogue-auth\"#" "$home/config.toml"
   engine "$home" status > "$home/dirty-auth.json"
@@ -292,8 +295,11 @@ test_profile_integrity_routing_and_secret_cleanup() {
     "$home/config-runtimes" \
     "$home/auth.json" >/dev/null 2>&1 ||
     fail "deleted profile secret remains in live or transaction storage"
+  # Profile delete must not wipe shared conversation history.
   [ -s "$third_runtime/sessions/keep.jsonl" ] ||
     fail "deleting a profile removed preserved session rollouts"
+  [ -s "$home/sessions/keep.jsonl" ] ||
+    fail "deleting a profile removed control-home shared sessions"
 
   engine "$home" profile create --name alpha --mode official --model gpt-5.4 > "$home/alpha.json"
   engine "$home" profile create --name beta --mode official --model gpt-5.5 > "$home/beta.json"
@@ -359,8 +365,9 @@ test_profile_runtime_config_persistence_and_isolation() {
     '[profile_local]' \
     '# alpha-runtime-only' \
     'runtime_note = "alpha-only"' >> "$alpha_runtime/config.toml"
-  mkdir -p "$alpha_runtime/sessions"
+  # Shared sessions: write through alpha runtime link; beta must see it too.
   printf '%s\n' '{"session":"alpha-stays-alive"}' > "$alpha_runtime/sessions/alpha.jsonl"
+  [ -L "$alpha_runtime/sessions" ] || fail "alpha runtime must symlink shared sessions"
 
   engine "$home" profile activate beta >/dev/null
   engine "$home" profile launch beta \
@@ -375,8 +382,10 @@ test_profile_runtime_config_persistence_and_isolation() {
   assert_contains "$beta_runtime/config.toml" 'base_url = "https://beta.example.test/v1"'
   assert_not_contains "$beta_runtime/config.toml" "https://alpha.example.test/v1"
   assert_not_contains "$beta_runtime/config.toml" "alpha-runtime-only"
-  [ ! -e "$beta_runtime/sessions/alpha.jsonl" ] ||
-    fail "beta inherited alpha session state"
+  [ -L "$beta_runtime/sessions" ] || fail "beta runtime must symlink shared sessions"
+  [ -e "$beta_runtime/sessions/alpha.jsonl" ] ||
+    fail "beta must see shared alpha session state"
+  assert_contains "$beta_runtime/sessions/alpha.jsonl" '"session":"alpha-stays-alive"'
 
   engine "$home" profile sync-runtime alpha \
     --source-dir "$alpha_runtime" > "$home/alpha-sync.json"

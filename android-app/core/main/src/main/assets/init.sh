@@ -333,9 +333,14 @@ enter_interactive_shell() {
   # Visible handoff so "引导结束" is never followed by a silent freeze.
   printf '%s\n' "正在进入交互 shell…"
 
-  # Pure shell home: never leave the user in Codex workspace after guide text.
-  # Workspace is still exported for `codex` launcher to avoid project-local config noise.
-  if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
+  # Unified workspace: shell prompt and `codex` launcher share the same cwd.
+  # Avoids $HOME project-local config noise while keeping paths consistent.
+  workspace="${CODEX_FOR_TUI_WORKSPACE:-${HOME:-/root}/workspace}"
+  mkdir -p "$workspace" 2>/dev/null || true
+  export CODEX_FOR_TUI_WORKSPACE="$workspace"
+  if [ -d "$workspace" ]; then
+    cd "$workspace" 2>/dev/null || cd "${HOME:-/root}" 2>/dev/null || true
+  elif [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
     cd "$HOME" 2>/dev/null || true
   fi
 
@@ -365,7 +370,11 @@ enter_interactive_shell() {
   shell_rc="${TMPDIR:-/tmp}/codex-for-tui-shell-rc.$$"
   cat >"$shell_rc" <<'EOF' 2>/dev/null || true
 # Codex for TUI interactive shell handoff (auto-generated, safe to ignore).
-if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
+workspace="${CODEX_FOR_TUI_WORKSPACE:-${HOME:-/root}/workspace}"
+mkdir -p "$workspace" 2>/dev/null || true
+if [ -d "$workspace" ]; then
+  cd "$workspace" 2>/dev/null || true
+elif [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
   cd "$HOME" 2>/dev/null || true
 fi
 if [ ! -t 2 ] && [ -t 1 ]; then
@@ -397,12 +406,13 @@ if [ "$#" -eq 0 ]; then
   sanitize_profile_d
   [ ! -r /etc/profile ] || . /etc/profile
   export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"
-  # Dedicated workspace is for Codex launches only (see codex-zh-local.sh).
-  # Keep the interactive shell at $HOME so normal commands (claude/cloud/etc.) start cleanly.
+  # Unified workspace for shell + Codex launcher (same path, same cwd).
   workspace="${CODEX_FOR_TUI_WORKSPACE:-$HOME/workspace}"
   mkdir -p "$workspace" 2>/dev/null || true
   export CODEX_FOR_TUI_WORKSPACE="$workspace"
-  if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
+  if [ -d "$workspace" ]; then
+    cd "$workspace" 2>/dev/null || true
+  elif [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
     cd "$HOME" 2>/dev/null || true
   fi
   # Default shell-first; App setting may export CODEX_FOR_TUI_AUTO_START=1.

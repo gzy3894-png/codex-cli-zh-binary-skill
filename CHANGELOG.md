@@ -1,14 +1,15 @@
 # Changelog
 
-## Codex for TUI 2.5.3
+## Codex for TUI 2.5.4
 
-Codex for TUI 2.5.3：关闭终端窗口闪退热修 + 窗口≠agent 会话模型纠偏。
+Codex for TUI 2.5.4：关窗闪退前滚修复 + 配置共享会话 + 工作区路径统一。
 
-- 侧栏是终端窗口（PTY）列表，不是 agent 会话列表；关闭=杀进程，不删 CLI 对话。
-- 统一 `closeWindow`；删除按钮 / 快捷键 / shell 退出不再 `stopSelf`/`finish` 竞态闪退。
-- 侧栏文案改为「终端窗口」；重命名说明仅显示名。
-- SQLite epoch `apk-2.5.3`；`versionCode=69`、`versionName=2.5.3`。
-- 发布说明见 `docs/codex-for-tui-2.5.3-release-notes.md`。
+- 关窗：`Handler.post` 延后杀 PTY；`remainingBefore` 快照；最后一窗不伪造 `main`、不 `clearAll`/`stopSelf`。
+- 侧栏 sessions 快照，避免 Compose 删除竞态；闪退后不再清空窗口注册表。
+- 不同配置档共享 `sessions`/`history`（软链控制 `CODEX_HOME`）；config/auth/sqlite 仍隔离。
+- 交互 shell 与 `codex` launcher 统一 `CODEX_FOR_TUI_WORKSPACE`（默认 `/root/workspace`）。
+- SQLite epoch `apk-2.5.4`；`versionCode=70`、`versionName=2.5.4`。
+- 发布说明见 `docs/codex-for-tui-2.5.4-release-notes.md`。
 
 
 

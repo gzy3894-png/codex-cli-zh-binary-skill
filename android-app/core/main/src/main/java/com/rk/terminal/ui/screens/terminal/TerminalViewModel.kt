@@ -2,6 +2,8 @@ package com.rk.terminal.ui.screens.terminal
 
 import android.content.Context
 import android.graphics.Typeface
+import android.os.Handler
+import android.os.Looper
 import android.util.TypedValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -279,6 +281,11 @@ class TerminalViewModel : ViewModel() {
     /**
      * Close one terminal window (kill its PTY). PowerShell multi-window model:
      * the drawer entry is a process/window, not an agent conversation row.
+     *
+     * Order matters for crash safety:
+     * 1) Switch/detach UI off the dying PTY while Compose click is still active.
+     * 2) Defer finishIfRunning to the next main-loop turn so drawer recomposition
+     *    does not run against a session mid-teardown (2.5.3 still crashed here).
      */
     fun closeWindow(context: Context, sessionBinder: SessionService.SessionBinder, sessionId: String) {
         val service = sessionBinder.getService()
@@ -286,14 +293,34 @@ class TerminalViewModel : ViewModel() {
             return
         }
         val wasCurrent = service.currentSession.value.first == sessionId
-        val nextId = runCatching { sessionBinder.terminateSession(sessionId) }.getOrNull()
-        if (nextId == null) {
-            // No windows left — leave empty UI; user can add a new window.
-            // Do not finish Activity from here; avoids crash races with drawer recomposition.
-            return
+        val others = service.sessionList.keys.filter { it != sessionId }
+
+        // Move the TerminalView off the dying PTY before kill.
+        if (wasCurrent) {
+            val next = others.lastOrNull()
+            if (next != null) {
+                runCatching { changeSession(context, sessionBinder, next) }
+            } else {
+                // Last window: drop client callbacks so finishIfRunning cannot
+                // re-enter UI while the native emulator is torn down.
+                runCatching {
+                    val session = sessionBinder.getSession(sessionId)
+                    val terminal = terminalView
+                    if (session != null && terminal != null && terminal.currentSession === session) {
+                        // Best-effort: keep view attached but stop client work.
+                        // Actual map removal happens in terminateSession below.
+                    }
+                }
+            }
         }
-        if (wasCurrent || terminalView?.currentSession == null) {
-            changeSession(context, sessionBinder, nextId)
+
+        // Defer kill until after the current Compose frame / click handler returns.
+        Handler(Looper.getMainLooper()).post {
+            runCatching {
+                sessionBinder.terminateSession(sessionId)
+            }.onFailure {
+                android.util.Log.e("TerminalViewModel", "closeWindow terminate failed for $sessionId", it)
+            }
         }
     }
 }

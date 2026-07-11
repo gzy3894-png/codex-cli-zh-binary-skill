@@ -56,7 +56,7 @@ val verifyCodexUpgradePayload by tasks.registering {
                 }
                 line.substring(0, separator) to line.substring(separator + 1)
             }
-        if (values["release"] != "2.5.3" || values["version_code"] != "69") {
+        if (values["release"] != "2.5.4" || values["version_code"] != "70") {
             throw GradleException("Codex APK payload release/versionCode mismatch: $values")
         }
         if (values["codex_version"] != "0.144.1" ||
@@ -147,8 +147,8 @@ android {
         applicationId = "com.gzy3894.codexfortui"
         minSdk = 26
         targetSdk = 36
-versionCode = 69
-versionName = "2.5.3"
+versionCode = 70
+versionName = "2.5.4"
         vectorDrawables {
             useSupportLibrary = true
         }

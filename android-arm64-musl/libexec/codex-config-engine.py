@@ -1063,18 +1063,16 @@ def cmd_profile_sync_current(paths: Paths, args: argparse.Namespace) -> None:
 
 
 def seed_runtime_links(paths: Paths, runtime_home: Path) -> None:
+    """Link shared conversation state + managed docs into a profile runtime.
+
+    Config/auth/sqlite stay per-runtime (isolated). Sessions/history are shared
+    across profiles so switching model_providers / config profiles keeps one
+    conversation list (user expectation for Codex for TUI).
+    """
     if runtime_home == paths.home:
         return
-    for name in ("history.jsonl", "sessions", "archived_sessions", "shell_snapshots"):
-        source = paths.home / name
-        destination = runtime_home / name
-        if not destination.is_symlink():
-            continue
-        try:
-            if destination.resolve(strict=False) == source.resolve(strict=False):
-                destination.unlink()
-        except OSError:
-            continue
+    # Shared conversation state under control CODEX_HOME.
+    seed_runtime_state(paths.home, runtime_home)
     for name in ("AGENTS.md", "skills", "rules"):
         source = paths.home / name
         destination = runtime_home / name
@@ -1930,26 +1928,83 @@ def copy_regular_tree(source: Path, destination: Path) -> None:
 
 
 def seed_runtime_state(source_home: Path, runtime_home: Path) -> list[str]:
+    """Share conversation state across config profiles.
+
+    Different profiles keep isolated config.toml / auth / sqlite under
+    config-runtimes/, but sessions + history + shell_snapshots must resolve
+    to the control CODEX_HOME so switching model_providers.custom (or any
+    profile) still sees the same conversation list.
+    """
     if runtime_home.resolve(strict=False) == source_home.resolve(strict=False):
         raise EngineError("配置运行目录未隔离", 7)
-    copied: list[str] = []
-    history = source_home / "history.jsonl"
-    runtime_history = runtime_home / "history.jsonl"
-    if runtime_history.is_symlink():
-        runtime_history.unlink()
-    if history.is_file() and not runtime_history.exists():
-        safe_copy(history, runtime_history, stat.S_IMODE(history.stat().st_mode))
-        copied.append("history.jsonl")
-    for name in ("sessions", "archived_sessions", "shell_snapshots"):
+    linked: list[str] = []
+
+    def _link_shared(name: str, is_dir: bool) -> None:
         source = source_home / name
         destination = runtime_home / name
+        # Ensure control-home target exists so symlink is usable immediately.
+        if is_dir:
+            ensure_private_dir(source)
+        else:
+            if not source.exists():
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.touch(exist_ok=True)
+                try:
+                    source.chmod(0o600)
+                except OSError:
+                    pass
         if destination.is_symlink():
+            try:
+                if destination.resolve(strict=False) == source.resolve(strict=False):
+                    linked.append(name)
+                    return
+            except OSError:
+                pass
             destination.unlink()
-        before = destination.exists()
-        copy_regular_tree(source, destination)
-        if source.is_dir() and not before and destination.exists():
-            copied.append(name)
-    return copied
+        elif destination.exists():
+            # Migrate any per-runtime private data into the shared control home
+            # once, then replace with a symlink.
+            if is_dir and destination.is_dir() and source.is_dir():
+                try:
+                    for item in destination.iterdir():
+                        target = source / item.name
+                        if target.exists() or item.is_symlink():
+                            continue
+                        if item.is_dir():
+                            shutil.copytree(item, target, dirs_exist_ok=True)
+                        elif item.is_file():
+                            shutil.copy2(item, target)
+                except OSError:
+                    pass
+                shutil.rmtree(destination, ignore_errors=True)
+            elif destination.is_file() and source.is_file():
+                # Prefer the larger history (more complete).
+                try:
+                    if destination.stat().st_size > source.stat().st_size:
+                        safe_copy(destination, source, 0o600)
+                except OSError:
+                    pass
+                destination.unlink(missing_ok=True)
+            else:
+                if destination.is_dir():
+                    shutil.rmtree(destination, ignore_errors=True)
+                else:
+                    destination.unlink(missing_ok=True)
+        try:
+            destination.symlink_to(source, target_is_directory=is_dir)
+            linked.append(name)
+        except OSError:
+            # Fallback: copy once if symlink not permitted.
+            if is_dir:
+                copy_regular_tree(source, destination)
+            elif source.is_file() and not destination.exists():
+                safe_copy(source, destination, 0o600)
+            linked.append(name)
+
+    _link_shared("history.jsonl", is_dir=False)
+    for name in ("sessions", "archived_sessions", "shell_snapshots"):
+        _link_shared(name, is_dir=True)
+    return linked
 
 
 def seed_root_runtime_state(paths: Paths, runtime_home: Path) -> list[str]:
