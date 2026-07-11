@@ -1,5 +1,17 @@
 # Changelog
 
+## Codex for TUI 2.4.5
+
+Codex for TUI 2.4.5 优化冷启动：默认 shell、减少噪声、加快日常升级检查，并写清新/老用户流程。
+
+- 默认 `CODEX_FOR_TUI_AUTO_START=0`：安装完成后进入 shell，打印一行就绪提示；设置页可开启「启动时自动进入 Codex」。
+- 过滤 proot `can't sanitize binding` 警告；工作目录改为 `/root/workspace`，减少 project-local `model_provider` 黄色提示。
+- 日常冷启动：`quick_complete` 命中后立即静默退出，不再每次联网刷新模型目录。
+- 配置/会话/压缩策略说明：profile 隔离不变；压缩默认 follow-model。
+- SQLite build key 使用 `apk-2.4.5` runtime epoch；Codex 二进制仍为固定 `0.144.1-zh.1`。
+- Release 校验 `versionCode=60`、`versionName=2.4.5`；发布说明见 `docs/codex-for-tui-2.4.5-release-notes.md`。
+- Android 不能普通覆盖降级安装；从 2.4.5（`versionCode=60`）回到更低版本必须使用更高 versionCode 的前滚修复包，或卸载重装。
+
 ## Codex for TUI 2.4.4
 
 Codex for TUI 2.4.4 是 2.4.3 的前滚热修，恢复文件托盘发送时的「附加说明」对话框。

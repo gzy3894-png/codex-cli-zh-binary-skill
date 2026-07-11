@@ -159,4 +159,36 @@ chmod 1777 "$ALPINE_DIR/tmp" 2>/dev/null || true
 ARGS="$ARGS -b $ALPINE_DIR/tmp:/dev/shm"
 ARGS="$ARGS -r $ALPINE_DIR -0 --link2symlink --sysvipc -L"
 
+# Filter known-harmless proot bind races ("can't sanitize binding /proc/.../fd").
+# Keep stdout on the session PTY; only route stderr through a line filter.
+# Codex TUI uses the tty/stdout path, so this does not break the interface.
+if [ "${CODEX_FOR_TUI_FILTER_PROOT_WARNINGS:-1}" = "1" ] &&
+  [ -n "${PROOT_TMP_DIR:-}" ] &&
+  mkdir -p "$PROOT_TMP_DIR" 2>/dev/null
+then
+  fifo="$PROOT_TMP_DIR/proot-err.$$"
+  rm -f "$fifo"
+  if mkfifo "$fifo" 2>/dev/null; then
+    (
+      while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+          *"proot warning: can't sanitize binding"*) ;;
+          *"proot warning: can"*"t sanitize binding"*) ;;
+          *) printf '%s\n' "$line" ;;
+        esac
+      done < "$fifo" >&2
+    ) &
+    filter_pid=$!
+    set +e
+    # shellcheck disable=SC2086
+    "$PROOT" $ARGS sh "$PREFIX/local/bin/init" "$@" 2>"$fifo"
+    rc=$?
+    set -e
+    wait "$filter_pid" 2>/dev/null || true
+    rm -f "$fifo"
+    exit "$rc"
+  fi
+fi
+
+# shellcheck disable=SC2086
 exec "$PROOT" $ARGS sh "$PREFIX/local/bin/init" "$@"

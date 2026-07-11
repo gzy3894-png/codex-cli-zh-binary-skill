@@ -126,6 +126,14 @@ fun Settings(
 
         PreferenceGroup {
             SettingsToggle(
+                label = stringResource(strings.auto_start_codex),
+                description = stringResource(strings.auto_start_codex_desc),
+                showSwitch = true,
+                default = Settings.auto_start_codex,
+                sideEffect = { Settings.auto_start_codex = it }
+            )
+
+            SettingsToggle(
                 label = stringResource(strings.seccomp),
                 description = stringResource(strings.seccomp_desc),
                 showSwitch = true,

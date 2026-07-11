@@ -102,6 +102,11 @@ object Settings {
         get() = Preference.getBoolean(key = "shortcuts_enabled", default = true)
         set(value) = Preference.setBoolean(key = "shortcuts_enabled", value)
 
+    // Default shell-first; users can re-enable auto Codex start from Settings.
+    var auto_start_codex
+        get() = Preference.getBoolean(key = "auto_start_codex", default = false)
+        set(value) = Preference.setBoolean(key = "auto_start_codex", value)
+
     fun getShortcutBinding(action: com.rk.terminal.ui.screens.terminal.ShortcutAction): com.rk.terminal.ui.screens.terminal.ShortcutBinding {
         val raw = Preference.getString(key = action.prefKey, default = action.default.serialize())
         return com.rk.terminal.ui.screens.terminal.ShortcutBinding.deserialize(raw)

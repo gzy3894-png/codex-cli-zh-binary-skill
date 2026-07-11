@@ -7,6 +7,7 @@ import com.rk.libcommons.createFileIfNot
 import com.rk.libcommons.localBinDir
 import com.rk.libcommons.localDir
 import com.rk.libcommons.localLibDir
+import com.rk.settings.Settings
 import com.rk.terminal.App.Companion.getTempDir
 import com.rk.terminal.BuildConfig
 import com.rk.terminal.ui.screens.settings.WorkingMode
@@ -102,6 +103,10 @@ object MkSession {
                 "PATH=${System.getenv("PATH")}:/sbin:${localBinDir().absolutePath}",
                 "HOME=/root",
                 "CODEX_HOME=/root/.codex",
+                // Shell-first by default; Settings can re-enable auto Codex start.
+                "CODEX_FOR_TUI_AUTO_START=${if (Settings.auto_start_codex) "1" else "0"}",
+                // Dedicated workspace avoids treating $HOME/.codex as project-local config.
+                "CODEX_FOR_TUI_WORKSPACE=/root/workspace",
                 "PUBLIC_HOME=${getExternalFilesDir(null)?.absolutePath}",
                 "COLORTERM=truecolor",
                 "TERM=xterm-256color",

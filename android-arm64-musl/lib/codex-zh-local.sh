@@ -190,7 +190,7 @@ codex_for_tui_binary_build_key() {
     [0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]) ;;
     *) return 1 ;;
   esac
-  epoch="${CODEX_ZH_RUNTIME_EPOCH:-apk-2.4.4}"
+  epoch="${CODEX_ZH_RUNTIME_EPOCH:-apk-2.4.5}"
   epoch="$(printf '%s' "$epoch" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-32)"
   [ -n "$epoch" ] || epoch="runtime"
   printf '%s-%s-%s\n' "$version" "$epoch" "$digest"
@@ -307,7 +307,15 @@ codex_for_tui_sync_runtime() {
 
 codex_for_tui_run_real() {
   run_rc=0
-  "$real_bin" "$@" || run_rc=$?
+  # Prefer dedicated workspace so user config under CODEX_HOME is not treated as
+  # project-local config when cwd is $HOME (avoids yellow model_provider warnings).
+  workspace="${CODEX_FOR_TUI_WORKSPACE:-$HOME/workspace}"
+  mkdir -p "$workspace" 2>/dev/null || true
+  if [ -d "$workspace" ]; then
+    (cd "$workspace" && "$real_bin" "$@") || run_rc=$?
+  else
+    "$real_bin" "$@" || run_rc=$?
+  fi
   codex_for_tui_sync_runtime
   return "$run_rc"
 }

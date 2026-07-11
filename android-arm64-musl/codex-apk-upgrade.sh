@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
-RELEASE="2.4.4"
-VERSION_CODE="59"
+RELEASE="2.4.5"
+VERSION_CODE="60"
 EXPECTED_CODEX_VERSION="0.144.1"
 EXPECTED_TARGET="aarch64-unknown-linux-musl"
 EXPECTED_ARCHIVE_SHA256="1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61"
@@ -100,7 +100,7 @@ best_effort_refresh() {
   [ -s "$RELEASE_STATE/refresh-attempted" ] && return 0
   engine="$SCRIPT_ROOT/libexec/codex-config-engine.py"
   [ -s "$engine" ] && command -v python3 >/dev/null 2>&1 || return 0
-  info "核心升级已完成，正在尽力刷新当前第三方站点模型目录。"
+  # Quiet by default after upgrade; only surface failures.
   if PYTHONNOUSERSITE=1 python3 "$engine" \
     --codex-home "$CONTROL_HOME" apk-refresh-active --timeout 8 \
     > "$RELEASE_STATE/refresh.json" 2> "$RELEASE_STATE/refresh.err"
@@ -213,8 +213,9 @@ finish() {
 
 trap finish EXIT HUP INT TERM
 
+# Daily cold start: upgrade already complete — exit immediately without network
+# model refresh (that only runs once after a real upgrade transaction).
 if quick_complete; then
-  best_effort_refresh
   exit 0
 fi
 
@@ -223,14 +224,13 @@ if acquire_lock; then
 else
   lock_rc=$?
   if [ "$lock_rc" -eq 2 ]; then
-    best_effort_refresh
+    # Another process finished the upgrade while we waited.
     exit 0
   fi
   exit "$lock_rc"
 fi
 
 if quick_complete; then
-  best_effort_refresh
   exit 0
 fi
 

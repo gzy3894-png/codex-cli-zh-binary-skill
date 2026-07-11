@@ -306,7 +306,16 @@ export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH
 if [ "$#" -eq 0 ]; then
   [ ! -r /etc/profile ] || . /etc/profile
   export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"
-  cd "$HOME" 2>/dev/null || true
+  # Prefer a dedicated workspace so Codex does not treat $HOME/.codex as project-local config.
+  workspace="${CODEX_FOR_TUI_WORKSPACE:-$HOME/workspace}"
+  mkdir -p "$workspace" 2>/dev/null || true
+  if [ -d "$workspace" ]; then
+    cd "$workspace" 2>/dev/null || cd "$HOME" 2>/dev/null || true
+  else
+    cd "$HOME" 2>/dev/null || true
+  fi
+  # Default shell-first; App setting may export CODEX_FOR_TUI_AUTO_START=1.
+  export CODEX_FOR_TUI_AUTO_START="${CODEX_FOR_TUI_AUTO_START:-0}"
   bootstrap="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin/codex-for-tui-bootstrap.sh"
   if ! command -v python3 >/dev/null 2>&1; then
     if [ ! -s "$bootstrap" ] ||
@@ -328,8 +337,10 @@ if [ "$#" -eq 0 ]; then
   fi
   if [ -s "$bootstrap" ]; then
     HOME=/root CODEX_HOME=/root/.codex \
+      CODEX_FOR_TUI_AUTO_START="$CODEX_FOR_TUI_AUTO_START" \
+      CODEX_FOR_TUI_WORKSPACE="$workspace" \
       sh "$bootstrap" ||
-      echo "警告: Codex for TUI 启动失败，已回到 shell。"
+      printf '%s\n' "警告: Codex for TUI 启动引导失败，已回到 shell。" >&2
   fi
   exec /bin/ash
 fi

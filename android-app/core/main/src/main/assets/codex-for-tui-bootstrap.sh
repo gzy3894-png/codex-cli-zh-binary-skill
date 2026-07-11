@@ -264,21 +264,38 @@ case "${1:-}" in
     ;;
 esac
 
-if [ "${CODEX_FOR_TUI_AUTO_START:-1}" = "0" ]; then
-  info "已跳过 Codex 自动启动，因为 CODEX_FOR_TUI_AUTO_START=0"
-  exit 0
-fi
+print_ready_shell_hint() {
+  # Quiet daily tip on stdout (not stderr) so it is not styled as a warning.
+  profile_hint=""
+  if [ -r "${CODEX_HOME:-$HOME/.codex}/config-profiles-v2/index.json" ]; then
+    profile_hint="$(sed -n 's/.*"active_profile_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+      "${CODEX_HOME:-$HOME/.codex}/config-profiles-v2/index.json" 2>/dev/null | sed -n '1p')"
+  fi
+  if [ -n "$profile_hint" ]; then
+    printf '%s\n' "环境就绪 · 活动配置: $profile_hint · 输入 codex 启动，codex 配置模式 管理站点"
+  else
+    printf '%s\n' "环境就绪 · 输入 codex 启动，codex 配置模式 管理站点与压缩策略"
+  fi
+}
+
+# Default is shell-first. Set CODEX_FOR_TUI_AUTO_START=1 (App setting) to restore old behavior.
+auto_start="${CODEX_FOR_TUI_AUTO_START:-0}"
 
 if have codex; then
-  info "Codex 已安装，直接启动。"
-  exec codex
+  if [ "$auto_start" = "1" ]; then
+    exec codex
+  fi
+  print_ready_shell_hint
+  exit 0
 fi
 
 if has_local_state && runner="$(resume_runner 2>/dev/null)"; then
   warn "检测到本地状态但 Codex 启动器缺失；进入本地诊断，不拉取远端更新。"
   "$runner" doctor || true
+  exit 0
 fi
 
+# New installs still need the installer even when auto-start is off.
 confirm_first_install
 
 if [ ! -x "$REMOTE_INSTALLER" ]; then
@@ -294,4 +311,17 @@ if [ ! -x "$REMOTE_INSTALLER" ]; then
 fi
 
 info "开始首次安装 Codex for TUI。"
-CODEX_ZH_SKIP_RUN=0 sh "$REMOTE_INSTALLER"
+CODEX_ZH_SKIP_RUN=1 sh "$REMOTE_INSTALLER" || {
+  warn "首次安装未完成。"
+  exit 1
+}
+
+if have codex && [ "$auto_start" = "1" ]; then
+  exec codex
+fi
+if have codex; then
+  print_ready_shell_hint
+  exit 0
+fi
+warn "首次安装后仍找不到 codex 命令。"
+exit 1

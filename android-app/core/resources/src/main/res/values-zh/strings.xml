@@ -7,6 +7,8 @@
     <string name="alpine_desc">Alpine Linux</string>
     <string name="android_desc">Codex for TUI Android Shell</string>
     <string name="customizations">自定义</string>
+    <string name="auto_start_codex">启动时自动进入 Codex</string>
+    <string name="auto_start_codex_desc">默认关闭，打开终端后先进入 shell；需要时再输入 codex。开启后恢复旧行为。</string>
     <string name="seccomp">SECCOMP</string>
     <string name="seccomp_desc">修复"操作不被允许"错误</string>
     <string name="all_file_access">完整文件访问</string>
