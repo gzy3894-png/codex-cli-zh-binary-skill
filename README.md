@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.4.8-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.4.8)
+[![Release](https://img.shields.io/badge/release-v2.4.10-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.4.10)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.144.1-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,9 +9,9 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.4.8 shell 回 home 与 proot 噪声热修（基于 2.4.7）
+## 重要：2.4.10 引导后自动回 shell（基于 2.4.9）
 
-2.4.8 修复引导结束后落在 `/root/workspace` 的问题：纯 shell 固定 `cd $HOME`，`CODEX_FOR_TUI_WORKSPACE` 只给 `codex` launcher；并扩大 proot 过滤（`ptrace` / `PROOT_TMP_DIR` 提示），把 proot 私有临时目录移出会被启动清理的 `cache/tmp`。2.4.7 的纯 shell 交接与文件托盘多选/短名继续保留。发布说明见 `docs/codex-for-tui-2.4.8-release-notes.md`。
+2.4.10 修复 2.4.9「引导文字输出完后卡住、不出现 prompt，只能 Ctrl+C 才到 `localhost:/root#`」：根因是 `init-host` 按行过滤 guest stderr，busybox ash 的无换行 PS1 / CSI `6n` 被永久卡住。现改为交互 shell 前把 stderr 绑回会话 PTY，并把 proot 过滤器改为字节/前缀感知。2.4.9 的启动即时文案与 managed 脚本 stamp，以及 2.4.8 的 `$HOME` 纯 shell / 扩大 proot 过滤继续保留。发布说明见 `docs/codex-for-tui-2.4.10-release-notes.md`。
 
 2.4.2 把 APK 覆盖安装升级为离线、原子、可回滚的完整用户环境升级。老用户安装 APK 并打开 App 后，会在 Codex 启动前自动校验并安装固定 `0.144.1-zh.1` 二进制、launcher、配置引擎和受管脚本，迁移 V1/V2 配置，以 `/root/.codex/config.toml` 为活动配置，重建与 `rust-v0.144.1` 一致的模型目录，并为每个站点隔离 runtime、sessions 和 SQLite。全新 rootfs 缺少 Python 时，会在首次安装确认后自动补齐 `python3` 再继续；单次启动最多尝试 3 次，连续失败会阻止 Codex 启动并在下次打开时重试。升级失败会回滚并阻止 Codex 启动，下次打开自动重试。无需手动运行 `codex 更新`、`codex-local repair-launcher`、配置模式或 `CODEX_HOME=...`。发布说明见 `docs/codex-for-tui-2.4.2-release-notes.md`。
 
@@ -55,7 +55,7 @@ codex-ops resume-hint
 
 `codex-clean scan` 默认只扫描；`apply` 只移动到 `$PREFIX/local/ops/trash/<task_id>/`，不永久删除；误清理可用 `codex-clean restore <apply_task_id>` 恢复。详细说明见 `docs/codex-for-tui-2.3.1-ops.md`，发布说明见 `docs/codex-for-tui-2.3.1-release-notes.md`。
 
-发布安全说明：正式 APK 构建必须使用 GitHub Secrets/离线签名输入，仓库内不再提供正式 keystore fallback；Release 门禁会校验包名、版本号、非 debuggable、正式签名指纹和 APK 内离线 Codex 载荷。Android 不支持普通覆盖安装降级，2.4.8（`versionCode=63`）出现问题时只发布更高 `versionCode` 的前滚修复包。
+发布安全说明：正式 APK 构建必须使用 GitHub Secrets/离线签名输入，仓库内不再提供正式 keystore fallback；Release 门禁会校验包名、版本号、非 debuggable、正式签名指纹和 APK 内离线 Codex 载荷。Android 不支持普通覆盖安装降级，2.4.10（`versionCode=65`）出现问题时只发布更高 `versionCode` 的前滚修复包。
 
 2.3.0 是 2.2.9 后的稳定化回归版：补齐 `docs/codex-for-tui-2.3.0-regression.md` 和 `tests/codex-for-tui-installed-device-smoke.sh`，把安装/更新/首启、RTK/context、文件托盘、会话折叠、浏览器后台截图、JS、Auth 状态清理和终端性能状态纳入可重复门禁。真机回归时发现 `codex-browser open` 重复打开当前已加载 URL 可能卡到超时并误报 `Page load timed out before userscript completion`，2.3.0 已修复为直接返回当前页面快照；需要强制刷新时仍使用 `codex-browser reload`。
 
@@ -67,12 +67,14 @@ codex-ops resume-hint
 
 内置 WebView 继续作为 Agent Browser，保留后台打开、DOM 读取、点击、输入、JS、截图、多标签、Cookie/WebStorage 持久化和 userscript；遇到验证码/风控/外部 scheme 时会进入明确的用户协作状态，而不是让 Agent 猜。
 
-已经安装 2.0.x、2.1.x、2.2.x、2.3.x、2.4.0、2.4.1、2.4.2、2.4.3、2.4.4、2.4.5、2.4.6 或 2.4.7 的用户，直接从 Releases 下载并覆盖安装 2.4.8 APK，然后打开 App。首次启动会自动完成二进制、launcher、脚本、配置档 V2、模型目录和 SQLite 运行世代升级；之后默认进入 shell（引导结束后为 `$HOME` 纯交互 shell），输入 `codex` 再启动。无需再执行任何 Codex 更新或修复命令。
+已经安装 2.0.x、2.1.x、2.2.x、2.3.x、2.4.0、2.4.1、2.4.2、2.4.3、2.4.4、2.4.5、2.4.6、2.4.7、2.4.8 或 2.4.9 的用户，直接从 Releases 下载并覆盖安装 2.4.10 APK，然后打开 App。首次启动会自动完成二进制、launcher、脚本、配置档 V2、模型目录和 SQLite 运行世代升级；之后默认进入 shell（引导结束后自动出现 `$HOME` 纯交互 prompt，无需 Ctrl+C），输入 `codex` 再启动。无需再执行任何 Codex 更新或修复命令。
 
 升级只使用 APK 内置载荷完成核心迁移。完成后普通启动仍不会远程更新脚本、自动请求第三方 `/models` 或覆盖用户手写配置。`codex 更新` 只用于用户没有更新 APK、明确只想热更新脚本的场景。
 
 ## 2.0 新功能
 
+- 2.4.10 热修：引导结束后自动出现 shell prompt（无需 Ctrl+C）；字节级 proot stderr 过滤，避免卡住 ash PS1。
+- 2.4.9 热修：启动立刻有文案；按 version stamp 跳过每会话重写大型 managed 脚本（含 rtk）。
 - 2.4.8 热修：引导后 shell 固定 `$HOME`；扩大 proot 噪声过滤；稳定 `PROOT_TMP_DIR`。
 - 2.4.7 热修：引导结束后纯 shell 交接；文件托盘多选 + 顶部发送；临时文件短名 `图片N`/`视频N`/`文本N`。
 - 2.4.6 热修：多行就绪引导；交互 shell + 默认输入模式修正，输入过程实时回显。
@@ -155,7 +157,7 @@ codex-ops resume-hint
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.4.8` |
+| Android App | `2.4.10` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug/Test 包名 | `com.gzy3894.codexfortui.test` |
 | Codex CLI | `0.144.1` 中文版 |
