@@ -1,5 +1,17 @@
 # Changelog
 
+## Codex for TUI 2.5.3
+
+Codex for TUI 2.5.3：关闭终端窗口闪退热修 + 窗口≠agent 会话模型纠偏。
+
+- 侧栏是终端窗口（PTY）列表，不是 agent 会话列表；关闭=杀进程，不删 CLI 对话。
+- 统一 `closeWindow`；删除按钮 / 快捷键 / shell 退出不再 `stopSelf`/`finish` 竞态闪退。
+- 侧栏文案改为「终端窗口」；重命名说明仅显示名。
+- SQLite epoch `apk-2.5.3`；`versionCode=69`、`versionName=2.5.3`。
+- 发布说明见 `docs/codex-for-tui-2.5.3-release-notes.md`。
+
+
+
 ## Codex for TUI 2.5.2
 
 Codex for TUI 2.5.2：会话隔离语义修正 + 2.5.1 审查修复。

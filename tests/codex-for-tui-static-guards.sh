@@ -165,8 +165,8 @@ test_apk_upgrade_guards() {
   assert_nonempty_file "$MODEL_PTY_SMOKE"
   python3 -m py_compile "$MODEL_PTY_SMOKE" || fail "model PTY smoke Python syntax failed"
 
-  assert_file_contains "$APK_UPGRADER" 'RELEASE="2.5.2"'
-  assert_file_contains "$APK_UPGRADER" 'VERSION_CODE="68"'
+  assert_file_contains "$APK_UPGRADER" 'RELEASE="2.5.3"'
+  assert_file_contains "$APK_UPGRADER" 'VERSION_CODE="69"'
   assert_file_contains "$APK_UPGRADER" 'EXPECTED_ARCHIVE_SHA256="1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61"'
   assert_file_contains "$APK_UPGRADER" 'EXPECTED_BINARY_SHA256="0cde6d6bad02855732ee0ee2867005408d169c46753d414e6a487884d49e0767"'
   assert_file_contains "$APK_UPGRADER" 'LOCK_DIR="$STATE_ROOT/apk-upgrade.lock"'
@@ -184,8 +184,8 @@ test_apk_upgrade_guards() {
   assert_file_contains "$APK_UPGRADER" 'best_effort_refresh'
   assert_file_contains "$APK_UPGRADER" '第三方模型目录联网刷新失败，已保留离线重建结果。'
 
-  assert_file_contains "$APK_PAYLOAD_PREPARE" 'RELEASE="2.5.2"'
-  assert_file_contains "$APK_PAYLOAD_PREPARE" 'VERSION_CODE="68"'
+  assert_file_contains "$APK_PAYLOAD_PREPARE" 'RELEASE="2.5.3"'
+  assert_file_contains "$APK_PAYLOAD_PREPARE" 'VERSION_CODE="69"'
   assert_file_contains "$APK_PAYLOAD_PREPARE" "tar \\"
   assert_file_contains "$APK_PAYLOAD_PREPARE" "--sort=name"
   assert_file_contains "$APK_PAYLOAD_PREPARE" "--mtime='UTC 1970-01-01'"
@@ -251,7 +251,7 @@ test_apk_upgrade_guards() {
   assert_file_contains "$INIT_HOST_ASSET" 'Codex for TUI：正在启动'
   assert_file_contains "$INIT_ASSET" 'Codex for TUI：环境已就绪，正在初始化'
   assert_file_contains "$INIT_ASSET" '正在进入交互 shell'
-  # 2.5.2: session isolation module (standalone; must not require local gradle)
+  # 2.5.3: session isolation module (standalone; must not require local gradle)
   SESSION_ISO="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/session"
   assert_file_contains "$SESSION_ISO/SessionIsolation.kt" 'object SessionIsolation'
   assert_file_contains "$SESSION_ISO/SessionIsolation.kt" 'agentResumeId'
@@ -265,11 +265,11 @@ test_apk_upgrade_guards() {
   assert_file_contains "$SESSION_ISO/SessionIsolation.kt" 'agentResumeId'
   assert_file_contains "$SESSION_ISO/AgentKind.kt" 'codex resume'
   assert_file_contains "$SESSION_ISO/AgentKind.kt" 'claude --resume'
-  # 2.5.1/2.5.2: Android ICU rejects malformed Unicode property regex in SessionNaming
+  # 2.5.1/2.5.3: Android ICU rejects malformed Unicode property regex in SessionNaming
   assert_file_not_contains "$SESSION_ISO/SessionNaming.kt" 'private val nonLabel = Regex'
   assert_file_contains "$SESSION_ISO/SessionNaming.kt" 'isLetterOrDigit'
   assert_file_contains "$SESSION_ISO/SessionIsolation.kt" 'runCatching'
-  # 2.5.2: auto agent prefix from launch lines; no dialog chips
+  # 2.5.3: auto agent prefix from launch lines; no dialog chips
   assert_file_contains "$SESSION_ISO/AgentKind.kt" 'fun detectLaunch'
   assert_file_contains "$SESSION_ISO/SessionIsolation.kt" 'fun onUserSubmittedLine'
   assert_file_contains "$SESSION_ISO/SessionIsolation.kt" 'intentionallyWiped'
@@ -279,6 +279,19 @@ test_apk_upgrade_guards() {
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalBackEnd.kt" 'flushSubmittedLine'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/service/SessionService.kt" 'clearRegistry'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt" 'maybeInjectResume'
+  # 2.5.3: close window = kill PTY only (not agent session list); no stopSelf/finish crash path
+  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt" 'fun closeWindow'
+  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalDrawer.kt" 'onCloseWindow'
+  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalDrawer.kt" '终端窗口'
+  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/service/SessionService.kt" 'Close a terminal window'
+  # delete button must not call terminateSession directly from drawer (goes through closeWindow)
+  if grep -n 'onClick = { sessionBinder.terminateSession' "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalDrawer.kt" >/dev/null 2>&1; then
+    fail "TerminalDrawer must close windows via onCloseWindow/closeWindow, not raw terminateSession"
+  fi
+  # last-window close must not stopSelf (crash path with bound UI)
+  if awk '/private fun terminateSession/,/^    private fun |^    override |^}/' "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/service/SessionService.kt" | grep -n 'stopSelf' >/dev/null 2>&1; then
+    fail "SessionService.terminateSession must not call stopSelf (use EXIT/onDestroy for full teardown)"
+  fi
 
   # 2.4.10: guide ends into live shell without ^C — reconnect stderr + byte-wise proot filter
   assert_file_contains "$INIT_ASSET" 'exec 2>&1'
@@ -310,13 +323,13 @@ test_apk_upgrade_guards() {
     'test_bootstrap_dependency_cancel_does_not_install'
 
   assert_file_contains "$APP_BUILD_GRADLE" 'val verifyCodexUpgradePayload by tasks.registering'
-  assert_file_contains "$APP_BUILD_GRADLE" 'release"] != "2.5.2"'
-  assert_file_contains "$APP_BUILD_GRADLE" 'version_code"] != "68"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'release"] != "2.5.3"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'version_code"] != "69"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex APK manifest SHA256 mismatch'
   assert_file_contains "$APP_BUILD_GRADLE" 'AAPT strips that asset suffix; use .tgz'
   assert_file_contains "$APP_BUILD_GRADLE" 'dependsOn(verifyCodexUpgradePayload)'
-  assert_file_contains "$CODEX_COMMON" ': "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.5.2}"'
-  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'epoch="${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.2}"'
+  assert_file_contains "$CODEX_COMMON" ': "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.5.3}"'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'epoch="${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.3}"'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" '配置引擎未返回独立运行目录；未启动 Codex。'
   assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'config-profiles/current'
   assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'if model.get("tool_mode") == "code_mode_only":'
@@ -344,16 +357,16 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 68'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.5.2"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 69'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.5.3"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" '- "release/codex-for-tui-*"'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "68"'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.5.2'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "69"'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.5.3'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -393,7 +406,7 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'sha256sum *.apk > SHA256SUMS'
   assert_file_contains "$BUILD_WORKFLOW" 'android-app/app/build/outputs/apk/release/SHA256SUMS'
   assert_file_contains "$BUILD_WORKFLOW" 'softprops/action-gh-release@v2'
-  assert_file_contains "$BUILD_WORKFLOW" 'body_path: docs/codex-for-tui-2.5.2-release-notes.md'
+  assert_file_contains "$BUILD_WORKFLOW" 'body_path: docs/codex-for-tui-2.5.3-release-notes.md'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Publish verified GitHub release'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Download verified release assets'
   assert_file_order "$BUILD_WORKFLOW" 'name: Promote verified tag to installer channel' 'name: Publish verified GitHub release'
@@ -1660,7 +1673,7 @@ EOF
     fail "normal codex did not use an isolated profile runtime"
   printf '%s\n' "$output" | grep -F '/sqlite-builds/' >/dev/null 2>&1 ||
     fail "normal codex did not isolate SQLite by binary build"
-  printf '%s\n' "$output" | grep -F 'apk-2.5.2' >/dev/null 2>&1 ||
+  printf '%s\n' "$output" | grep -F 'apk-2.5.3' >/dev/null 2>&1 ||
     fail "normal codex did not include the APK runtime epoch in SQLite isolation"
   printf '%s\n' "$output" | grep -F "$tmp/prefix/local/bin" >/dev/null 2>&1 || fail "normal codex did not carry app bridge bin in PATH"
   printf '%s\n' "$output" | grep -F 'update-ran' >/dev/null 2>&1 && fail "normal codex invoked update path"

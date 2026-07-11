@@ -15,10 +15,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
-import com.rk.resources.strings
 import com.rk.terminal.service.SessionService
 import com.rk.terminal.session.AgentKind
 import com.rk.terminal.session.SessionIsolation
@@ -32,7 +30,9 @@ fun TerminalDrawer(
     sessionBinder: SessionService.SessionBinder?,
     navController: NavController,
     onAddSession: () -> Unit,
-    onSessionSelected: (String) -> Unit
+    onSessionSelected: (String) -> Unit,
+    /** Close a terminal window (kill PTY). Not an agent-session delete. */
+    onCloseWindow: (String) -> Unit = {},
 ) {
     val isolationRevision = SessionIsolation.revision.value
     var renameTarget by remember { mutableStateOf<String?>(null) }
@@ -50,8 +50,9 @@ fun TerminalDrawer(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Side drawer lists terminal windows (PTY tabs), not agent conversation history.
                 Text(
-                    text = stringResource(strings.session),
+                    text = "终端窗口",
                     style = MaterialTheme.typography.titleLarge
                 )
 
@@ -65,7 +66,7 @@ fun TerminalDrawer(
                     }
 
                     IconButton(onClick = onAddSession) {
-                        Icon(imageVector = Icons.Default.Add, contentDescription = null)
+                        Icon(imageVector = Icons.Default.Add, contentDescription = "新建窗口")
                     }
                 }
             }
@@ -83,7 +84,8 @@ fun TerminalDrawer(
                             onSelect = { onSessionSelected(sessionId) },
                             onLongClick = {
                                 renameTarget = sessionId
-                                val prefix = SessionIsolation.record(sessionId)?.agentKind?.prefix ?: AgentKind.CODEX.prefix
+                                val prefix = SessionIsolation.record(sessionId)?.agentKind?.prefix
+                                    ?: AgentKind.SHELL.prefix
                                 renameDraft = title
                                     .removePrefix("$prefix-")
                                     .ifBlank { title }
@@ -102,17 +104,17 @@ fun TerminalDrawer(
                                     modifier = Modifier.weight(1f)
                                 )
 
-                                if (!isSelected) {
-                                    IconButton(
-                                        onClick = { sessionBinder.terminateSession(sessionId) },
-                                        modifier = Modifier.size(24.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.Delete,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
+                                // Allow closing any window, including the selected one.
+                                // Closing = kill this PTY window only (PowerShell multi-window model).
+                                IconButton(
+                                    onClick = { onCloseWindow(sessionId) },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Delete,
+                                        contentDescription = "关闭窗口",
+                                        modifier = Modifier.size(20.dp)
+                                    )
                                 }
                             }
                         }
@@ -125,11 +127,11 @@ fun TerminalDrawer(
     renameTarget?.let { targetId ->
         AlertDialog(
             onDismissRequest = { renameTarget = null },
-            title = { Text("重命名会话") },
+            title = { Text("重命名窗口") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "前缀固定为 ${SessionIsolation.record(targetId)?.agentKind?.prefix ?: "codex"}-",
+                        text = "标签前缀固定为 ${SessionIsolation.record(targetId)?.agentKind?.prefix ?: "shell"}-（仅显示名，不绑定 agent 会话）",
                         style = MaterialTheme.typography.bodySmall
                     )
                     OutlinedTextField(

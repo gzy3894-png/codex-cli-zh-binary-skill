@@ -226,16 +226,25 @@ class TerminalViewModel : ViewModel() {
     fun changeSession(context: Context, sessionBinder: SessionService.SessionBinder, sessionId: String) {
         val terminal = terminalView ?: return
         val activity = context as? MainActivity ?: return
+        val service = sessionBinder.getService()
+        // Never crash UI when the target window disappeared mid-click.
+        if (!service.sessionList.containsKey(sessionId) && sessionBinder.getSession(sessionId) == null) {
+            val fallback = service.sessionList.keys.lastOrNull() ?: return
+            if (fallback != sessionId) {
+                changeSession(context, sessionBinder, fallback)
+            }
+            return
+        }
         val client = TerminalBackEnd(terminal, activity, sessionId)
-        
+
         val session = sessionBinder.getSession(sessionId)
             ?: sessionBinder.createSession(sessionId, client, Settings.working_Mode)
-            
+
         session.updateTerminalSessionClient(client)
         terminal.setBackgroundColor(android.graphics.Color.TRANSPARENT)
         terminal.attachSession(session)
         terminal.setTerminalViewClient(client)
-        
+
         terminal.post {
             val typedValue = TypedValue()
             context.theme.resolveAttribute(R.attr.colorOnSurface, typedValue, true)
@@ -249,19 +258,42 @@ class TerminalViewModel : ViewModel() {
                 set(258, typedValue.data)
             }
         }
-        
+
         virtualKeysView?.apply {
             virtualKeysViewClient = terminal.mTermSession?.let { VirtualKeysListener(it) }
         }
-        
-        sessionBinder.getService().currentSession.value = Pair(sessionId, sessionBinder.getService().sessionList[sessionId]!!)
+
+        val mode = service.sessionList[sessionId] ?: Settings.working_Mode
+        service.currentSession.value = Pair(sessionId, mode)
         SessionIsolationHooks.notifyCurrent(sessionId)
 
-        // Resume inject on switch as well (one-shot per session id in SessionIsolation).
+        // Optional one-shot resume inject when a UUID was previously bound to this window.
+        // Closing a window never deletes agent CLI history; resume is independent.
         terminal.post {
             SessionIsolationHooks.maybeInjectResume(sessionId) { line ->
                 runCatching { session.write(line) }
             }
+        }
+    }
+
+    /**
+     * Close one terminal window (kill its PTY). PowerShell multi-window model:
+     * the drawer entry is a process/window, not an agent conversation row.
+     */
+    fun closeWindow(context: Context, sessionBinder: SessionService.SessionBinder, sessionId: String) {
+        val service = sessionBinder.getService()
+        if (!service.sessionList.containsKey(sessionId) && sessionBinder.getSession(sessionId) == null) {
+            return
+        }
+        val wasCurrent = service.currentSession.value.first == sessionId
+        val nextId = runCatching { sessionBinder.terminateSession(sessionId) }.getOrNull()
+        if (nextId == null) {
+            // No windows left — leave empty UI; user can add a new window.
+            // Do not finish Activity from here; avoids crash races with drawer recomposition.
+            return
+        }
+        if (wasCurrent || terminalView?.currentSession == null) {
+            changeSession(context, sessionBinder, nextId)
         }
     }
 }

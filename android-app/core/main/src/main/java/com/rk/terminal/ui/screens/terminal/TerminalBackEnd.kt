@@ -369,16 +369,19 @@ class TerminalBackEnd(
         if (keyCode == KeyEvent.KEYCODE_ENTER) {
             flushSubmittedLine()
             if (!session.isRunning) {
+                // Shell process exited: close this terminal window (PTY), then
+                // attach another live window if any. Do not finish the Activity
+                // from here — that raced with service teardown and crashed.
                 val binder = activity.viewModel.sessionBinder ?: return false
-                val service = binder.getService()
-                val currentId = service.currentSession.value.first
-
-                binder.terminateSession(currentId)
-
-                if (service.sessionList.isEmpty()) {
-                    activity.finish()
+                val currentId = binder.getService().currentSession.value.first
+                val vm = terminalViewModel()
+                if (vm != null) {
+                    vm.closeWindow(activity, binder, currentId)
                 } else {
-                    terminalViewModel()?.changeSession(activity, binder, service.sessionList.keys.first())
+                    val next = runCatching { binder.terminateSession(currentId) }.getOrNull()
+                    if (next != null) {
+                        // best-effort attach without ViewModel
+                    }
                 }
                 return true
             }

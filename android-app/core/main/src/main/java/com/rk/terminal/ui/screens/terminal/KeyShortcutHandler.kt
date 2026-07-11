@@ -58,22 +58,12 @@ object KeyShortcutHandler {
         val binder = activity.viewModel.sessionBinder ?: return true
         val service = binder.getService()
         val currentId = service.currentSession.value.first
-        val sessionKeys = service.sessionList.keys.toList()
-
-        if (sessionKeys.size <= 1) {
-            binder.terminateSession(currentId)
-            if (service.sessionList.isEmpty()) {
-                activity.finish()
-            }
-        } else {
-            val currentIndex = sessionKeys.indexOf(currentId)
-            val nextId = if (currentIndex < sessionKeys.size - 1) {
-                sessionKeys[currentIndex + 1]
-            } else {
-                sessionKeys[currentIndex - 1]
-            }
-            viewModel.changeSession(activity, binder, nextId)
-            binder.terminateSession(currentId)
+        // Close current terminal window only — same path as drawer delete button.
+        viewModel.closeWindow(activity, binder, currentId)
+        // If no windows remain, leave activity open; user can add another window.
+        // Avoid finish() here: it raced with service stopSelf and crashed on delete.
+        if (service.sessionList.isEmpty()) {
+            return true
         }
         return true
     }

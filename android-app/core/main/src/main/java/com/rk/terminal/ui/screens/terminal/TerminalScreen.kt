@@ -142,7 +142,11 @@ fun TerminalScreen(
                 onSessionSelected = { id ->
                     sessionBinder?.let { terminalViewModel.changeSession(context, it, id) }
                     scope.launch { drawerState.close() }
-                }
+                },
+                onCloseWindow = { id ->
+                    // Close = kill this terminal PTY window only (not agent session delete).
+                    sessionBinder?.let { terminalViewModel.closeWindow(context, it, id) }
+                },
             )
         }
     ) {

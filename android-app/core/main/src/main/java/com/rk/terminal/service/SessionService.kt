@@ -59,8 +59,13 @@ class SessionService : Service() {
 
         fun getSession(id: String): TerminalSession? = sessions[id]
 
-        fun terminateSession(id: String) {
-            this@SessionService.terminateSession(id)
+        /**
+         * Close one terminal window (kill its PTY). Window lifecycle only —
+         * not an agent-session delete. Safe to call from UI clicks.
+         * @return next current window id, or null if none remain.
+         */
+        fun terminateSession(id: String): String? {
+            return this@SessionService.terminateSession(id)
         }
     }
 
@@ -123,17 +128,47 @@ class SessionService : Service() {
         }
     }
 
-    private fun terminateSession(id: String) {
-        sessions[id]?.finishIfRunning()
-        sessions.remove(id)
-        sessionList.remove(id)
-        cleanupSessionTempDir(id)
-        // User closed one tab → drop its metadata.
-        SessionIsolationHooks.notifyTerminated(id)
-        if (sessions.isEmpty()) {
-            stopSelf()
-        } else {
-            updateNotification()
+    /**
+     * Close a terminal window: stop its PTY and drop live + label metadata.
+     * Agent CLI history/UUID lives outside this map; closing a window must not
+     * be treated as deleting a codex/claude conversation.
+     *
+     * Always leaves [currentSession] pointing at a still-live id when any remain.
+     * Avoids [stopSelf] on last-window close while UI may still be bound
+     * (binder death mid-recompose was a crash path).
+     * @return next current id, or null when no windows left.
+     */
+    private fun terminateSession(id: String): String? {
+        return runCatching {
+            sessions[id]?.let { session ->
+                runCatching { session.finishIfRunning() }
+            }
+            sessions.remove(id)
+            sessionList.remove(id)
+            cleanupSessionTempDir(id)
+            // Window chrome only — not agent-session lifecycle.
+            runCatching { SessionIsolationHooks.notifyTerminated(id) }
+
+            val remaining = sessionList.keys.toList()
+            val nextCurrent = when {
+                remaining.isEmpty() -> null
+                currentSession.value.first == id -> remaining.last()
+                sessionList.containsKey(currentSession.value.first) -> currentSession.value.first
+                else -> remaining.last()
+            }
+            if (nextCurrent != null) {
+                val mode = sessionList[nextCurrent] ?: com.rk.settings.Settings.working_Mode
+                currentSession.value = nextCurrent to mode
+                runCatching { SessionIsolationHooks.notifyCurrent(nextCurrent) }
+                updateNotification()
+            } else {
+                currentSession.value = "main" to com.rk.settings.Settings.working_Mode
+                updateNotification()
+            }
+            nextCurrent
+        }.getOrElse {
+            android.util.Log.e("SessionService", "terminateSession failed for $id", it)
+            sessionList.keys.lastOrNull()
         }
     }
 
