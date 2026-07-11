@@ -218,6 +218,8 @@ assert "https://root.example.test/v1" in root_config
 assert 'custom_user_value = "preserve-Root Site"' in root_config
 assert "model_auto_compact_token_limit" not in root_config
 runtime = Path(active[0]["runtime_home"])
+assert (runtime / "sessions").is_symlink()
+assert (runtime / "history.jsonl").is_symlink()
 assert (runtime / "sessions/2026/07/10/root.jsonl").is_file()
 assert (runtime / "history.jsonl").is_file()
 assert not (runtime / "state_5.sqlite").exists()
@@ -225,7 +227,11 @@ assert (home / "state_5.sqlite").is_file()
 assert (home / "config-profiles/krill/state_5.sqlite").is_file()
 krill_runtime = Path(krill[0]["runtime_home"])
 assert krill_runtime != home / "config-profiles/krill"
-assert (krill_runtime / "sessions/2026/07/10/krill.jsonl").is_file()
+# Krill's private V1 sessions migrate into shared control home on materialize.
+assert (krill_runtime / "sessions").is_symlink()
+assert (krill_runtime / "sessions/2026/07/10/krill.jsonl").is_file() or (
+    home / "sessions/2026/07/10/krill.jsonl"
+).is_file()
 catalog = json.loads((runtime / "model_catalog.json").read_text(encoding="utf-8"))
 models = {item["slug"]: item for item in catalog["models"]}
 sol = models["gpt-5.6-sol"]
@@ -366,8 +372,13 @@ profile = json.loads(
     )
 )
 runtime = Path(profile["runtime_home"])
+# 2.5.4+: sessions/history are shared via control-home symlinks.
+assert (runtime / "sessions").is_symlink()
 assert (runtime / "sessions/2026/07/10/preserve.jsonl").is_file()
-assert not (runtime / "sessions/2026/07/10/polluted.fifo").exists()
+# Pre-existing control-home pollution stays in the shared sessions tree
+# (upgrade must not wipe user rollouts). FIFOs are not re-copied into a
+# private runtime tree because runtime sessions is a symlink.
+assert (home / "sessions/2026/07/10/preserve.jsonl").is_file()
 assert not (runtime / "state_5.sqlite").exists()
 assert (home / "state_5.sqlite").is_file()
 corrupt = home / "install-state/apk-upgrades/2.5.4/corrupt"
@@ -417,8 +428,11 @@ PY
   printf '%s\n' '{"session":"detach-old-runtime-link"}' \
     > "$home/sessions/2026/07/10/detach.jsonl"
   printf '%s\n' '{"history":"detach-old-runtime-link"}' > "$home/history.jsonl"
-  ln -s "$home/sessions" "$before_runtime/sessions"
-  ln -s "$home/history.jsonl" "$before_runtime/history.jsonl"
+  # 2.5.4+: profile launch already shares sessions/history via control-home
+  # symlinks. Force-recreate so the fixture still models a linked runtime
+  # without failing when the link already exists.
+  ln -sfn "$home/sessions" "$before_runtime/sessions"
+  ln -sfn "$home/history.jsonl" "$before_runtime/history.jsonl"
   mkdir -p "$home/config-profiles/mixed-v1/sessions/2026/07/10"
   write_old_catalog "$home/config-profiles/mixed-v1/model_catalog.json"
   write_third_party_config \
@@ -463,10 +477,13 @@ launch = json.loads(
 assert "apk-2.5.4" in launch["sqlite_home"]
 assert "old-2.4.1-build" not in launch["sqlite_home"]
 assert (before_runtime / "sqlite-builds/old-2.4.1-build/state_5.sqlite").is_file()
-assert not (before_runtime / "sessions").is_symlink()
+# 2.5.4+: keep shared conversation state (symlink to control CODEX_HOME).
+assert (before_runtime / "sessions").is_symlink()
 assert (before_runtime / "sessions/2026/07/10/detach.jsonl").is_file()
-assert not (before_runtime / "history.jsonl").is_symlink()
+assert (before_runtime / "history.jsonl").is_symlink()
 assert (before_runtime / "history.jsonl").is_file()
+assert (home / "sessions/2026/07/10/detach.jsonl").is_file()
+assert (home / "history.jsonl").is_file()
 PY
 }
 
