@@ -1,6 +1,8 @@
 package com.rk.terminal.ui.screens.terminal
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -18,8 +20,12 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.rk.resources.strings
 import com.rk.terminal.service.SessionService
+import com.rk.terminal.session.AgentKind
+import com.rk.terminal.session.SessionIsolation
+import com.rk.terminal.session.SessionIsolationHooks
 import com.rk.terminal.ui.routes.MainActivityRoutes
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TerminalDrawer(
     drawerWidth: androidx.compose.ui.unit.Dp,
@@ -28,6 +34,10 @@ fun TerminalDrawer(
     onAddSession: () -> Unit,
     onSessionSelected: (String) -> Unit
 ) {
+    val isolationRevision = SessionIsolation.revision.value
+    var renameTarget by remember { mutableStateOf<String?>(null) }
+    var renameDraft by remember { mutableStateOf("") }
+
     ModalDrawerSheet(modifier = Modifier.width(drawerWidth)) {
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -60,13 +70,24 @@ fun TerminalDrawer(
                 }
             }
 
+            @Suppress("UNUSED_EXPRESSION")
+            isolationRevision
+
             sessionBinder?.getService()?.sessionList?.keys?.toList()?.let { sessions ->
                 LazyColumn {
-                    items(sessions) { sessionId ->
+                    items(sessions, key = { it }) { sessionId ->
                         val isSelected = sessionId == sessionBinder.getService().currentSession.value.first
+                        val title = SessionIsolationHooks.titleOf(sessionId)
                         SelectableCard(
                             selected = isSelected,
                             onSelect = { onSessionSelected(sessionId) },
+                            onLongClick = {
+                                renameTarget = sessionId
+                                val prefix = SessionIsolation.record(sessionId)?.agentKind?.prefix ?: AgentKind.CODEX.prefix
+                                renameDraft = title
+                                    .removePrefix("$prefix-")
+                                    .ifBlank { title }
+                            },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(8.dp)
@@ -75,10 +96,13 @@ fun TerminalDrawer(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(text = sessionId, style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    text = title,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier.weight(1f)
+                                )
 
                                 if (!isSelected) {
-                                    Spacer(modifier = Modifier.weight(1f))
                                     IconButton(
                                         onClick = { sessionBinder.terminateSession(sessionId) },
                                         modifier = Modifier.size(24.dp)
@@ -97,14 +121,48 @@ fun TerminalDrawer(
             }
         }
     }
+
+    renameTarget?.let { targetId ->
+        AlertDialog(
+            onDismissRequest = { renameTarget = null },
+            title = { Text("重命名会话") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "前缀固定为 ${SessionIsolation.record(targetId)?.agentKind?.prefix ?: "codex"}-",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    OutlinedTextField(
+                        value = renameDraft,
+                        onValueChange = { renameDraft = it },
+                        singleLine = true,
+                        label = { Text("名称") }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        SessionIsolation.rename(targetId, renameDraft)
+                        renameTarget = null
+                    }
+                ) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameTarget = null }) { Text("取消") }
+            }
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SelectableCard(
     selected: Boolean,
     onSelect: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    onLongClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val containerColor by animateColorAsState(
@@ -115,26 +173,43 @@ fun SelectableCard(
         label = "containerColor"
     )
 
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = containerColor,
-            contentColor = if (selected) {
-                MaterialTheme.colorScheme.onPrimaryContainer
-            } else {
-                MaterialTheme.colorScheme.onSurface
-            }
-        ),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = if (selected) 8.dp else 2.dp
-        ),
-        enabled = enabled,
-        onClick = onSelect
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
+    val colors = CardDefaults.cardColors(
+        containerColor = containerColor,
+        contentColor = if (selected) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        }
+    )
+    val elevation = CardDefaults.cardElevation(
+        defaultElevation = if (selected) 8.dp else 2.dp
+    )
+
+    if (onLongClick != null) {
+        Card(
+            modifier = modifier.combinedClickable(
+                enabled = enabled,
+                onClick = onSelect,
+                onLongClick = onLongClick
+            ),
+            colors = colors,
+            elevation = elevation
         ) {
-            content()
+            Column(modifier = Modifier.padding(16.dp)) {
+                content()
+            }
+        }
+    } else {
+        Card(
+            modifier = modifier,
+            colors = colors,
+            elevation = elevation,
+            enabled = enabled,
+            onClick = onSelect
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                content()
+            }
         }
     }
 }

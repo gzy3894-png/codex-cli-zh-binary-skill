@@ -4,6 +4,7 @@ import android.view.KeyEvent
 import androidx.lifecycle.ViewModelProvider
 import com.blankj.utilcode.util.ClipboardUtils
 import com.rk.settings.Settings
+import com.rk.terminal.session.SessionIsolationHooks
 import com.rk.terminal.ui.activities.terminal.MainActivity
 
 object KeyShortcutHandler {
@@ -44,7 +45,7 @@ object KeyShortcutHandler {
         val binder = activity.viewModel.sessionBinder ?: return true
         val service = binder.getService()
 
-        val sessionId = generateUniqueSessionId(service.sessionList.keys.toList())
+        val sessionId = SessionIsolationHooks.nextId(service.sessionList.keys.toList())
         viewModel.terminalView?.let {
             val client = TerminalBackEnd(it, activity, sessionId)
             binder.createSession(sessionId, client, Settings.working_Mode)
@@ -97,13 +98,4 @@ object KeyShortcutHandler {
         return true
     }
 
-    private fun generateUniqueSessionId(existingIds: List<String>): String {
-        var index = 1
-        var newId: String
-        do {
-            newId = "main$index"
-            index++
-        } while (newId in existingIds)
-        return newId
     }
-}

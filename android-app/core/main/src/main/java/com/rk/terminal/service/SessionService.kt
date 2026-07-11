@@ -16,6 +16,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.core.app.NotificationCompat
 import com.rk.resources.drawables
 import com.rk.resources.strings
+import com.rk.terminal.session.SessionIsolation
+import com.rk.terminal.session.SessionIsolationHooks
 import com.rk.terminal.ui.activities.terminal.MainActivity
 import com.rk.terminal.ui.screens.terminal.MkSession
 import com.termux.terminal.TerminalSession
@@ -28,7 +30,7 @@ class SessionService : Service() {
 
     inner class SessionBinder : Binder() {
         fun getService(): SessionService = this@SessionService
-        
+
         fun terminateAllSessions() {
             this@SessionService.terminateAllSessions()
         }
@@ -48,6 +50,8 @@ class SessionService : Service() {
             ).also {
                 sessions[id] = it
                 sessionList[id] = workingMode
+                // Metadata only — does not alter PTY / env setup.
+                SessionIsolationHooks.notifyCreated(id, workingMode)
                 updateNotification()
             }
         }
@@ -101,6 +105,9 @@ class SessionService : Service() {
         }
         sessions.clear()
         sessionList.clear()
+        // Keep registry on process/service exit so cold start can restore tabs.
+        SessionIsolationHooks.ensureInit(this)
+        SessionIsolation.saveNow()
         if (updateNotification) {
             updateNotification()
         }
@@ -111,6 +118,8 @@ class SessionService : Service() {
         sessions.remove(id)
         sessionList.remove(id)
         cleanupSessionTempDir(id)
+        // User closed one tab → drop its metadata.
+        SessionIsolationHooks.notifyTerminated(id)
         if (sessions.isEmpty()) {
             stopSelf()
         } else {

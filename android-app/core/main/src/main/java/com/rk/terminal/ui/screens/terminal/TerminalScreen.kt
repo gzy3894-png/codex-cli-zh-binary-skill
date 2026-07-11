@@ -5,8 +5,10 @@ import android.graphics.BitmapFactory
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
@@ -35,6 +37,9 @@ import com.rk.terminal.R
 import com.rk.terminal.ui.activities.terminal.MainActivity
 import com.rk.terminal.ui.activities.terminal.MainViewModel
 import com.rk.terminal.ui.components.SetStatusBarTextColor
+import com.rk.terminal.session.AgentKind
+import com.rk.terminal.session.SessionIsolation
+import com.rk.terminal.session.SessionIsolationHooks
 import com.rk.terminal.ui.screens.settings.SettingsCard
 import com.rk.terminal.ui.screens.settings.WorkingMode
 import com.rk.terminal.ui.screens.terminal.virtualkeys.VirtualKeysListener
@@ -100,14 +105,19 @@ fun TerminalScreen(
         topPadding + 8.dp
     }
 
+    // Cold restore runs in TerminalViewLayout factory (before default main is created).
+
     if (showAddDialog && sessionBinder != null) {
         AddSessionDialog(
             onDismiss = { showAddDialog = false },
-            onCreateSession = { mode ->
-                val sessionId = generateUniqueSessionId(sessionBinder.getService().sessionList.keys.toList())
+            onCreateSession = { mode, agentKind ->
+                val sessionId = SessionIsolationHooks.nextId(
+                    sessionBinder.getService().sessionList.keys.toList()
+                )
                 val terminal = terminalViewModel.terminalView ?: return@AddSessionDialog
                 val client = TerminalBackEnd(terminal, mainActivity, sessionId)
                 sessionBinder.createSession(sessionId, client, mode)
+                SessionIsolation.onSessionCreated(sessionId, mode, agentKind)
                 terminalViewModel.changeSession(context, sessionBinder, sessionId)
                 showAddDialog = false
             }
@@ -242,31 +252,44 @@ private fun BackgroundImage(viewModel: TerminalViewModel) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddSessionDialog(onDismiss: () -> Unit, onCreateSession: (Int) -> Unit) {
+private fun AddSessionDialog(
+    onDismiss: () -> Unit,
+    onCreateSession: (mode: Int, agentKind: AgentKind) -> Unit
+) {
+    var agentKind by remember { mutableStateOf(AgentKind.CODEX) }
     BasicAlertDialog(onDismissRequest = onDismiss) {
         PreferenceGroup {
+            Text(
+                text = "Agent 前缀",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                AgentKind.entries.forEach { kind ->
+                    FilterChip(
+                        selected = agentKind == kind,
+                        onClick = { agentKind = kind },
+                        label = { Text(kind.prefix) }
+                    )
+                }
+            }
             SettingsCard(
                 title = { Text("Alpine") },
                 description = { Text(stringResource(strings.alpine_desc)) },
-                onClick = { onCreateSession(WorkingMode.ALPINE) }
+                onClick = { onCreateSession(WorkingMode.ALPINE, agentKind) }
             )
             SettingsCard(
                 title = { Text("Android") },
                 description = { Text(stringResource(strings.android_desc)) },
-                onClick = { onCreateSession(WorkingMode.ANDROID) }
+                onClick = { onCreateSession(WorkingMode.ANDROID, agentKind) }
             )
         }
     }
-}
-
-private fun generateUniqueSessionId(existingIds: List<String>): String {
-    var index = 1
-    var newId: String
-    do {
-        newId = "main$index"
-        index++
-    } while (newId in existingIds)
-    return newId
 }
 
 const val VIRTUAL_KEYS = "[" +

@@ -7,6 +7,7 @@ import android.os.StrictMode
 import com.github.anrwatchdog.ANRWatchDog
 import com.rk.libcommons.application
 import com.rk.resources.Res
+import com.rk.terminal.session.SessionIsolation
 import com.rk.terminal.ui.screens.terminal.TerminalUtils
 import com.rk.update.UpdateManager
 import kotlinx.coroutines.DelicateCoroutinesApi
@@ -34,6 +35,8 @@ class App : Application() {
         application = this
         Res.application = this
         TerminalUtils.init(this)
+        // Session isolation is a standalone module; init only loads registry metadata.
+        SessionIsolation.init(this)
 
         GlobalScope.launch(Dispatchers.IO) {
             // Only clear loose leftover files under cache/tmp. Do not wipe session

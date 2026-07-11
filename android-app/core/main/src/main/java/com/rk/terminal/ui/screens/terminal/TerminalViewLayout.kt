@@ -19,6 +19,8 @@ import com.rk.libcommons.dpToPx
 import com.rk.libcommons.localDir
 import com.rk.settings.Settings
 import com.rk.terminal.service.SessionService
+import com.rk.terminal.session.SessionIsolation
+import com.rk.terminal.session.SessionIsolationHooks
 import com.rk.terminal.ui.activities.terminal.MainActivity
 import com.rk.terminal.ui.screens.terminal.virtualkeys.*
 import com.termux.terminal.TerminalColors
@@ -40,11 +42,40 @@ fun TerminalViewLayout(
                     viewModel.setTerminalView(this)
                     setTextSize(dpToPx(Settings.terminal_font_size.toFloat(), ctx))
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                    
+
                     val service = sessionBinder.getService()
+                    SessionIsolationHooks.ensureInit(ctx)
+
+                    // Cold restore before default "main" is created, so process death
+                    // can bring back previous tabs without changing the normal first-run path.
+                    if (service.sessionList.isEmpty()) {
+                        val pending = SessionIsolationHooks.pendingRestoreIfEmpty(0)
+                        pending.forEach { rec ->
+                            val restoreClient = TerminalBackEnd(this, mainActivity, rec.id)
+                            if (sessionBinder.getSession(rec.id) == null) {
+                                sessionBinder.createSession(rec.id, restoreClient, rec.workingMode)
+                            }
+                            SessionIsolation.onSessionCreated(
+                                sessionId = rec.id,
+                                workingMode = rec.workingMode,
+                                agentKind = rec.agentKind,
+                                preferredDisplayName = rec.displayName,
+                                agentResumeId = rec.agentResumeId,
+                                autoNamed = rec.autoNamed,
+                            )
+                        }
+                        if (pending.isNotEmpty()) {
+                            val preferred = SessionIsolation.preferredCurrentId(pending.first().id)
+                            if (service.sessionList.containsKey(preferred)) {
+                                service.currentSession.value =
+                                    preferred to (service.sessionList[preferred] ?: Settings.working_Mode)
+                            }
+                        }
+                    }
+
                     val sessionId = service.currentSession.value.first
                     val client = TerminalBackEnd(this, mainActivity, sessionId)
-                    
+
                     val session = sessionBinder.getSession(sessionId)
                         ?: sessionBinder.createSession(
                             sessionId,
@@ -56,6 +87,14 @@ fun TerminalViewLayout(
                     attachSession(session)
                     setTerminalViewClient(client)
                     setTypeface(TerminalUtils.typeface)
+                    SessionIsolationHooks.notifyCurrent(sessionId)
+
+                    // One-shot resume inject when UUID is known; no-op otherwise.
+                    post {
+                        SessionIsolationHooks.maybeInjectResume(sessionId) { line ->
+                            runCatching { session.write(line) }
+                        }
+                    }
 
                     post {
                         val color = TerminalUtils.getViewColor()
@@ -86,7 +125,7 @@ fun TerminalViewLayout(
         )
 
         if (viewModel.showVirtualKeys) {
-            VirtualKeysPager(viewModel)
+            VirtualKeysPager(viewModel, mainActivity)
         }
     }
 }
@@ -108,7 +147,7 @@ private fun TerminalView.applyTerminalDynamicColors(
 }
 
 @Composable
-private fun VirtualKeysPager(viewModel: TerminalViewModel) {
+private fun VirtualKeysPager(viewModel: TerminalViewModel, mainActivity: MainActivity) {
     val pagerState = rememberPagerState(pageCount = { 2 })
     val onSurfaceColor = MaterialTheme.colorScheme.onSurface.toArgb()
 
@@ -149,6 +188,14 @@ private fun VirtualKeysPager(viewModel: TerminalViewModel) {
                                         terminal?.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
                                         terminal?.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
                                     } else {
+                                        val sid = mainActivity.viewModel.sessionBinder
+                                            ?.getService()
+                                            ?.currentSession
+                                            ?.value
+                                            ?.first
+                                        if (sid != null) {
+                                            SessionIsolationHooks.onUserSubmittedLine(sid, text)
+                                        }
                                         terminal?.currentSession?.write(text)
                                         setText("")
                                     }

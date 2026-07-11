@@ -13,6 +13,7 @@ import androidx.lifecycle.ViewModel
 import com.google.android.material.R
 import com.rk.settings.Settings
 import com.rk.terminal.service.SessionService
+import com.rk.terminal.session.SessionIsolationHooks
 import com.rk.terminal.ui.activities.terminal.MainActivity
 import com.rk.terminal.ui.screens.terminal.virtualkeys.VirtualKeysListener
 import com.rk.terminal.ui.screens.terminal.virtualkeys.VirtualKeysView
@@ -254,6 +255,7 @@ class TerminalViewModel : ViewModel() {
         }
         
         sessionBinder.getService().currentSession.value = Pair(sessionId, sessionBinder.getService().sessionList[sessionId]!!)
+        SessionIsolationHooks.notifyCurrent(sessionId)
     }
 }
 

@@ -8,6 +8,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import com.rk.terminal.service.SessionService
+import com.rk.terminal.session.SessionIsolation
+import com.rk.terminal.session.SessionIsolationHooks
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,9 +35,12 @@ fun TerminalTopBar(
             Column {
                 Text(text = "Codex for TUI", color = color)
                 sessionBinder?.getService()?.currentSession?.value?.let { (id, mode) ->
+                    @Suppress("UNUSED_VARIABLE")
+                    val rev = SessionIsolation.revision.value
+                    val title = SessionIsolationHooks.titleOf(id)
                     Text(
                         style = MaterialTheme.typography.bodySmall,
-                        text = "$id (${TerminalUtils.getNameOfWorkingMode(mode)})",
+                        text = "$title (${TerminalUtils.getNameOfWorkingMode(mode)})",
                         color = color
                     )
                 }

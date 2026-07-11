@@ -1,5 +1,17 @@
 # Changelog
 
+## Codex for TUI 2.5.0
+
+Codex for TUI 2.5.0 在 2.4.10 之上交付 **会话隔离 P0**：终端标签显示名、固定 agent 前缀（codex/claude/shell）、注册表冷启动恢复、按 **UUID**（非显示名）绑定的 resume 注入。独立模块 `com.rk.terminal.session`，不改 MkSession / 全局 `CODEX_HOME`，不破坏 2.4.2+ 升级路径与 2.4.10 shell 交接。
+
+- 抽屉与顶栏展示 `codex-…` / `claude-…` / `shell-…`；内部 id 仍为 `main` / `mainN`。
+- 新建会话可选 agent 前缀；长按重命名只改后缀，前缀锁定；改名不影响 resume。
+- 冷启动按 `filesDir/session-isolation/registry.json` 重建标签；有 UUID 才注入 `codex resume` / `claude --resume`，无 UUID 不瞎 resume。
+- 虚拟键输入栏首条消息可自动命名；软键盘直打与 per-session `CODEX_HOME` 未做。
+- SQLite build key 使用 `apk-2.5.0` runtime epoch；Codex 二进制仍为固定 `0.144.1-zh.1`。
+- Release 校验 `versionCode=66`、`versionName=2.5.0`；发布说明见 `docs/codex-for-tui-2.5.0-release-notes.md`。
+- Android 不能普通覆盖降级安装；从 2.5.0（`versionCode=66`）回到更低版本必须使用更高 versionCode 的前滚修复包，或卸载重装。
+
 ## Codex for TUI 2.4.10
 
 Codex for TUI 2.4.10 是 2.4.9 的引导交接热修：引导文字输出完后自动进入可输入 shell，不再需要 Ctrl+C；并消除启动时 `^[[…R` 类光标应答杂音。
