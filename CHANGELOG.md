@@ -1,5 +1,17 @@
 # Changelog
 
+## Codex for TUI 2.4.3
+
+Codex for TUI 2.4.3 是 2.4.2 的前滚热修，修复 aarch64-musl 上 `gpt-5.6-*` 因 `tool_mode=code_mode_only` 导致工具调用全面失败的问题。
+
+- 随包模型目录清除 `gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna` 的 `code_mode_only`。
+- 配置引擎在目录写入、重建和 runtime 物化时统一规范化 `tool_mode`，防止升级/刷新再次写回坏值。
+- SQLite build key 使用 `apk-2.4.3` runtime epoch；Codex 二进制仍为固定 `0.144.1-zh.1`。
+- 会话仍按 profile 隔离；历史会话未删除，需在对应配置下 `resume`。
+- Release 校验 `versionCode=58`、`versionName=2.4.3`；发布说明见 `docs/codex-for-tui-2.4.3-release-notes.md`。
+- Android 不能普通覆盖降级安装；从 2.4.3（`versionCode=58`）回到更低版本必须使用更高 versionCode 的前滚修复包，或卸载重装。
+
+
 ## Codex for TUI 2.4.2
 
 Codex for TUI 2.4.2 将 APK 覆盖安装升级为离线、原子、可回滚的完整用户环境升级，修复 2.4.0/2.4.1 中 App、Codex 二进制、launcher、配置引擎、模型目录和 SQLite 版本漂移。

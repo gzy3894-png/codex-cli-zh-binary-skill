@@ -1364,9 +1364,18 @@ def conservative_unknown_model(slug: str, base_instructions: str) -> dict[str, A
 
 
 def apply_catalog_visibility_policy(model: dict[str, Any]) -> None:
+    """Normalize catalog entries for this Android/musl runtime.
+
+    - Hide codex-auto-* helper models so /model opens the full picker.
+    - Clear code_mode_only: aarch64-unknown-linux-musl builds ship without the
+      V8 code-mode runtime, so that tool_mode makes every tool call fail with
+      "code mode is unavailable in this aarch64-unknown-linux-musl build".
+    """
     slug = model.get("slug")
     if isinstance(slug, str) and slug.startswith("codex-auto-"):
         model["visibility"] = "hide"
+    if model.get("tool_mode") == "code_mode_only":
+        model["tool_mode"] = None
 
 
 def write_catalog_with_visibility_policy(source: Path, destination: Path) -> None:
@@ -2306,7 +2315,7 @@ def fetch_provider_models_for_profile(
         headers={
             "Authorization": f"Bearer {key}",
             "Accept": "application/json",
-            "User-Agent": "codex-for-tui-apk-upgrade/2.4.2",
+            "User-Agent": "codex-for-tui-apk-upgrade/2.4.3",
         },
     )
     try:

@@ -26,7 +26,7 @@
 
 普通启动不会自动联网更新脚本，不会请求 `/models`，不会覆盖 `~/.codex/config.toml`。
 
-Codex for TUI 2.4.2 APK 内置固定 `0.144.1-zh.1` 二进制、launcher、完整受管脚本和模型能力目录。已安装旧版的用户覆盖安装 APK 并打开 App 后，会在 Codex 启动前自动完成离线、事务型环境升级：根配置成为活动 V2 profile，旧配置独立保留，runtime/session/SQLite 按站点隔离，`/model` 直接显示完整普通模型页，推理等级与 `rust-v0.144.1` 一致。升级失败会回滚并阻止启动，下次打开自动重试；不需要手动运行更新、修复 launcher、配置模式或设置 `CODEX_HOME`。
+Codex for TUI 2.4.3 APK 内置固定 `0.144.1-zh.1` 二进制、launcher、完整受管脚本和模型能力目录。已安装旧版的用户覆盖安装 APK 并打开 App 后，会在 Codex 启动前自动完成离线、事务型环境升级：根配置成为活动 V2 profile，旧配置独立保留，runtime/session/SQLite 按站点隔离，`/model` 直接显示完整普通模型页，推理等级与 `rust-v0.144.1` 一致。升级失败会回滚并阻止启动，下次打开自动重试；2.4.3 额外清除 musl 上不可用的 `code_mode_only`，恢复 `gpt-5.6-*` 工具调用。不需要手动运行更新、修复 launcher、配置模式或设置 `CODEX_HOME`。
 
 只有在不更新 APK、明确只想热更新脚本时，才手动运行：
 
