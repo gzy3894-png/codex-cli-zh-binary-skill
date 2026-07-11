@@ -1347,7 +1347,8 @@ class MainActivity : ComponentActivity() {
     private fun submitPromptToSession(session: TerminalSession, prompt: String) {
         val cleanPrompt = prompt.trimEnd('\r', '\n')
         // File-tray / AI send path: also drive agent prefix + first-message naming.
-        val sid = terminalViewModel.sessionBinder
+        // sessionBinder lives on MainViewModel (viewModel), not TerminalViewModel.
+        val sid: String? = viewModel.sessionBinder
             ?.getService()
             ?.currentSession
             ?.value
