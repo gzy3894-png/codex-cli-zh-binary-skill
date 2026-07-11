@@ -171,8 +171,12 @@ if [ -z "${PROOT_TMP_DIR:-}" ] || ! mkdir -p "$PROOT_TMP_DIR" 2>/dev/null; then
 fi
 
 # Filter known-harmless proot noise that otherwise corrupts TUI/shell output.
-# Keep stdout on the session PTY; only route stderr through a line filter.
+# Keep stdout on the session PTY; only route stderr through a noise filter.
 # Codex TUI uses the tty/stdout path, so this does not break the interface.
+#
+# IMPORTANT: must be byte-wise / prefix-aware, NOT line-buffered.
+# busybox ash writes PS1 without a trailing newline (and may emit CSI 6n).
+# A plain `read -r line` holds that prompt forever → looks like "卡在引导".
 if [ "${CODEX_FOR_TUI_FILTER_PROOT_WARNINGS:-1}" = "1" ] &&
   [ -n "${PROOT_TMP_DIR:-}" ] &&
   mkdir -p "$PROOT_TMP_DIR" 2>/dev/null
@@ -181,19 +185,57 @@ then
   rm -f "$fifo"
   if mkfifo "$fifo" 2>/dev/null; then
     (
-      while IFS= read -r line || [ -n "$line" ]; do
-        case "$line" in
-          *"proot warning: can't sanitize binding"*) ;;
-          *"proot warning: can"*"t sanitize binding"*) ;;
-          *"proot warning: ptrace("*) ;;
-          *"proot warning: can't set tracee registers"*) ;;
-          *"proot warning: can"*"t set tracee registers"*) ;;
-          *"proot info: Please set PROOT_TMP_DIR"*) ;;
-          *"Please set PROOT_TMP_DIR env"*) ;;
-          *) printf '%s\n' "$line" ;;
+      is_proot_noise_line() {
+        case "$1" in
+          *"proot warning: can't sanitize binding"*) return 0 ;;
+          *"proot warning: can"*"t sanitize binding"*) return 0 ;;
+          *"proot warning: ptrace("*) return 0 ;;
+          *"proot warning: can't set tracee registers"*) return 0 ;;
+          *"proot warning: can"*"t set tracee registers"*) return 0 ;;
+          *"proot info: Please set PROOT_TMP_DIR"*) return 0 ;;
+          *"Please set PROOT_TMP_DIR env"*) return 0 ;;
+          *) return 1 ;;
         esac
-      done < "$fifo" >&2
-    ) &
+      }
+
+      # Hold only while buf is still a prefix of a known noise pattern.
+      # Anything else (shell prompts, CSI, normal logs) is flushed immediately.
+      could_become_proot_noise() {
+        case "$1" in
+          ''|p|pr|pro|proo|proot|proot\ |proot\ w*|proot\ i*|P|Pl|Ple|Plea|Pleas|Please|Please\ *)
+            return 0
+            ;;
+          *)
+            return 1
+            ;;
+        esac
+      }
+
+      # Byte-wise filter: Android /system/bin/sh supports `read -n 1`.
+      # Do not use line-buffered `read -r line` — ash PS1 has no trailing newline.
+      buf=""
+      while IFS= read -r -n 1 c; do
+        buf="${buf}${c}"
+        case "$c" in
+          '
+')
+            if ! is_proot_noise_line "$buf"; then
+              printf '%s' "$buf"
+            fi
+            buf=""
+            ;;
+          *)
+            if ! could_become_proot_noise "$buf"; then
+              printf '%s' "$buf"
+              buf=""
+            fi
+            ;;
+        esac
+      done
+      if [ -n "$buf" ] && ! is_proot_noise_line "$buf"; then
+        printf '%s' "$buf"
+      fi
+    ) < "$fifo" >&2 &
     filter_pid=$!
     set +e
     # shellcheck disable=SC2086

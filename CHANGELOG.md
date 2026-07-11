@@ -1,5 +1,15 @@
 # Changelog
 
+## Codex for TUI 2.4.10
+
+Codex for TUI 2.4.10 是 2.4.9 的引导交接热修：引导文字输出完后自动进入可输入 shell，不再需要 Ctrl+C；并消除启动时 `^[[…R` 类光标应答杂音。
+
+- 根因：`init-host` 把 guest stderr 重定向到**按行** proot 噪声过滤器；busybox ash 的 PS1 无换行，过滤器永久卡住，会话停在「正在进入交互 shell…」。
+- 修复：`enter_interactive_shell` 在 exec ash 前把 stderr 重新绑回会话 PTY（`exec 2>&1`）；proot 过滤器改为字节/前缀感知，立即放行 prompt 与 CSI。
+- SQLite build key 使用 `apk-2.4.10` runtime epoch；Codex 二进制仍为固定 `0.144.1-zh.1`。
+- Release 校验 `versionCode=65`、`versionName=2.4.10`；发布说明见 `docs/codex-for-tui-2.4.10-release-notes.md`。
+- Android 不能普通覆盖降级安装；从 2.4.10（`versionCode=65`）回到更低版本必须使用更高 versionCode 的前滚修复包，或卸载重装。
+
 ## Codex for TUI 2.4.9
 
 Codex for TUI 2.4.9 是 2.4.8 的前滚体感热修：消除打开空白与引导后卡顿。

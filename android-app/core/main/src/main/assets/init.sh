@@ -339,6 +339,14 @@ enter_interactive_shell() {
     cd "$HOME" 2>/dev/null || true
   fi
 
+  # Critical: init-host may route guest stderr through a proot-noise filter.
+  # busybox ash writes PS1 (no trailing newline) and CSI 6n to stderr; a line-buffered
+  # filter holds them forever, so the session looks stuck after "引导结束" until ^C.
+  # Rebind stderr to the session PTY (stdout) before the interactive shell owns the TTY.
+  if [ ! -t 2 ] && [ -t 1 ]; then
+    exec 2>&1
+  fi
+
   if command -v stty >/dev/null 2>&1; then
     # Prefer the controlling tty when stdin is not already a tty.
     # Never block: only touch stty when the fd is a real tty.
@@ -360,6 +368,9 @@ enter_interactive_shell() {
 if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
   cd "$HOME" 2>/dev/null || true
 fi
+if [ ! -t 2 ] && [ -t 1 ]; then
+  exec 2>&1
+fi
 if [ -t 0 ] && command -v stty >/dev/null 2>&1; then
   stty sane 2>/dev/null || true
   stty echo icanon icrnl onlcr ixon 2>/dev/null || true
@@ -372,6 +383,7 @@ EOF
 
   # Prefer interactive ash so line editing / echo match a normal terminal session.
   # Force unbuffered prompt path: -i is enough; avoid login shell (no second /etc/profile).
+  # No extra keypress, no ^C, no exit — guide text ends and shell prompt appears immediately.
   if [ -x /bin/ash ]; then
     exec /bin/ash -i
   fi
