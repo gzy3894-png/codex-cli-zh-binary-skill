@@ -8,6 +8,10 @@ ROOTFS_READY_MARKER=".codex-rootfs-ready"
 ROOTFS_LOCK="$PREFIX/local/alpine.install.lock"
 ROOTFS_WAIT_SECONDS="${ROOTFS_WAIT_SECONDS:-120}"
 
+# Immediate feedback before any rootfs/proot work so the terminal is never blank.
+# Use stderr so the line is less likely to be swallowed by later filters.
+printf '%s\n' "Codex for TUI：正在启动…" >&2
+
 rootfs_has_payload() {
   [ -d "$ALPINE_DIR" ] || return 1
   [ -n "$(find "$ALPINE_DIR" -mindepth 1 -maxdepth 1 ! -name root ! -name tmp ! -name "$ROOTFS_READY_MARKER" 2>/dev/null | sed -n '1p')" ]

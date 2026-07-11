@@ -1,5 +1,18 @@
 # Changelog
 
+## Codex for TUI 2.4.9
+
+Codex for TUI 2.4.9 是 2.4.8 的前滚体感热修：消除打开空白与引导后卡顿。
+
+- 启动立刻打印「正在启动… / 环境已就绪，正在初始化…」，避免首次打开长时间空白。
+- `MkSession` / `UpdateManager` 按 version stamp 跳过已同步 managed 脚本；不再每会话重写约 6.7MB 的 `rtk`。
+- 引导结束后打印「正在进入交互 shell…」；收紧 `stty` 与 `ash -i` 交接。
+- APK 升级成功后删除 `work/` 暂存树；自动清理脏 `profile.d` 测试 PATH 注入。
+- SQLite build key 使用 `apk-2.4.9` runtime epoch；Codex 二进制仍为固定 `0.144.1-zh.1`。
+- Release 校验 `versionCode=64`、`versionName=2.4.9`；发布说明见 `docs/codex-for-tui-2.4.9-release-notes.md`。
+- Android 不能普通覆盖降级安装；从 2.4.9（`versionCode=64`）回到更低版本必须使用更高 versionCode 的前滚修复包，或卸载重装。
+
+
 ## Codex for TUI 2.4.8
 
 Codex for TUI 2.4.8 是 2.4.7 的前滚热修：引导结束后的纯 shell 固定落在 `$HOME`，并扩大 proot 噪声过滤。

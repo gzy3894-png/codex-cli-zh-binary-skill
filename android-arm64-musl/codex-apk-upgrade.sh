@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
-RELEASE="2.4.8"
-VERSION_CODE="63"
+RELEASE="2.4.9"
+VERSION_CODE="64"
 EXPECTED_CODEX_VERSION="0.144.1"
 EXPECTED_TARGET="aarch64-unknown-linux-musl"
 EXPECTED_ARCHIVE_SHA256="1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61"
@@ -495,6 +495,9 @@ fi
 } > "$COMPLETE_MARKER.tmp.$$"
 mv "$COMPLETE_MARKER.tmp.$$" "$COMPLETE_MARKER"
 rm -f "$JOURNAL" "$RELEASE_STATE/failed"
+# Drop staged archives after success so daily cold starts and disk stay light.
+# Keep complete/status/refresh markers; only the multi-hundred-MB work tree goes.
+rm -rf "$WORK_ROOT"
 UPGRADE_ACTIVE=0
 
 info "Codex for TUI $RELEASE 环境升级完成。"

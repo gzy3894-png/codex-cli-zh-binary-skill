@@ -300,8 +300,28 @@ EOF
   chmod 755 "$bin_dir/codex-preview" "$bin_dir/codex-push-image" "$bin_dir/codex-push-media" 2>/dev/null || true
 }
 
+# Immediate in-guest feedback as soon as proot hands off to init.
+printf '%s\n' "Codex for TUI：环境已就绪，正在初始化…"
+
 ensure_codex_preview
 export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"
+
+# Drop stale test PATH injections that point into deleted cache/tmp trees.
+sanitize_profile_d() {
+  profile_d="/etc/profile.d/codex-zh.sh"
+  [ -f "$profile_d" ] || return 0
+  if grep -F 'cache/tmp/codex-tui-static-first-run' "$profile_d" >/dev/null 2>&1 ||
+    grep -F 'codex-tui-static-' "$profile_d" >/dev/null 2>&1
+  then
+    cat >"$profile_d" <<'EOF'
+# Managed by Codex for TUI. Keep /usr/local/bin early for codex launcher.
+case ":${PATH:-}:" in
+  *":/usr/local/bin:"*) ;;
+  *) export PATH="/usr/local/bin:${PATH:-}" ;;
+esac
+EOF
+  fi
+}
 
 # Hand off to a pure interactive shell after bootstrap guide text.
 # Non-interactive `exec /bin/ash` can leave the PTY without echo/icanon on some paths.
@@ -309,6 +329,9 @@ export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH
 enter_interactive_shell() {
   # Drop any residual non-interactive flags from bootstrap/upgrade.
   set +e +u +v +x 2>/dev/null || true
+
+  # Visible handoff so "引导结束" is never followed by a silent freeze.
+  printf '%s\n' "正在进入交互 shell…"
 
   # Pure shell home: never leave the user in Codex workspace after guide text.
   # Workspace is still exported for `codex` launcher to avoid project-local config noise.
@@ -318,27 +341,29 @@ enter_interactive_shell() {
 
   if command -v stty >/dev/null 2>&1; then
     # Prefer the controlling tty when stdin is not already a tty.
+    # Never block: only touch stty when the fd is a real tty.
     if [ -t 0 ]; then
       stty sane 2>/dev/null || true
       stty echo icanon icrnl onlcr ixon 2>/dev/null || true
-    elif [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    elif [ -c /dev/tty ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+      # open may fail if no controlling tty; keep it non-fatal and non-blocking.
       stty sane < /dev/tty 2>/dev/null || true
       stty echo icanon icrnl onlcr ixon < /dev/tty 2>/dev/null || true
     fi
   fi
 
   # ash/bash-compatible interactive startup: re-assert echo once the shell owns the TTY.
+  # Keep this rc tiny — large ENV scripts make the post-guide gap feel like a hang.
   shell_rc="${TMPDIR:-/tmp}/codex-for-tui-shell-rc.$$"
   cat >"$shell_rc" <<'EOF' 2>/dev/null || true
 # Codex for TUI interactive shell handoff (auto-generated, safe to ignore).
 if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
   cd "$HOME" 2>/dev/null || true
 fi
-if command -v stty >/dev/null 2>&1; then
+if [ -t 0 ] && command -v stty >/dev/null 2>&1; then
   stty sane 2>/dev/null || true
   stty echo icanon icrnl onlcr ixon 2>/dev/null || true
 fi
-# Avoid double-sourcing if the shell restarts.
 unset ENV
 EOF
   if [ -s "$shell_rc" ]; then
@@ -346,6 +371,7 @@ EOF
   fi
 
   # Prefer interactive ash so line editing / echo match a normal terminal session.
+  # Force unbuffered prompt path: -i is enough; avoid login shell (no second /etc/profile).
   if [ -x /bin/ash ]; then
     exec /bin/ash -i
   fi
@@ -356,6 +382,7 @@ EOF
 }
 
 if [ "$#" -eq 0 ]; then
+  sanitize_profile_d
   [ ! -r /etc/profile ] || . /etc/profile
   export PATH="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin:$PATH"
   # Dedicated workspace is for Codex launches only (see codex-zh-local.sh).
@@ -370,6 +397,7 @@ if [ "$#" -eq 0 ]; then
   export CODEX_FOR_TUI_AUTO_START="${CODEX_FOR_TUI_AUTO_START:-0}"
   bootstrap="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/bin/codex-for-tui-bootstrap.sh"
   if ! command -v python3 >/dev/null 2>&1; then
+    printf '%s\n' "正在准备 python3 依赖…"
     if [ ! -s "$bootstrap" ] ||
       ! HOME=/root CODEX_HOME=/root/.codex sh "$bootstrap" --prepare-apk-upgrade-deps ||
       ! command -v python3 >/dev/null 2>&1
@@ -383,6 +411,7 @@ if [ "$#" -eq 0 ]; then
     printf '%s\n' "错误: APK 环境升级入口缺失，已阻止 Codex 启动。" >&2
     enter_interactive_shell
   fi
+  printf '%s\n' "正在检查环境升级…"
   if ! HOME=/root CODEX_HOME=/root/.codex sh "$apk_upgrade"; then
     printf '%s\n' "错误: APK 环境升级未完成，已回滚并阻止 Codex 启动；下次打开 App 会自动重试。" >&2
     enter_interactive_shell

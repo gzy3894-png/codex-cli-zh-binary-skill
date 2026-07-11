@@ -43,6 +43,8 @@ object MkSession {
         "codex-local-resume.sh",
     )
     private val unsafeSessionIdChars = Regex("[^A-Za-z0-9._-]")
+    // Avoid rewriting multi-MB assets (especially rtk) on every new session.
+    private const val MANAGED_SCRIPTS_STAMP = ".managed-scripts-stamp"
 
     fun sanitizeSessionId(sessionId: String): String {
         val base = sessionId
@@ -57,21 +59,57 @@ object MkSession {
     fun sessionTempDir(context: Context, sessionId: String): File =
         getTempDir(context).child(sanitizeSessionId(sessionId))
 
+    private fun Context.managedScriptsStampValue(): String =
+        "versionCode=${BuildConfig.VERSION_CODE}\nversionName=${BuildConfig.VERSION_NAME}\ncount=${managedScripts.size}\n"
+
     private fun Context.syncManagedScripts() {
+        val binDir = localBinDir()
         obsoleteScripts.forEach { outputName ->
-            localBinDir().child(outputName).delete()
+            binDir.child(outputName).delete()
         }
+
+        val stampFile = binDir.child(MANAGED_SCRIPTS_STAMP)
+        val expectedStamp = managedScriptsStampValue()
+        val stampMatches = stampFile.exists() &&
+            runCatching { stampFile.readText() }.getOrNull() == expectedStamp
+        val missingOrUnusable = managedScripts.values.any { outputName ->
+            val file = binDir.child(outputName)
+            !file.exists() || !file.canExecute() || file.length() <= 0L
+        }
+
+        // Fast path: same app version and all managed binaries still present.
+        if (stampMatches && !missingOrUnusable) {
+            return
+        }
+
         managedScripts.forEach { (assetName, outputName) ->
-            localBinDir().child(outputName).apply {
-                createFileIfNot()
-                assets.open(assetName).use { input ->
-                    outputStream().use { output ->
-                        input.copyTo(output)
-                    }
-                }
-                setExecutable(true, false)
+            val dest = binDir.child(outputName)
+            // Skip rewrite when the on-disk file already matches the packaged asset size.
+            // rtk alone is ~6.7MB; rewriting it every session makes the first frame blank.
+            val assetLength = runCatching {
+                assets.openFd(assetName).use { it.length }
+            }.getOrElse {
+                // Compressed assets may not support openFd; fall back to a full rewrite.
+                -1L
             }
+            if (
+                dest.exists() &&
+                dest.canExecute() &&
+                assetLength > 0L &&
+                dest.length() == assetLength
+            ) {
+                return@forEach
+            }
+            dest.createFileIfNot()
+            assets.open(assetName).use { input ->
+                dest.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            dest.setExecutable(true, false)
         }
+
+        stampFile.writeText(expectedStamp)
     }
 
     fun createSession(
