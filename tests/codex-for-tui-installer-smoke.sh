@@ -103,15 +103,30 @@ EOF
     export PREFIX="$tmp/prefix"
     export CODEX_HOME="$tmp/home/.codex"
     export PATH="/bin:/usr/bin"
+    # 2.4.5+: default is shell-first; do not auto-exec codex.
     sh "$BOOTSTRAP" >"$tmp/stdout" 2>"$tmp/stderr"
   ) || {
     sed -n '1,160p' "$tmp/stderr" >&2 || true
-    fail "bootstrap normal start should launch local codex"
+    fail "bootstrap normal start should return to shell without network"
   }
 
-  assert_file_contains "$tmp/stdout" "codex-ran"
+  assert_file_contains "$tmp/stdout" "环境就绪"
+  assert_file_not_contains "$tmp/stdout" "codex-ran"
   [ ! -e "$tmp/home/network.log" ] || fail "normal startup called network fetch"
   [ ! -e "$tmp/home/.codex-for-tui/remote/install-reterminal-alpine.sh" ] || fail "normal startup refreshed scripts"
+
+  (
+    export HOME="$tmp/home"
+    export PREFIX="$tmp/prefix"
+    export CODEX_HOME="$tmp/home/.codex"
+    export PATH="/bin:/usr/bin"
+    export CODEX_FOR_TUI_AUTO_START=1
+    sh "$BOOTSTRAP" >"$tmp/stdout-auto" 2>"$tmp/stderr-auto"
+  ) || {
+    sed -n '1,160p' "$tmp/stderr-auto" >&2 || true
+    fail "bootstrap AUTO_START=1 should launch local codex"
+  }
+  assert_file_contains "$tmp/stdout-auto" "codex-ran"
   rm -rf "$tmp"
 }
 
