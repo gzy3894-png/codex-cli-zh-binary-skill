@@ -53,6 +53,13 @@ MANAGED_ROOT_KEYS = (
     "model_reasoning_effort",
     "model_catalog_json",
 )
+RUNTIME_LOCAL_FILE = "runtime-local.toml"
+COMMON_BASE_FILE = "common-base.toml"
+RUNTIME_GENERATED_ROOT_KEYS = {
+    "sqlite_home",
+    "model_auto_compact_token_limit",
+    "model_providers",
+}
 
 
 class EngineError(Exception):
@@ -590,19 +597,50 @@ def load_common_config(paths: Paths, index: dict[str, Any] | None = None) -> TOM
     return tomlkit.document()
 
 
-def merge_runtime_local_overlay(doc: TOMLDocument, previous: TOMLDocument | None) -> None:
-    """Preserve runtime-only non-managed keys across relaunch (patch, not full replace)."""
-    if previous is None:
+def merge_runtime_local_overlay(doc: TOMLDocument, overlay: TOMLDocument | None) -> None:
+    """Apply only explicitly tracked runtime-local keys."""
+    if overlay is None:
         return
-    for key in list(previous):
-        if key in MANAGED_ROOT_KEYS or key in {
-            "sqlite_home",
-            "model_auto_compact_token_limit",
-            "model_providers",
-        }:
+    for key in list(overlay):
+        if key in MANAGED_ROOT_KEYS or key in RUNTIME_GENERATED_ROOT_KEYS:
             continue
-        if key not in doc:
-            doc[key] = copy.deepcopy(previous[key])
+        doc[key] = copy.deepcopy(overlay[key])
+
+
+def extract_runtime_local_overlay(
+    runtime: TOMLDocument,
+    common_base: TOMLDocument,
+) -> TOMLDocument:
+    """Keep runtime keys absent from the last known common configuration."""
+    runtime_clean = strip_managed_fields(runtime)
+    common_clean = strip_managed_fields(common_base)
+    overlay = tomlkit.document()
+    for key in list(runtime_clean):
+        if key in MANAGED_ROOT_KEYS or key in RUNTIME_GENERATED_ROOT_KEYS:
+            continue
+        if key not in common_clean:
+            overlay[key] = copy.deepcopy(runtime_clean[key])
+    return overlay
+
+
+def write_runtime_local_overlay(directory: Path, overlay: TOMLDocument) -> None:
+    destination = directory / RUNTIME_LOCAL_FILE
+    if len(overlay) == 0:
+        destination.unlink(missing_ok=True)
+        return
+    atomic_write_text(destination, tomlkit.dumps(overlay), 0o600)
+
+
+def preserve_runtime_metadata(
+    paths: Paths,
+    profile_id: str,
+    staged: Path,
+) -> None:
+    existing = profile_dir(paths, profile_id)
+    for name in (RUNTIME_LOCAL_FILE, COMMON_BASE_FILE):
+        source = existing / name
+        if source.is_file():
+            safe_copy(source, staged / name, 0o600)
 
 
 def create_profile_directory(
@@ -641,6 +679,7 @@ def create_profile_directory(
     atomic_write_json(staged / "profile.json", meta)
     if base_config_file is not None:
         write_profile_base_config(base_config_file, staged / "legacy-config.toml")
+        write_profile_base_config(base_config_file, staged / COMMON_BASE_FILE)
     if mode == "third_party":
         if not model:
             raise EngineError("默认模型不能为空", 2)
@@ -948,6 +987,7 @@ def cmd_profile_update(paths: Paths, args: argparse.Namespace) -> None:
                 runtime_home=runtime_home_for_profile(paths, current),
                 compact_policy=profile_compact_policy(current, load_index(paths, create=True)),
             )
+            preserve_runtime_metadata(paths, str(current["id"]), staged)
             replace_directory(staged, directory)
             maybe_failpoint("after-profile-replace")
             index = load_index(paths, create=True)
@@ -1072,6 +1112,7 @@ def import_runtime_profile(
         updated_meta = read_json(meta_path, {})
         updated_meta["compatibility_model"] = existing_meta.get("compatibility_model")
         atomic_write_json(meta_path, updated_meta)
+        preserve_runtime_metadata(paths, profile_id, staged)
     replace_directory(staged, profile_dir(paths, profile_id))
     return profile_meta(paths, profile_id)
 
@@ -1152,6 +1193,23 @@ def materialize_runtime(
     runtime_marker = runtime_home / "install-state" / "official-login-mode"
 
     previous_runtime = read_toml(runtime_config) if runtime_config.is_file() else None
+    profile_directory = profile_dir(paths, str(meta["id"]))
+    runtime_local_path = profile_directory / RUNTIME_LOCAL_FILE
+    if runtime_local_path.is_file():
+        runtime_local = read_toml(runtime_local_path)
+    elif previous_runtime is not None:
+        common_base_path = profile_directory / COMMON_BASE_FILE
+        if not common_base_path.is_file():
+            common_base_path = profile_directory / "legacy-config.toml"
+        common_base = (
+            read_toml(common_base_path)
+            if common_base_path.is_file()
+            else tomlkit.document()
+        )
+        runtime_local = extract_runtime_local_overlay(previous_runtime, common_base)
+        write_runtime_local_overlay(profile_directory, runtime_local)
+    else:
+        runtime_local = tomlkit.document()
     doc = read_toml(paths.config)
     if paths.catalog.is_file():
         write_catalog_with_visibility_policy(paths.catalog, runtime_catalog)
@@ -1160,9 +1218,10 @@ def materialize_runtime(
         runtime_catalog.unlink(missing_ok=True)
         doc.pop("model_catalog_json", None)
     doc["sqlite_home"] = str(sqlite_home)
-    # Keep only non-managed runtime-local extras (e.g. user notes), never restamp managed vars.
-    merge_runtime_local_overlay(doc, previous_runtime)
+    # Apply only explicitly tracked runtime-local extras; common control keys are authoritative.
+    merge_runtime_local_overlay(doc, runtime_local)
     atomic_write_text(runtime_config, tomlkit.dumps(doc), 0o600)
+    write_profile_base_config(paths.config, profile_directory / COMMON_BASE_FILE)
 
     if paths.auth.is_file():
         safe_copy(paths.auth, runtime_auth, 0o600)
@@ -1215,6 +1274,8 @@ def cmd_profile_sync_runtime(paths: Paths, args: argparse.Namespace) -> None:
                 actual=str(source_dir),
             )
         with transaction(paths, "profile-sync-runtime"):
+            runtime_doc = read_toml(source_dir / "config.toml")
+            common_base = load_common_config(paths, load_index(paths, create=True))
             meta = import_runtime_profile(
                 paths,
                 name=str(current["name"]),
@@ -1224,6 +1285,12 @@ def cmd_profile_sync_runtime(paths: Paths, args: argparse.Namespace) -> None:
                 runtime_home=expected_runtime,
             )
             index = load_index(paths, create=True)
+            directory = profile_dir(paths, str(meta["id"]))
+            write_runtime_local_overlay(
+                directory,
+                extract_runtime_local_overlay(runtime_doc, common_base),
+            )
+            write_profile_base_config(paths.config, directory / COMMON_BASE_FILE)
             if index.get("active_profile_id") == current["id"]:
                 materialize_profile(paths, meta, index)
         emit(True, profile=redact_profile(paths, meta))
@@ -1650,6 +1717,7 @@ def cmd_compact_policy(paths: Paths, args: argparse.Namespace) -> None:
                 doc = load_common_config(paths, index)
                 apply_compact_policy(doc, index)
                 atomic_write_text(paths.config, tomlkit.dumps(doc), 0o600)
+                atomic_write_json(paths.index, index)
         emit(True, compact_policy=policy)
 
 

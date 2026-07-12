@@ -38,6 +38,7 @@ import com.rk.terminal.ui.activities.terminal.MainActivity
 import com.rk.terminal.ui.activities.terminal.MainViewModel
 import com.rk.terminal.ui.components.SetStatusBarTextColor
 import com.rk.terminal.session.AgentKind
+import com.rk.terminal.session.ConversationManager
 import com.rk.terminal.session.SessionIsolation
 import com.rk.terminal.session.SessionIsolationHooks
 import com.rk.terminal.ui.screens.settings.SettingsCard
@@ -142,6 +143,42 @@ fun TerminalScreen(
                 onSessionSelected = { id ->
                     sessionBinder?.let { terminalViewModel.changeSession(context, it, id) }
                     scope.launch { drawerState.close() }
+                },
+                onConversationSelected = { conversation ->
+                    sessionBinder?.let { binder ->
+                        val service = binder.getService()
+                        val liveId = service.sessionList.keys.firstOrNull { id ->
+                            SessionIsolation.record(id)?.agentResumeId == conversation.id
+                        }
+                        if (liveId != null) {
+                            terminalViewModel.changeSession(context, binder, liveId)
+                        } else {
+                            val terminal = terminalViewModel.terminalView
+                            if (terminal != null) {
+                                val sessionId = SessionIsolationHooks.nextId(
+                                    service.sessionList.keys.toList()
+                                )
+                                binder.createSession(
+                                    sessionId,
+                                    TerminalBackEnd(terminal, mainActivity, sessionId),
+                                    com.rk.settings.Settings.working_Mode,
+                                )
+                                SessionIsolation.onSessionCreated(
+                                    sessionId = sessionId,
+                                    workingMode = com.rk.settings.Settings.working_Mode,
+                                    agentKind = conversation.agentKind,
+                                    preferredDisplayName = conversation.displayName,
+                                    agentResumeId = conversation.id,
+                                    preserveExistingIdentity = false,
+                                )
+                                terminalViewModel.changeSession(context, binder, sessionId)
+                            }
+                        }
+                    }
+                    scope.launch { drawerState.close() }
+                },
+                onConversationArchived = { id ->
+                    ConversationManager.archive(id)
                 },
                 onCloseWindow = { id ->
                     // Close = kill this terminal PTY window only (not agent session delete).

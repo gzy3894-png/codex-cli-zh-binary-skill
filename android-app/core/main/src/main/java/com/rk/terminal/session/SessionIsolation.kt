@@ -5,6 +5,8 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * Standalone session-isolation facade.
@@ -27,6 +29,10 @@ object SessionIsolation {
     /** Set by clearAll (EXIT); blocks mid-lifecycle allRecords resurrect until process re-init. */
     private var intentionallyWiped = false
     private val resumeInjected = ConcurrentHashMap.newKeySet<String>()
+    private val resumeClaims = ConcurrentHashMap.newKeySet<String>()
+    private val resumeDiscoveryExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "codex-session-resume-bind").apply { isDaemon = true }
+    }
 
     /** Observable titles for Compose (sessionId → displayName). */
     val displayNames: SnapshotStateMap<String, String> = mutableStateMapOf()
@@ -45,6 +51,7 @@ object SessionIsolation {
             if (store != null) return
             val s = SessionRegistryStore(app)
             store = s
+            ConversationManager.init(app)
             val snap = s.load()
             records.clear()
             displayNames.clear()
@@ -57,6 +64,7 @@ object SessionIsolation {
             restoreConsumed = false
             intentionallyWiped = false
             resumeInjected.clear()
+            resumeClaims.clear()
             bumpLocked()
         }
     }
@@ -144,6 +152,13 @@ object SessionIsolation {
                     )
                 }
                 putLocked(rec)
+                if (rec.agentResumeId.isNotBlank()) {
+                    ConversationManager.ensure(
+                        id = rec.agentResumeId,
+                        agentKind = rec.agentKind,
+                        displayName = rec.displayName,
+                    )
+                }
                 if (currentId.isBlank()) currentId = sessionId
                 persistLocked()
                 rec
@@ -186,6 +201,7 @@ object SessionIsolation {
             records.clear()
             displayNames.clear()
             resumeInjected.clear()
+            resumeClaims.clear()
             currentId = ""
             pendingRestore = emptyList()
             restoreConsumed = true
@@ -284,7 +300,14 @@ object SessionIsolation {
         return runCatching {
             val launch = AgentKind.detectLaunch(line)
             if (launch != null) {
-                setAgentKind(sessionId, launch) != null
+                val changed = setAgentKind(sessionId, launch) != null
+                val explicitResumeId = AgentKind.detectResumeId(line)
+                if (explicitResumeId != null) {
+                    bindAgentResumeId(sessionId, explicitResumeId)
+                } else {
+                    scheduleResumeDiscovery(sessionId, launch)
+                }
+                changed
             } else {
                 applyFirstUserMessage(sessionId, line)
             }
@@ -325,7 +348,39 @@ object SessionIsolation {
             val next = existing.withResumeId(id)
             putLocked(next)
             persistLocked()
+            ConversationManager.ensure(
+                id = id,
+                agentKind = next.agentKind,
+                displayName = next.displayName,
+            )
             return next
+        }
+    }
+
+    /**
+     * Bind a newly-created CLI transcript to the window that launched it.
+     *
+     * Codex and Claude create their JSONL file after the shell command is
+     * submitted, so this uses a short bounded retry. Explicit `resume UUID`
+     * commands are handled synchronously in [onUserSubmittedLine].
+     */
+    private fun scheduleResumeDiscovery(sessionId: String, kind: AgentKind) {
+        val submittedAt = System.currentTimeMillis()
+        val knownIds = ConversationManager.all().map { it.id }.toSet()
+        listOf(700L, 1_600L, 3_000L).forEach { delay ->
+            resumeDiscoveryExecutor.schedule({
+                val existing = record(sessionId)
+                if (existing == null || existing.agentResumeId.isNotBlank()) return@schedule
+                val candidate = ConversationManager.latestNewConversation(
+                    kind = kind,
+                    knownIds = knownIds,
+                    submittedAt = submittedAt,
+                ) ?: return@schedule
+                if (!resumeClaims.add(candidate.id)) return@schedule
+                if (bindAgentResumeId(sessionId, candidate.id) == null) {
+                    resumeClaims.remove(candidate.id)
+                }
+            }, delay, TimeUnit.MILLISECONDS)
         }
     }
 
@@ -408,6 +463,8 @@ object SessionIsolation {
             restoreConsumed = false
             intentionallyWiped = false
             resumeInjected.clear()
+            resumeClaims.clear()
+            ConversationManager.resetForTests()
             revision.value = 0
         }
     }

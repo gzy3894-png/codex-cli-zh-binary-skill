@@ -423,6 +423,40 @@ PY
   assert_contains "$alpha_runtime/config.toml" 'common_marker = "keep-me"'
   assert_not_contains "$alpha_runtime/config.toml" 'poison_legacy'
 
+  # Removing a control-owned common key must not resurrect it from the old runtime.
+  python3 - "$home/config.toml" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+lines = [
+    line for line in path.read_text(encoding="utf-8").splitlines()
+    if line != 'common_marker = "keep-me"'
+]
+path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
+  engine "$home" profile launch alpha \
+    --sqlite-build-key codex-cli-0.144.1-build-d > "$home/alpha-common-delete.json"
+  assert_not_contains "$home/config.toml" 'common_marker = "keep-me"'
+  assert_not_contains "$alpha_runtime/config.toml" 'common_marker = "keep-me"'
+
+  # Explicitly synced runtime-only keys remain in the separate overlay.
+  # The previous launch already materialized [profile_local]; append within
+  # that table instead of declaring the same TOML table twice.
+  printf '%s\n' 'runtime_sync_marker = "alpha-sync"' \
+    >> "$alpha_runtime/config.toml"
+  engine "$home" profile sync-runtime alpha \
+    --source-dir "$alpha_runtime" > "$home/alpha-sync-runtime-local.json"
+  alpha_profile_dir="$home/config-profiles-v2/profiles/$alpha_id"
+  [ -s "$alpha_profile_dir/runtime-local.toml" ] ||
+    fail "runtime-local overlay was not persisted"
+  assert_contains "$alpha_profile_dir/runtime-local.toml" 'runtime_note = "alpha-only"'
+  assert_contains "$alpha_profile_dir/runtime-local.toml" 'runtime_sync_marker = "alpha-sync"'
+  assert_not_contains "$alpha_profile_dir/runtime-local.toml" 'common_marker = "keep-me"'
+  engine "$home" profile launch alpha \
+    --sqlite-build-key codex-cli-0.144.1-build-e > "$home/alpha-runtime-local-launch.json"
+  assert_contains "$alpha_runtime/config.toml" 'runtime_note = "alpha-only"'
+
   # Global compact policy is index-owned; profile meta copies are not the source of truth.
   engine "$home" compact-policy fixed 250000 > "$home/compact-fixed.json"
   assert_contains "$home/config.toml" 'model_auto_compact_token_limit = 250000'
@@ -430,8 +464,36 @@ PY
   engine "$home" profile launch beta \
     --sqlite-build-key codex-cli-0.144.1-build-c > "$home/beta-common-launch.json"
   assert_contains "$home/config.toml" 'model_auto_compact_token_limit = 250000'
-  assert_contains "$home/config.toml" 'common_marker = "keep-me"'
+  assert_not_contains "$home/config.toml" 'common_marker = "keep-me"'
   assert_contains "$beta_runtime/config.toml" 'model_auto_compact_token_limit = 250000'
+}
+
+test_compact_policy_without_active_profile_persists_metadata() {
+  home="$TMP_ROOT/no-active"
+  mkdir -p "$home"
+  printf '%s\n' 'common_marker = "keep-me"' > "$home/config.toml"
+
+  engine "$home" compact-policy fixed 123456 > "$home/fixed.json"
+  python3 - "$home/config-profiles-v2/index.json" <<'PY'
+import json
+import sys
+
+value = json.loads(open(sys.argv[1], encoding="utf-8").read())
+assert value["compact_policy"] == {"mode": "fixed", "value": 123456}
+assert "model_auto_compact_token_limit" in value["runtime_managed"]["root_keys"]
+PY
+  assert_contains "$home/config.toml" 'model_auto_compact_token_limit = 123456'
+
+  engine "$home" compact-policy follow-model > "$home/follow.json"
+  python3 - "$home/config-profiles-v2/index.json" <<'PY'
+import json
+import sys
+
+value = json.loads(open(sys.argv[1], encoding="utf-8").read())
+assert value["compact_policy"] == {"mode": "follow-model"}
+assert "model_auto_compact_token_limit" not in value["runtime_managed"]["root_keys"]
+PY
+  assert_not_contains "$home/config.toml" 'model_auto_compact_token_limit = '
 }
 
 write_v1_official_fixture() {
@@ -771,6 +833,8 @@ printf 'RUN profile integrity, routing and secret cleanup\n'
 test_profile_integrity_routing_and_secret_cleanup
 printf 'RUN profile runtime config persistence and isolation\n'
 test_profile_runtime_config_persistence_and_isolation
+printf 'RUN compact policy without active profile metadata persistence\n'
+test_compact_policy_without_active_profile_persists_metadata
 printf 'RUN V1 migration policies and rollback\n'
 test_v1_migration_policies_and_rollback
 printf 'RUN V1 migration crash recovery\n'

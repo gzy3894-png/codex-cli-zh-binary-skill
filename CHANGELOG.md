@@ -1,3 +1,13 @@
+## Codex for TUI 2.5.7
+
+Codex for TUI 2.5.7：对话恢复闭环、PTY 关闭竞态修复与配置删除一致性修复。
+
+- 侧栏新增 Codex/Claude 对话 registry：扫描已有 JSONL 历史，持久化真实 UUID，选择对话时复用窗口或新建 PTY 并恢复。
+- 关闭窗口只移除窗口 registry、先解绑 TerminalView 再结束 PTY；对话保留，归档不做永久删除。
+- 配置物化固定为 `common ⊕ managed ⊕ runtime-local`，control 删除的通用字段不再从旧 runtime 复活；无 active profile 的压缩策略同步写入 `index.json`。
+- SQLite epoch `apk-2.5.7`；`versionCode=73`、`versionName=2.5.7`。
+- 发布说明见 `docs/codex-for-tui-2.5.7-release-notes.md`。
+
 ## Codex for TUI 2.5.6
 
 Codex for TUI 2.5.6：配置物化改为 common⊕managed 补丁合并；自动压缩策略全局固定真源。

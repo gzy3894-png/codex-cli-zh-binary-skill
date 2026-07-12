@@ -19,6 +19,8 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.rk.terminal.service.SessionService
 import com.rk.terminal.session.AgentKind
+import com.rk.terminal.session.ConversationManager
+import com.rk.terminal.session.ConversationRecord
 import com.rk.terminal.session.SessionIsolation
 import com.rk.terminal.session.SessionIsolationHooks
 import com.rk.terminal.ui.routes.MainActivityRoutes
@@ -31,10 +33,13 @@ fun TerminalDrawer(
     navController: NavController,
     onAddSession: () -> Unit,
     onSessionSelected: (String) -> Unit,
+    onConversationSelected: (ConversationRecord) -> Unit = {},
+    onConversationArchived: (String) -> Unit = {},
     /** Close a terminal window (kill PTY). Not an agent-session delete. */
     onCloseWindow: (String) -> Unit = {},
 ) {
     val isolationRevision = SessionIsolation.revision.value
+    val conversationRevision = ConversationManager.revision.value
     var renameTarget by remember { mutableStateOf<String?>(null) }
     var renameDraft by remember { mutableStateOf("") }
     // Snapshot keys for LazyColumn — never iterate the live map during remove.
@@ -42,6 +47,16 @@ fun TerminalDrawer(
     val currentId = sessionBinder?.getService()?.currentSession?.value?.first.orEmpty()
     @Suppress("UNUSED_VARIABLE")
     val _isolationTick = isolationRevision
+    @Suppress("UNUSED_VARIABLE")
+    val _conversationTick = conversationRevision
+    val conversations = ConversationManager.visible.toList()
+    val currentConversationId = sessionBinder
+        ?.getService()
+        ?.currentSession
+        ?.value
+        ?.first
+        ?.let { SessionIsolation.record(it)?.agentResumeId }
+        .orEmpty()
 
     ModalDrawerSheet(modifier = Modifier.width(drawerWidth)) {
         Column(
@@ -55,9 +70,8 @@ fun TerminalDrawer(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Side drawer lists terminal windows (PTY tabs), not agent conversation history.
                 Text(
-                    text = "终端窗口",
+                    text = "对话",
                     style = MaterialTheme.typography.titleLarge
                 )
 
@@ -77,20 +91,19 @@ fun TerminalDrawer(
             }
 
             LazyColumn {
-                items(sessions, key = { it }) { sessionId ->
-                    val isSelected = sessionId == currentId
-                    val title = SessionIsolationHooks.titleOf(sessionId)
+                if (conversations.isEmpty()) {
+                    item {
+                        Text(
+                            text = "未发现 Codex/Claude 历史；在终端启动 agent 后会自动导入。",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+                    }
+                }
+                items(conversations, key = { "conversation-${it.id}" }) { conversation ->
                     SelectableCard(
-                        selected = isSelected,
-                        onSelect = { onSessionSelected(sessionId) },
-                        onLongClick = {
-                            renameTarget = sessionId
-                            val prefix = SessionIsolation.record(sessionId)?.agentKind?.prefix
-                                ?: AgentKind.SHELL.prefix
-                            renameDraft = title
-                                .removePrefix("$prefix-")
-                                .ifBlank { title }
-                        },
+                        selected = conversation.id == currentConversationId,
+                        onSelect = { onConversationSelected(conversation) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(8.dp)
@@ -100,22 +113,69 @@ fun TerminalDrawer(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = title,
+                                text = conversation.displayName,
                                 style = MaterialTheme.typography.bodyLarge,
                                 modifier = Modifier.weight(1f)
                             )
-
-                            // Closing = kill this PTY window only (PowerShell multi-window model).
-                            // Capture id; do not close during composition of a removed key.
                             IconButton(
-                                onClick = { onCloseWindow(sessionId) },
+                                onClick = { onConversationArchived(conversation.id) },
                                 modifier = Modifier.size(24.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.Delete,
-                                    contentDescription = "关闭窗口",
+                                    contentDescription = "归档对话",
                                     modifier = Modifier.size(20.dp)
                                 )
+                            }
+                        }
+                    }
+                }
+
+                if (sessions.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "终端窗口",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
+                    items(sessions, key = { "window-$it" }) { sessionId ->
+                        val isSelected = sessionId == currentId
+                        val title = SessionIsolationHooks.titleOf(sessionId)
+                        SelectableCard(
+                            selected = isSelected,
+                            onSelect = { onSessionSelected(sessionId) },
+                            onLongClick = {
+                                renameTarget = sessionId
+                                val prefix = SessionIsolation.record(sessionId)?.agentKind?.prefix
+                                    ?: AgentKind.SHELL.prefix
+                                renameDraft = title
+                                    .removePrefix("$prefix-")
+                                    .ifBlank { title }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = title,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(
+                                    onClick = { onCloseWindow(sessionId) },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Delete,
+                                        contentDescription = "关闭窗口",
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -131,7 +191,7 @@ fun TerminalDrawer(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "标签前缀固定为 ${SessionIsolation.record(targetId)?.agentKind?.prefix ?: "shell"}-（仅显示名，不绑定 agent 会话）",
+                        text = "窗口标签前缀固定为 ${SessionIsolation.record(targetId)?.agentKind?.prefix ?: "shell"}-（关闭窗口不会删除对话）",
                         style = MaterialTheme.typography.bodySmall
                     )
                     OutlinedTextField(

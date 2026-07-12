@@ -25,6 +25,8 @@ import com.termux.terminal.TerminalSessionClient
 
 class SessionService : Service() {
     private val sessions = hashMapOf<String, TerminalSession>()
+    private val lifecycleLock = Any()
+    private val closingSessionIds = mutableSetOf<String>()
     val sessionList = mutableStateMapOf<String, Int>()
     var currentSession = mutableStateOf(Pair("main", com.rk.settings.Settings.working_Mode))
 
@@ -41,16 +43,26 @@ class SessionService : Service() {
             client: TerminalSessionClient,
             workingMode: Int
         ): TerminalSession {
-            sessions[id]?.finishIfRunning()
+            // Restore/click races can request the same window twice. Reuse a
+            // live PTY instead of tearing it down and recreating the native
+            // object under an attached TerminalView.
+            synchronized(lifecycleLock) {
+                sessions[id]?.takeIf { it.isRunning }?.let { return it }
+                sessions.remove(id)
+                sessionList.remove(id)
+            }
             cleanupSessionTempDir(id)
-            return MkSession.createSession(
+            val created = MkSession.createSession(
                 context = this@SessionService,
                 sessionClient = client,
                 sessionId = id,
                 workingMode = workingMode
-            ).also {
-                sessions[id] = it
+            )
+            synchronized(lifecycleLock) {
+                sessions[id] = created
                 sessionList[id] = workingMode
+            }
+            created.also {
                 // Metadata only — does not alter PTY / env setup.
                 SessionIsolationHooks.notifyCreated(id, workingMode)
                 updateNotification()
@@ -110,12 +122,14 @@ class SessionService : Service() {
         updateNotification: Boolean = true,
         clearRegistry: Boolean = false,
     ) {
-        sessions.keys.toList().forEach { id ->
-            sessions[id]?.finishIfRunning()
-            cleanupSessionTempDir(id)
+        val dying = synchronized(lifecycleLock) {
+            val snapshot = sessions.toList()
+            closingSessionIds.addAll(sessions.keys)
+            sessions.clear()
+            sessionList.clear()
+            snapshot
         }
-        sessions.clear()
-        sessionList.clear()
+        currentSession.value = "" to com.rk.settings.Settings.working_Mode
         SessionIsolationHooks.ensureInit(this)
         if (clearRegistry) {
             SessionIsolationHooks.clearAll()
@@ -125,6 +139,16 @@ class SessionService : Service() {
         }
         if (updateNotification) {
             updateNotification()
+        }
+        // Registry truth is already committed before native teardown. A
+        // process-level SIGSEGV cannot be caught by runCatching, so keeping
+        // this phase isolated is what prevents stale windows from returning.
+        dying.forEach { (id, session) ->
+            runCatching { session.finishIfRunning() }
+            cleanupSessionTempDir(id)
+        }
+        synchronized(lifecycleLock) {
+            closingSessionIds.clear()
         }
     }
 
@@ -148,52 +172,49 @@ class SessionService : Service() {
      * @return next current id, or null when no windows left.
      */
     private fun terminateSession(id: String): String? {
-        return runCatching {
-            // Snapshot remaining before mutation so Compose readers never see a
-            // half-removed map mid-click (crash path observed on 2.5.3).
+        val removal = synchronized(lifecycleLock) {
+            if (id in closingSessionIds) return currentSession.value.first
+            if (!sessionList.containsKey(id) && !sessions.containsKey(id)) return null
+            closingSessionIds += id
+
+            // Snapshot remaining before mutation so Compose readers never see
+            // a half-removed map mid-click.
             val remainingBefore = sessionList.keys.filter { it != id }
             val nextCurrent = when {
                 remainingBefore.isEmpty() -> null
                 currentSession.value.first == id -> remainingBefore.last()
-                sessionList.containsKey(currentSession.value.first) &&
-                    currentSession.value.first != id -> currentSession.value.first
+                sessionList.containsKey(currentSession.value.first) -> currentSession.value.first
                 else -> remainingBefore.lastOrNull()
             }
-
-            // Point current away from the dying id before any map/registry drop.
             if (nextCurrent != null) {
                 val mode = sessionList[nextCurrent] ?: com.rk.settings.Settings.working_Mode
                 currentSession.value = nextCurrent to mode
             } else {
-                // No live windows left — keep a stable empty placeholder without
-                // inventing a fake "main" row or calling clearAll().
                 currentSession.value = "" to com.rk.settings.Settings.working_Mode
             }
-
-            // Detach the session object first so later finishIfRunning cannot
-            // re-enter UI against a still-listed id.
             val dying = sessions.remove(id)
             sessionList.remove(id)
-
-            // Persist chrome drop BEFORE native teardown. If finishIfRunning
-            // SIGSEGVs, cold restore must not resurrect this window.
-            // Window chrome only — not agent-session lifecycle / not clearAll.
-            runCatching { SessionIsolationHooks.notifyTerminated(id) }
-            if (nextCurrent != null) {
-                runCatching { SessionIsolationHooks.notifyCurrent(nextCurrent) }
-            }
-            runCatching { updateNotification() }
-
-            // Kill PTY last; never let native teardown block registry truth.
-            runCatching { dying?.finishIfRunning() }
-            cleanupSessionTempDir(id)
-            nextCurrent
-        }.getOrElse {
-            android.util.Log.e("SessionService", "terminateSession failed for $id", it)
-            // Even on failure, try not to leave a deleted id as current.
-            runCatching { SessionIsolationHooks.notifyTerminated(id) }
-            sessionList.keys.lastOrNull()
+            nextCurrent to dying
         }
+
+        val nextCurrent = removal.first
+        val dying = removal.second
+
+        // Persist chrome drop BEFORE native teardown: window drop before
+        // touching native PTY teardown. This
+        // survives a process-level SIGSEGV, which Kotlin cannot catch.
+        runCatching { SessionIsolationHooks.notifyTerminated(id) }
+        if (nextCurrent != null) {
+            runCatching { SessionIsolationHooks.notifyCurrent(nextCurrent) }
+        }
+        runCatching { updateNotification() }
+
+        runCatching { dying?.finishIfRunning() }
+        cleanupSessionTempDir(id)
+        synchronized(lifecycleLock) {
+            closingSessionIds.remove(id)
+        }
+        return nextCurrent
     }
 
     private fun cleanupSessionTempDir(id: String) {

@@ -309,8 +309,11 @@ class TerminalViewModel : ViewModel() {
                     val session = sessionBinder.getSession(sessionId)
                     val terminal = terminalView
                     if (session != null && terminal != null && terminal.currentSession === session) {
-                        // Best-effort: keep view attached but stop client work.
-                        // Actual map/registry removal happens in terminateSession below.
+                        // Detach the Java view before the PTY reader can invoke
+                        // emulator/JNI cleanup. Termux's attachSession(null)
+                        // clears mTermSession and makes updateSize() a no-op;
+                        // the service drops registry/maps before killing the PTY.
+                        terminal.attachSession(null)
                     }
                 }
             }

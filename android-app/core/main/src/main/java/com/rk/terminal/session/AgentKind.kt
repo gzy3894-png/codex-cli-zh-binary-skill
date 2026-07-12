@@ -23,6 +23,11 @@ enum class AgentKind(val prefix: String) {
     }
 
     companion object {
+        private val UUID_PATTERN = Regex(
+            "(?i)[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-" +
+                "[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+        )
+
         fun fromRaw(raw: String?): AgentKind {
             val key = raw?.trim()?.lowercase().orEmpty()
             return entries.firstOrNull { it.prefix == key || it.name.equals(key, ignoreCase = true) }
@@ -61,6 +66,21 @@ enum class AgentKind(val prefix: String) {
                 cmd == "codex" || cmd.startsWith("codex-") -> CODEX
                 else -> null
             }
+        }
+
+        /**
+         * Extract an explicit CLI resume UUID from a submitted command.
+         *
+         * This closes the important path where the user already knows the
+         * UUID: no filesystem timing heuristic is needed for `resume` calls.
+         */
+        fun detectResumeId(line: String): String? {
+            val trimmed = line.trim()
+            if (trimmed.isEmpty()) return null
+            val hasResumeVerb = Regex("(?i)(?:^|\\s)resume(?:\\s|$)").containsMatchIn(trimmed)
+            val hasResumeFlag = Regex("(?i)(?:^|\\s)--resume(?:=|\\s)").containsMatchIn(trimmed)
+            if (!hasResumeVerb && !hasResumeFlag) return null
+            return UUID_PATTERN.find(trimmed)?.value?.lowercase()
         }
     }
 }
