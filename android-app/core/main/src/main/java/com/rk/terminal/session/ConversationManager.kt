@@ -48,7 +48,11 @@ object ConversationManager {
                     item
                 } else {
                     item.copy(
-                        displayName = previous.displayName,
+                        displayName = if (previous.agentKind == item.agentKind) {
+                            previous.displayName
+                        } else {
+                            SessionNaming.buildDisplayName(item.agentKind, previous.displayName)
+                        },
                         archived = previous.archived,
                     )
                 }

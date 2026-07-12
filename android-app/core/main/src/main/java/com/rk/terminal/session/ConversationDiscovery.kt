@@ -111,7 +111,7 @@ class ConversationDiscovery(private val context: Context) {
     }
 
     private fun extractText(value: JSONObject): String? {
-        val directKeys = listOf("text", "prompt", "input", "content")
+        val directKeys = listOf("text", "prompt", "input", "content", "message")
         directKeys.forEach { key ->
             val item = value.opt(key)
             when (item) {
@@ -140,8 +140,8 @@ class ConversationDiscovery(private val context: Context) {
         private const val MAX_FILES = 512
         private const val MAX_RECORDS = 96
         private val UUID_PATTERN = Regex(
-            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-" +
-                "[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}"
+            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-" +
+                "[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
         )
         private val CWD_KEYS = listOf("cwd", "working_directory", "project_dir")
 

@@ -3,15 +3,19 @@ package com.rk.terminal.ui.screens.terminal
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -50,6 +54,11 @@ fun TerminalDrawer(
     @Suppress("UNUSED_VARIABLE")
     val _conversationTick = conversationRevision
     val conversations = ConversationManager.visible.toList()
+    val codexConversations = conversations.filter { it.agentKind == AgentKind.CODEX }
+    val claudeConversations = conversations.filter { it.agentKind == AgentKind.CLAUDE }
+    var codexExpanded by rememberSaveable { mutableStateOf(true) }
+    var claudeExpanded by rememberSaveable { mutableStateOf(true) }
+    var windowsExpanded by rememberSaveable { mutableStateOf(true) }
     val currentConversationId = sessionBinder
         ?.getService()
         ?.currentSession
@@ -100,83 +109,111 @@ fun TerminalDrawer(
                         )
                     }
                 }
-                items(conversations, key = { "conversation-${it.id}" }) { conversation ->
-                    SelectableCard(
-                        selected = conversation.id == currentConversationId,
-                        onSelect = { onConversationSelected(conversation) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = conversation.displayName,
-                                style = MaterialTheme.typography.bodyLarge,
-                                modifier = Modifier.weight(1f)
-                            )
-                            IconButton(
-                                onClick = { onConversationArchived(conversation.id) },
-                                modifier = Modifier.size(24.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Delete,
-                                    contentDescription = "归档对话",
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
+                item(key = "codex-section") {
+                    ConversationSectionHeader(
+                        title = "Codex 对话",
+                        count = codexConversations.size,
+                        expanded = codexExpanded,
+                        onToggle = { codexExpanded = !codexExpanded },
+                    )
+                }
+                if (codexExpanded) {
+                    items(codexConversations, key = { "codex-conversation-${it.id}" }) { conversation ->
+                        ConversationCard(
+                            conversation = conversation,
+                            selected = conversation.id == currentConversationId,
+                            onSelect = { onConversationSelected(conversation) },
+                            onArchive = { onConversationArchived(conversation.id) },
+                        )
+                    }
+                }
+
+                item(key = "claude-section") {
+                    ConversationSectionHeader(
+                        title = "Claude 对话",
+                        count = claudeConversations.size,
+                        expanded = claudeExpanded,
+                        onToggle = { claudeExpanded = !claudeExpanded },
+                    )
+                }
+                if (claudeExpanded) {
+                    items(claudeConversations, key = { "claude-conversation-${it.id}" }) { conversation ->
+                        ConversationCard(
+                            conversation = conversation,
+                            selected = conversation.id == currentConversationId,
+                            onSelect = { onConversationSelected(conversation) },
+                            onArchive = { onConversationArchived(conversation.id) },
+                        )
                     }
                 }
 
                 if (sessions.isNotEmpty()) {
-                    item {
-                        Text(
-                            text = "终端窗口",
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.padding(16.dp)
+                    item(key = "window-section") {
+                        ConversationSectionHeader(
+                            title = "终端窗口",
+                            count = sessions.size,
+                            expanded = windowsExpanded,
+                            onToggle = { windowsExpanded = !windowsExpanded },
                         )
                     }
-                    items(sessions, key = { "window-$it" }) { sessionId ->
-                        val isSelected = sessionId == currentId
-                        val title = SessionIsolationHooks.titleOf(sessionId)
-                        SelectableCard(
-                            selected = isSelected,
-                            onSelect = { onSessionSelected(sessionId) },
-                            onLongClick = {
-                                renameTarget = sessionId
-                                val prefix = SessionIsolation.record(sessionId)?.agentKind?.prefix
-                                    ?: AgentKind.SHELL.prefix
-                                renameDraft = title
-                                    .removePrefix("$prefix-")
-                                    .ifBlank { title }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
+                    if (windowsExpanded) {
+                        items(sessions, key = { "window-$it" }) { sessionId ->
+                            val isSelected = sessionId == currentId
+                            val title = SessionIsolationHooks.titleOf(sessionId)
+                            SelectableCard(
+                                selected = isSelected,
+                                onSelect = { onSessionSelected(sessionId) },
+                                onLongClick = {
+                                    renameTarget = sessionId
+                                    val prefix = SessionIsolation.record(sessionId)?.agentKind?.prefix
+                                        ?: AgentKind.SHELL.prefix
+                                    renameDraft = title
+                                        .removePrefix("$prefix-")
+                                        .ifBlank { title }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(8.dp)
                             ) {
-                                Text(
-                                    text = title,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                IconButton(
-                                    onClick = { onCloseWindow(sessionId) },
-                                    modifier = Modifier.size(24.dp)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.Delete,
-                                        contentDescription = "关闭窗口",
-                                        modifier = Modifier.size(20.dp)
+                                    Text(
+                                        text = title,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        modifier = Modifier.weight(1f)
                                     )
+                                    IconButton(
+                                        onClick = { onCloseWindow(sessionId) },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Delete,
+                                            contentDescription = "关闭窗口",
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
                             }
+                        }
+                    }
+                } else {
+                    item(key = "window-section-empty") {
+                        ConversationSectionHeader(
+                            title = "终端窗口",
+                            count = 0,
+                            expanded = windowsExpanded,
+                            onToggle = { windowsExpanded = !windowsExpanded },
+                        )
+                    }
+                    if (windowsExpanded) {
+                        item(key = "window-empty") {
+                            Text(
+                                text = "暂无终端窗口",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
                         }
                     }
                 }
@@ -214,6 +251,69 @@ fun TerminalDrawer(
                 TextButton(onClick = { renameTarget = null }) { Text("取消") }
             }
         )
+    }
+}
+
+@Composable
+private fun ConversationSectionHeader(
+    title: String,
+    count: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "$title ($count)",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Icon(
+            imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+            contentDescription = if (expanded) "折叠$title" else "展开$title",
+        )
+    }
+}
+
+@Composable
+private fun ConversationCard(
+    conversation: ConversationRecord,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    onArchive: () -> Unit,
+) {
+    SelectableCard(
+        selected = selected,
+        onSelect = onSelect,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = conversation.displayName,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(
+                onClick = onArchive,
+                modifier = Modifier.size(24.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Delete,
+                    contentDescription = "归档对话",
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
     }
 }
 

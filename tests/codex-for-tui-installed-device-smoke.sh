@@ -129,6 +129,60 @@ else
   warn "config.toml not present; skipping config pollution check"
 fi
 
+conversation_registry="$prefix/files/conversation-isolation/registry.json"
+codex_transcript_root="$HOME/.codex/sessions"
+if [ -d "$codex_transcript_root" ]; then
+  need_cmd python3
+  conversation_status=""
+  elapsed=0
+  wait_seconds="${CODEX_TUI_INSTALLED_WAIT_SECONDS:-20}"
+  while [ "$elapsed" -lt "$wait_seconds" ]; do
+    if conversation_status="$(
+      python3 - "$codex_transcript_root" "$conversation_registry" <<'PY'
+import json
+import pathlib
+import re
+import sys
+
+transcript_root = pathlib.Path(sys.argv[1])
+registry_path = pathlib.Path(sys.argv[2])
+uuid_pattern = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-(7[0-9a-fA-F]{3})-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+rollout_ids = {
+    match.group(0).lower()
+    for path in transcript_root.rglob("*.jsonl")
+    if (match := uuid_pattern.search(path.name))
+}
+if not rollout_ids:
+    print("codex_rollout_v7=0 registry_codex=0")
+    raise SystemExit(0)
+if not registry_path.is_file():
+    raise SystemExit(1)
+registry = json.loads(registry_path.read_text(encoding="utf-8"))
+registry_ids = {
+    str(item.get("id", "")).lower()
+    for item in registry.get("conversations", [])
+    if str(item.get("agentKind", "")).lower() == "codex"
+}
+missing = rollout_ids - registry_ids
+if missing:
+    raise SystemExit(1)
+print(f"codex_rollout_v7={len(rollout_ids)} registry_codex={len(registry_ids)}")
+PY
+    )"; then
+      break
+    fi
+    conversation_status=""
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  [ -n "$conversation_status" ] ||
+    fail "Codex UUIDv7 transcripts were not imported into conversation registry within ${wait_seconds}s"
+  printf '%s\n' "$conversation_status"
+fi
+
 rtk_status="$(codex-rtk status 2>&1)" || fail "codex-rtk status failed"
 printf '%s\n' "$rtk_status" | sed -n '1,12p'
 assert_contains "$rtk_status" "rtk_path=" "rtk status"

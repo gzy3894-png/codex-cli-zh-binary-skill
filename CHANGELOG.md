@@ -1,3 +1,14 @@
+## Codex for TUI 2.5.9
+
+Codex for TUI 2.5.9：修复 2.5.8 设备回归发现的 Codex 历史缺失和侧栏不可折叠问题。
+
+- Codex rollout UUIDv7 不再被 UUIDv1–v5 正则过滤；显式 UUIDv7 resume 也可正确绑定窗口。
+- 支持从 Codex `payload.message` 读取首条用户消息作为会话标题。
+- 对话抽屉拆分为可折叠的 Codex 对话、Claude 对话和终端窗口三个分区，并显示各区数量。
+- transcript 根目录仍是共享 `/root/.codex/sessions` 与 `/root/.claude/projects`；不修改用户 provider/中转配置。
+- SQLite epoch `apk-2.5.9`；`versionCode=75`、`versionName=2.5.9`。
+- 发布说明见 `docs/codex-for-tui-2.5.9-release-notes.md`。
+
 ## Codex for TUI 2.5.8
 
 Codex for TUI 2.5.8：2.5.7 对话恢复实现的 CI 编译前滚修复。
