@@ -205,18 +205,23 @@ object MkSession {
             }
 
             val args: Array<String>
-            val shell = if (pendingCommand == null) {
+            val shell = "/system/bin/sh"
+            if (pendingCommand == null) {
                 args = if (workingMode == WorkingMode.ALPINE) {
                     arrayOf("-c", initFile.absolutePath)
                 } else {
                     arrayOf()
                 }
-                "/system/bin/sh"
             } else {
-                // The host launcher enters Alpine/proot first, then init.sh
-                // execs these arguments without reconstructing a shell string.
-                args = arrayOf("sh", "-lc", pendingCommand.command)
-                initFile.absolutePath
+                // App-private files can be readable yet denied as direct exec targets
+                // by Android/SELinux. Always let the system shell read init-host,
+                // while preserving the pending command as positional arguments.
+                args = arrayOf(
+                    initFile.absolutePath,
+                    "sh",
+                    "-lc",
+                    pendingCommand.command,
+                )
             }
 
             return TerminalSession(

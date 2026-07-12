@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.5.10-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.5.10)
+[![Release](https://img.shields.io/badge/release-v2.5.11-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.5.11)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.144.1-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,9 +9,9 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.5.10 启动台、确定性会话绑定与安全关窗
+## 重要：2.5.11 历史恢复热修
 
-2.5.10 每次进程启动只创建一个不可删除的全新启动台，不再恢复旧 PTY。明确的 Agent 命令会创建平级独立工作窗口；Codex 通过窗口 token 和 `SessionStart` hook 绑定 UUID，Claude/Grok 在启动前绑定 UUID，不再猜“全局最新会话”。侧栏提供 Codex、Claude、Grok 历史分区和运行窗口；`codex-agent` 可注册其他 CLI。用户关闭窗口只发 SIGTERM，不再从 UI 路径执行 native 强制 teardown。发布说明见 `docs/codex-for-tui-2.5.10-release-notes.md`。
+2.5.11 修复 2.5.10 历史会话入口直接执行 app 私有脚本时被 Android 拒绝，以及失败窗口 ID 被复用后错误继承旧 UUID 的问题。历史恢复统一经系统 shell 进入 Alpine，新窗口显式清空旧绑定。2.5.10 的固定启动台、平级 Agent 窗口、确定性绑定与安全关窗设计保持不变。发布说明见 `docs/codex-for-tui-2.5.11-release-notes.md`。
 
 ## 重要：2.5.0 会话隔离（基于 2.4.10）
 
@@ -75,7 +75,7 @@ codex-ops resume-hint
 
 内置 WebView 继续作为 Agent Browser，保留后台打开、DOM 读取、点击、输入、JS、截图、多标签、Cookie/WebStorage 持久化和 userscript；遇到验证码/风控/外部 scheme 时会进入明确的用户协作状态，而不是让 Agent 猜。
 
-已经安装 2.0.x～2.5.9 的用户，直接从 Releases 下载并覆盖安装 2.5.10 APK，然后打开 App。首次启动会自动完成二进制、launcher、脚本、配置档 V2、模型目录和 SQLite 运行世代升级；之后进入固定启动台。输入 `codex`、`claude` 或 `grok` 会创建独立工作窗口；历史对话按真实 UUID 恢复，关闭窗口不会删除对话。无需再执行任何 Codex 更新或修复命令。
+已经安装 2.0.x～2.5.10 的用户，直接从 Releases 下载并覆盖安装 2.5.11 APK，然后打开 App。首次启动会自动完成二进制、launcher、脚本、配置档 V2、模型目录和 SQLite 运行世代升级；之后进入固定启动台。输入 `codex`、`claude` 或 `grok` 会创建独立工作窗口；历史对话按真实 UUID 恢复，关闭窗口不会删除对话。无需再执行任何 Codex 更新或修复命令。
 
 升级只使用 APK 内置载荷完成核心迁移。完成后普通启动仍不会远程更新脚本、自动请求第三方 `/models` 或覆盖用户手写配置。`codex 更新` 只用于用户没有更新 APK、明确只想热更新脚本的场景。
 
@@ -85,6 +85,7 @@ codex-ops resume-hint
 - 2.5.7：Codex/Claude 对话历史自动导入与 UUID resume；对话归档与 PTY 幂等关闭；修复 runtime 复活已删除通用配置项。
 - 2.5.8：2.5.7 CI 编译前滚修复；补齐 `SessionBinder.createSession` 返回值，保持对话恢复实现不变。
 - 2.5.9：支持 Codex UUIDv7 历史导入与标题解析；侧栏新增 Codex/Claude/终端窗口分区折叠。
+- 2.5.11：修复历史恢复 `init-host` 执行拒绝与窗口 ID 复用导致的旧 UUID 串绑。
 - 2.5.10：固定启动台与平级 Agent 工作窗口；Codex/Claude/Grok 确定性 UUID 绑定；安全关窗；`codex-agent` 自定义识别。
 - 2.5.5：关窗先落盘 registry 再杀 PTY，修复 2.5.0–2.5.4 老窗口删不掉。
 - 2.5.4：关窗闪退前滚 + 配置共享会话 + 工作区路径统一；侧栏=终端窗口。
@@ -175,7 +176,7 @@ codex-ops resume-hint
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.5.10` |
+| Android App | `2.5.11` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug/Test 包名 | `com.gzy3894.codexfortui.test` |
 | Codex CLI | `0.144.1` 中文版 |

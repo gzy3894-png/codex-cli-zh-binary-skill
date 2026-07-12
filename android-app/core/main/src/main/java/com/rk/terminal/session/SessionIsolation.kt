@@ -137,7 +137,10 @@ object SessionIsolation {
                             agentKind = agentKind,
                             agentId = agentId,
                             role = role,
-                            agentResumeId = agentResumeId.ifBlank { existing.agentResumeId },
+                            // Explicit identity replacement must also clear a stale UUID.
+                            // Session IDs are reusable after a failed/closed PTY; inheriting
+                            // the previous row binds a new window to the wrong conversation.
+                            agentResumeId = agentResumeId,
                             displayName = resolvedName,
                             autoNamed = if (preferredDisplayName != null) autoNamed else existing.autoNamed,
                         ).touch()
