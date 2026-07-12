@@ -10,6 +10,8 @@ data class SessionRecord(
     val id: String,
     val displayName: String,
     val agentKind: AgentKind = AgentKind.CODEX,
+    val agentId: String = agentKind.prefix,
+    val role: WindowRole = WindowRole.SHELL_WORKER,
     val workingMode: Int = 0,
     val agentResumeId: String = "",
     val autoNamed: Boolean = true,
@@ -30,4 +32,16 @@ data class SessionRecord(
         )
 
     fun touch(): SessionRecord = copy(lastActiveAt = System.currentTimeMillis())
+}
+
+/**
+ * Runtime role of a PTY window.
+ *
+ * LAUNCHER is the single, process-local fallback shell. Worker windows are
+ * disposable runtime state and are never restored after process death.
+ */
+enum class WindowRole {
+    LAUNCHER,
+    SHELL_WORKER,
+    AGENT_WORKER,
 }

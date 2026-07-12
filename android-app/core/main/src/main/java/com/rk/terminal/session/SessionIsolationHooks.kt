@@ -23,6 +23,8 @@ object SessionIsolationHooks {
         sessionId: String,
         workingMode: Int,
         agentKind: AgentKind = AgentKind.SHELL,
+        agentId: String = agentKind.prefix,
+        role: WindowRole = WindowRole.SHELL_WORKER,
         preserveExistingIdentity: Boolean = true,
     ) {
         if (!SessionIsolation.enabled) return
@@ -30,6 +32,8 @@ object SessionIsolationHooks {
             sessionId = sessionId,
             workingMode = workingMode,
             agentKind = agentKind,
+            agentId = agentId,
+            role = role,
             preserveExistingIdentity = preserveExistingIdentity,
         )
     }
@@ -57,25 +61,6 @@ object SessionIsolationHooks {
     fun onUserSubmittedLine(sessionId: String, text: String) {
         if (!SessionIsolation.enabled) return
         SessionIsolation.onUserSubmittedLine(sessionId, text)
-    }
-
-    /**
-     * When the live session map is empty, return registry rows to recreate.
-     * See [SessionIsolation.pendingRestoreIfEmpty].
-     */
-    fun pendingRestoreIfEmpty(liveSessionCount: Int): List<SessionRecord> {
-        if (!SessionIsolation.enabled) return emptyList()
-        return SessionIsolation.pendingRestoreIfEmpty(liveSessionCount)
-    }
-
-    /**
-     * Best-effort: inject `codex resume <uuid>` / `claude --resume <uuid>` once after restore.
-     * Does nothing when UUID is missing.
-     */
-    fun maybeInjectResume(sessionId: String, write: (String) -> Unit) {
-        if (!SessionIsolation.enabled) return
-        val cmd = SessionIsolation.takeResumeCommandForInject(sessionId) ?: return
-        write(cmd + "\n")
     }
 
     fun clearAll() {

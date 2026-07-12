@@ -18,6 +18,7 @@ object SessionNaming {
         val base = when (kind) {
             AgentKind.CODEX -> "新会话"
             AgentKind.CLAUDE -> "新会话"
+            AgentKind.GROK -> "新会话"
             AgentKind.SHELL -> "shell"
         }
         return if (ordinal != null && ordinal > 0) {
@@ -46,15 +47,18 @@ object SessionNaming {
      * Build a prefixed display name. If [title] already has a known prefix, keep/normalize it.
      */
     fun buildDisplayName(kind: AgentKind, title: String): String {
+        return buildDisplayName(kind.prefix, title)
+    }
+
+    fun buildDisplayName(agentId: String, title: String): String {
+        val prefix = sanitizeAgentId(agentId)
         val cleaned = sanitizeTitle(title)
-        if (cleaned.isEmpty()) return defaultTitle(kind)
+        if (cleaned.isEmpty()) return "$prefix-新会话"
         val lower = cleaned.lowercase()
-        val stripped = stripPrefix(cleaned)
+        val stripped = stripPrefix(cleaned, prefix)
         // If user typed only a known prefix word, keep default body.
-        if (AgentKind.entries.any { it.prefix == lower }) {
-            return defaultTitle(kind)
-        }
-        return "${kind.prefix}-${sanitizeTitle(stripped).ifBlank { "会话" }}"
+        if (lower == prefix) return "$prefix-新会话"
+        return "$prefix-${sanitizeTitle(stripped).ifBlank { "会话" }}"
     }
 
     fun fromFirstUserMessage(kind: AgentKind, message: String): String {
@@ -64,6 +68,24 @@ object SessionNaming {
             .firstOrNull { it.isNotEmpty() }
             .orEmpty()
         return buildDisplayName(kind, line.ifBlank { "新会话" })
+    }
+
+    fun fromFirstUserMessage(agentId: String, message: String): String {
+        val line = message.lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.isNotEmpty() }
+            .orEmpty()
+        return buildDisplayName(agentId, line.ifBlank { "新会话" })
+    }
+
+    fun stripPrefix(displayName: String, agentId: String): String {
+        val cleaned = displayName.trim()
+        val prefix = "${sanitizeAgentId(agentId)}-"
+        return if (cleaned.lowercase().startsWith(prefix)) {
+            cleaned.substring(prefix.length).trim().ifBlank { "新会话" }
+        } else {
+            cleaned.ifBlank { "新会话" }
+        }
     }
 
     fun sanitizeTitle(raw: String): String {
@@ -89,6 +111,11 @@ object SessionNaming {
             c == '_' ||
             c == '-'
     }
+
+    private fun sanitizeAgentId(raw: String): String =
+        raw.trim().lowercase()
+            .filter { it.isLetterOrDigit() || it == '.' || it == '_' || it == '+' || it == '-' }
+            .ifBlank { "shell" }
 
     /** Lines that should not become the session title (launch cmds / shell noise). */
     fun isNoiseForAutoName(message: String): Boolean {

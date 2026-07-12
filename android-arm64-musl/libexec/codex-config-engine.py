@@ -1195,21 +1195,27 @@ def materialize_runtime(
     previous_runtime = read_toml(runtime_config) if runtime_config.is_file() else None
     profile_directory = profile_dir(paths, str(meta["id"]))
     runtime_local_path = profile_directory / RUNTIME_LOCAL_FILE
+    common_base_path = profile_directory / COMMON_BASE_FILE
+    if not common_base_path.is_file():
+        common_base_path = profile_directory / "legacy-config.toml"
+    previous_common = (
+        read_toml(common_base_path)
+        if common_base_path.is_file()
+        else tomlkit.document()
+    )
     if runtime_local_path.is_file():
         runtime_local = read_toml(runtime_local_path)
     elif previous_runtime is not None:
-        common_base_path = profile_directory / COMMON_BASE_FILE
-        if not common_base_path.is_file():
-            common_base_path = profile_directory / "legacy-config.toml"
-        common_base = (
-            read_toml(common_base_path)
-            if common_base_path.is_file()
-            else tomlkit.document()
-        )
-        runtime_local = extract_runtime_local_overlay(previous_runtime, common_base)
-        write_runtime_local_overlay(profile_directory, runtime_local)
+        runtime_local = extract_runtime_local_overlay(previous_runtime, previous_common)
     else:
         runtime_local = tomlkit.document()
+    # Keys present in the prior common snapshot remain control-owned. If the
+    # user deletes one from control config.toml, a stale runtime-local overlay
+    # must not resurrect it during the next materialization.
+    previous_common_clean = strip_managed_fields(previous_common)
+    for key in list(previous_common_clean):
+        runtime_local.pop(key, None)
+    write_runtime_local_overlay(profile_directory, runtime_local)
     doc = read_toml(paths.config)
     if paths.catalog.is_file():
         write_catalog_with_visibility_policy(paths.catalog, runtime_catalog)

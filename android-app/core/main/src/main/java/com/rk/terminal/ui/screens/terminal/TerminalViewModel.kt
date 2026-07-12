@@ -269,13 +269,6 @@ class TerminalViewModel : ViewModel() {
         service.currentSession.value = Pair(sessionId, mode)
         SessionIsolationHooks.notifyCurrent(sessionId)
 
-        // Optional one-shot resume inject when a UUID was previously bound to this window.
-        // Closing a window never deletes agent CLI history; resume is independent.
-        terminal.post {
-            SessionIsolationHooks.maybeInjectResume(sessionId) { line ->
-                runCatching { session.write(line) }
-            }
-        }
     }
 
     /**

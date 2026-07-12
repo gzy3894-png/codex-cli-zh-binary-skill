@@ -36,6 +36,16 @@ class SessionRegistryStore(context: Context) {
                             id = id,
                             displayName = o.optString("displayName").ifBlank { id },
                             agentKind = AgentKind.fromRaw(o.optString("agentKind")),
+                            agentId = o.optString("agentId")
+                                .trim()
+                                .ifBlank {
+                                    AgentKind.fromRaw(o.optString("agentKind")).prefix
+                                },
+                            role = runCatching {
+                                WindowRole.valueOf(
+                                    o.optString("role", WindowRole.SHELL_WORKER.name)
+                                )
+                            }.getOrDefault(WindowRole.SHELL_WORKER),
                             workingMode = o.optInt("workingMode", 0),
                             agentResumeId = o.optString("agentResumeId", ""),
                             autoNamed = o.optBoolean("autoNamed", true),
@@ -58,6 +68,8 @@ class SessionRegistryStore(context: Context) {
                         .put("id", rec.id)
                         .put("displayName", rec.displayName)
                         .put("agentKind", rec.agentKind.prefix)
+                        .put("agentId", rec.agentId)
+                        .put("role", rec.role.name)
                         .put("workingMode", rec.workingMode)
                         .put("agentResumeId", rec.agentResumeId)
                         .put("autoNamed", rec.autoNamed)
@@ -81,6 +93,6 @@ class SessionRegistryStore(context: Context) {
     companion object {
         private const val DIR_NAME = "session-isolation"
         private const val FILE_NAME = "registry.json"
-        const val VERSION = 1
+        const val VERSION = 2
     }
 }

@@ -6,8 +6,8 @@ SCRIPT_DIR="$ROOT_DIR/android-arm64-musl"
 OUTPUT_DIR="${CODEX_TUI_PAYLOAD_OUTPUT_DIR:-$ROOT_DIR/android-app/core/main/src/main/assets/codex-upgrade}"
 ASSET_ROOT="$(dirname "$OUTPUT_DIR")"
 ARCHIVE="${CODEX_TUI_BINARY_ARCHIVE:-${1:-/root/.cache/codex-zh/codex-0.144.1-zh-aarch64-unknown-linux-musl.tar.gz}}"
-RELEASE="2.5.9"
-VERSION_CODE="75"
+RELEASE="2.5.10"
+VERSION_CODE="76"
 
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/codex-zh-common.sh"

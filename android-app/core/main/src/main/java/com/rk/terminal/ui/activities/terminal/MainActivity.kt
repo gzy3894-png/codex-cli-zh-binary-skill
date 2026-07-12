@@ -34,6 +34,7 @@ import com.rk.libcommons.toast
 import com.rk.terminal.ui.navHosts.MainActivityNavHost
 import com.rk.terminal.ui.routes.MainActivityRoutes
 import com.rk.terminal.ui.screens.terminal.TerminalBrowserSnapshot
+import com.rk.terminal.ui.screens.terminal.AgentWindowCoordinator
 import com.rk.terminal.ui.screens.terminal.TerminalBrowserSessionManager
 import com.rk.terminal.ui.screens.terminal.TerminalMediaPreview
 import com.rk.terminal.ui.screens.terminal.TerminalMediaPreviewKind
@@ -1353,12 +1354,29 @@ class MainActivity : ComponentActivity() {
             ?.currentSession
             ?.value
             ?.first
+        val terminalView = terminalViewModel.terminalView
+        if (
+            sid != null && cleanPrompt.isNotBlank() && terminalView != null &&
+            AgentWindowCoordinator.route(
+                this,
+                terminalView,
+                sid,
+                cleanPrompt,
+                session,
+                false,
+            ) { workerId ->
+                viewModel.sessionBinder?.let {
+                    terminalViewModel.changeSession(this, it, workerId)
+                }
+            }
+        ) {
+            return
+        }
         if (sid != null && cleanPrompt.isNotBlank()) {
             com.rk.terminal.session.SessionIsolationHooks.onUserSubmittedLine(sid, cleanPrompt)
         }
         session.write(cleanPrompt)
 
-        val terminalView = terminalViewModel.terminalView
         if (terminalView?.currentSession !== session) {
             lifecycleScope.launch {
                 delay(TRAY_SEND_ENTER_DELAY_MS)

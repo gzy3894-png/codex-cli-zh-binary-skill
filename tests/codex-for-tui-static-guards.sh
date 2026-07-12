@@ -30,6 +30,7 @@ PANEL_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-panel"
 SESSION_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-session"
 RTK_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-rtk"
 CONTEXT_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-context"
+AGENT_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-agent"
 DOCTOR_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-doctor"
 CLEAN_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-clean"
 OPS_ASSET="$ROOT_DIR/android-app/core/main/src/main/assets/codex-ops"
@@ -165,8 +166,8 @@ test_apk_upgrade_guards() {
   assert_nonempty_file "$MODEL_PTY_SMOKE"
   python3 -m py_compile "$MODEL_PTY_SMOKE" || fail "model PTY smoke Python syntax failed"
 
-  assert_file_contains "$APK_UPGRADER" 'RELEASE="2.5.9"'
-  assert_file_contains "$APK_UPGRADER" 'VERSION_CODE="75"'
+  assert_file_contains "$APK_UPGRADER" 'RELEASE="2.5.10"'
+  assert_file_contains "$APK_UPGRADER" 'VERSION_CODE="76"'
   assert_file_contains "$APK_UPGRADER" 'EXPECTED_ARCHIVE_SHA256="1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61"'
   assert_file_contains "$APK_UPGRADER" 'EXPECTED_BINARY_SHA256="0cde6d6bad02855732ee0ee2867005408d169c46753d414e6a487884d49e0767"'
   assert_file_contains "$APK_UPGRADER" 'LOCK_DIR="$STATE_ROOT/apk-upgrade.lock"'
@@ -184,8 +185,8 @@ test_apk_upgrade_guards() {
   assert_file_contains "$APK_UPGRADER" 'best_effort_refresh'
   assert_file_contains "$APK_UPGRADER" '第三方模型目录联网刷新失败，已保留离线重建结果。'
 
-  assert_file_contains "$APK_PAYLOAD_PREPARE" 'RELEASE="2.5.9"'
-  assert_file_contains "$APK_PAYLOAD_PREPARE" 'VERSION_CODE="75"'
+  assert_file_contains "$APK_PAYLOAD_PREPARE" 'RELEASE="2.5.10"'
+  assert_file_contains "$APK_PAYLOAD_PREPARE" 'VERSION_CODE="76"'
   assert_file_contains "$APK_PAYLOAD_PREPARE" "tar \\"
   assert_file_contains "$APK_PAYLOAD_PREPARE" "--sort=name"
   assert_file_contains "$APK_PAYLOAD_PREPARE" "--mtime='UTC 1970-01-01'"
@@ -261,7 +262,8 @@ test_apk_upgrade_guards() {
   assert_file_contains "$SESSION_ISO/SessionRegistryStore.kt" 'session-isolation'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/App.kt" 'SessionIsolation.init'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/service/SessionService.kt" 'SessionIsolationHooks.notifyCreated'
-  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewLayout.kt" 'pendingRestoreIfEmpty'
+  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewLayout.kt" 'WindowRole.LAUNCHER'
+  assert_file_not_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewLayout.kt" 'pendingRestoreIfEmpty'
   # resume must key off UUID field, not display name
   assert_file_contains "$SESSION_ISO/SessionIsolation.kt" 'agentResumeId'
   assert_file_contains "$SESSION_ISO/AgentKind.kt" 'codex resume'
@@ -271,15 +273,17 @@ test_apk_upgrade_guards() {
   assert_file_contains "$SESSION_ISO/SessionNaming.kt" 'isLetterOrDigit'
   assert_file_contains "$SESSION_ISO/SessionIsolation.kt" 'runCatching'
   # 2.5.4: auto agent prefix from launch lines; no dialog chips
-  assert_file_contains "$SESSION_ISO/AgentKind.kt" 'fun detectLaunch'
+  assert_file_contains "$SESSION_ISO/AgentCatalog.kt" 'fun detectLaunch'
   assert_file_contains "$SESSION_ISO/SessionIsolation.kt" 'fun onUserSubmittedLine'
-  assert_file_contains "$SESSION_ISO/SessionIsolation.kt" 'intentionallyWiped'
   assert_file_contains "$SESSION_ISO/SessionIsolation.kt" 'preserveExistingIdentity'
-  assert_file_contains "$SESSION_ISO/SessionIsolation.kt" 'bindAgentResumeId(sessionId, candidate.id)'
-  assert_file_contains "$SESSION_ISO/SessionIsolation.kt" 'scheduleResumeDiscovery'
+  assert_file_contains "$SESSION_ISO/SessionIsolation.kt" 'expectCodexBinding'
+  assert_file_not_contains "$SESSION_ISO/SessionIsolation.kt" 'scheduleResumeDiscovery'
+  assert_file_not_contains "$SESSION_ISO/ConversationManager.kt" 'latestNewConversation'
+  assert_file_contains "$SESSION_ISO/AgentCatalog.kt" 'EXPLICIT_SESSION_ID'
   assert_file_contains "$SESSION_ISO/ConversationDiscovery.kt" 'sessions'
   assert_file_contains "$SESSION_ISO/ConversationDiscovery.kt" '.claude'
-  # 2.5.9: Codex rollout IDs are UUIDv7; rejecting versions above v5 hides all Codex history.
+  assert_file_contains "$SESSION_ISO/ConversationDiscovery.kt" '.grok'
+  # 2.5.10: Codex rollout IDs are UUIDv7; rejecting versions above v5 hides all Codex history.
   assert_file_not_contains "$SESSION_ISO/ConversationDiscovery.kt" '[1-5][0-9a-fA-F]{3}'
   assert_file_not_contains "$SESSION_ISO/AgentKind.kt" '[1-5][0-9a-f]{3}'
   assert_file_contains "$SESSION_ISO/ConversationDiscovery.kt" '"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"'
@@ -302,7 +306,9 @@ PY
   assert_file_not_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalScreen.kt" 'Agent 前缀'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalBackEnd.kt" 'flushSubmittedLine'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/service/SessionService.kt" 'clearRegistry'
-  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt" 'maybeInjectResume'
+  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/AgentWindowCoordinator.kt" 'object AgentWindowCoordinator'
+  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/AgentWindowCoordinator.kt" '--session-id'
+  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/assets/codex-context" 'CODEX_TUI_WINDOW_TOKEN'
   # 2.5.4: close window = kill PTY only (not agent session list); no stopSelf/finish crash path
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt" 'fun closeWindow'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt" 'Handler(Looper.getMainLooper()).post'
@@ -312,12 +318,14 @@ PY
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalDrawer.kt" '归档对话'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalDrawer.kt" 'Codex 对话'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalDrawer.kt" 'Claude 对话'
+  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalDrawer.kt" 'Grok 对话'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalDrawer.kt" 'rememberSaveable'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalDrawer.kt" 'ConversationSectionHeader'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalDrawer.kt" 'KeyboardArrowUp'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalDrawer.kt" 'KeyboardArrowDown'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalScreen.kt" 'ConversationManager.archive'
-  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalDrawer.kt" '终端窗口'
+  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalDrawer.kt" '运行窗口'
+  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalDrawer.kt" '启动台'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalDrawer.kt" 'keys?.toList()'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/service/SessionService.kt" 'Close a terminal window'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/service/SessionService.kt" 'remainingBefore'
@@ -334,7 +342,7 @@ PY
   if awk '/private fun terminateSession/,/^    private fun |^    override |^}/' "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/service/SessionService.kt" | grep -n 'clearAll\|clearRegistry' >/dev/null 2>&1; then
     fail "SessionService.terminateSession must not clear isolation registry (would wipe windows after crash)"
   fi
-  # 2.5.5: registry/map drop must happen before native finishIfRunning so crash cannot resurrect windows.
+  # 2.5.10: user-close must never enter native force teardown.
   # Extract function body by brace depth (awk start/end ranges are unreliable here).
   TERM_FN="$(
     python3 - "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/service/SessionService.kt" <<'PY'
@@ -358,13 +366,12 @@ PY
   )"
   printf '%s\n' "$TERM_FN" | grep -E 'SessionIsolationHooks\.notifyTerminated|notifyTerminated\(' >/dev/null 2>&1 ||
     fail "SessionService.terminateSession must call notifyTerminated"
-  printf '%s\n' "$TERM_FN" | grep -E 'dying\?\.finishIfRunning\(|finishIfRunning\(\)' >/dev/null 2>&1 ||
-    fail "SessionService.terminateSession must call finishIfRunning"
-  # Compare real call sites only — comments also mention finishIfRunning.
-  nt_line="$(printf '%s\n' "$TERM_FN" | grep -nE 'SessionIsolationHooks\.notifyTerminated|notifyTerminated\(' | head -n1 | cut -d: -f1)"
-  fi_line="$(printf '%s\n' "$TERM_FN" | grep -nE 'dying\?\.finishIfRunning\(|finishIfRunning\(\)' | head -n1 | cut -d: -f1)"
-  [ -n "$nt_line" ] && [ -n "$fi_line" ] || fail "terminateSession must contain notifyTerminated and finishIfRunning"
-  [ "$nt_line" -lt "$fi_line" ] || fail "notifyTerminated must run before finishIfRunning (persist registry drop first)"
+  if printf '%s\n' "$TERM_FN" | grep -E '[.]finishIfRunning[(]|OsConstants[.]SIGKILL' >/dev/null 2>&1; then
+    fail "SessionService.terminateSession must not force native PTY teardown"
+  fi
+  printf '%s\n' "$TERM_FN" | grep -E 'SIGTERM' >/dev/null 2>&1 ||
+    fail "SessionService.terminateSession must request SIGTERM"
+  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/service/SessionService.kt" 'retiringSessions'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/service/SessionService.kt" 'Persist chrome drop BEFORE native teardown'
   # 2.5.4: config profiles share conversation sessions/history under control CODEX_HOME
   assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'Share conversation state across config profiles'
@@ -401,13 +408,13 @@ PY
     'test_bootstrap_dependency_cancel_does_not_install'
 
   assert_file_contains "$APP_BUILD_GRADLE" 'val verifyCodexUpgradePayload by tasks.registering'
-  assert_file_contains "$APP_BUILD_GRADLE" 'release"] != "2.5.9"'
-  assert_file_contains "$APP_BUILD_GRADLE" 'version_code"] != "75"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'release"] != "2.5.10"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'version_code"] != "76"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex APK manifest SHA256 mismatch'
   assert_file_contains "$APP_BUILD_GRADLE" 'AAPT strips that asset suffix; use .tgz'
   assert_file_contains "$APP_BUILD_GRADLE" 'dependsOn(verifyCodexUpgradePayload)'
-  assert_file_contains "$CODEX_COMMON" ': "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.5.9}"'
-  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'epoch="${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.9}"'
+  assert_file_contains "$CODEX_COMMON" ': "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.5.10}"'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'epoch="${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.10}"'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" '配置引擎未返回独立运行目录；未启动 Codex。'
   assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'config-profiles/current'
   assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'if model.get("tool_mode") == "code_mode_only":'
@@ -435,16 +442,16 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 75'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.5.9"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 76'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.5.10"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" '- "release/codex-for-tui-*"'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "75"'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.5.9'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "76"'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.5.10'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -484,7 +491,7 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'sha256sum *.apk > SHA256SUMS'
   assert_file_contains "$BUILD_WORKFLOW" 'android-app/app/build/outputs/apk/release/SHA256SUMS'
   assert_file_contains "$BUILD_WORKFLOW" 'softprops/action-gh-release@v2'
-  assert_file_contains "$BUILD_WORKFLOW" 'body_path: docs/codex-for-tui-2.5.9-release-notes.md'
+  assert_file_contains "$BUILD_WORKFLOW" 'body_path: docs/codex-for-tui-2.5.10-release-notes.md'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Publish verified GitHub release'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Download verified release assets'
   assert_file_order "$BUILD_WORKFLOW" 'name: Promote verified tag to installer channel' 'name: Publish verified GitHub release'
@@ -655,6 +662,17 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$MKSESSION" '"codex-session" to "codex-session"'
   assert_file_contains "$MKSESSION" '"codex-rtk" to "codex-rtk"'
   assert_file_contains "$MKSESSION" '"codex-context" to "codex-context"'
+  assert_file_contains "$MKSESSION" '"codex-agent" to "codex-agent"'
+  assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'codex-agent'
+  sh -n "$AGENT_ASSET" || fail "codex-agent shell syntax failed"
+  tmp_agent_home="$(mktemp -d "${TMPDIR:-/tmp}/codex-agent-guard.XXXXXX")"
+  HOME="$tmp_agent_home" sh "$AGENT_ASSET" add my-agent my-agent-cli "My Agent" >/dev/null
+  HOME="$tmp_agent_home" sh "$AGENT_ASSET" list | grep -F 'my-agent' >/dev/null ||
+    fail "codex-agent add/list failed"
+  if HOME="$tmp_agent_home" sh "$AGENT_ASSET" add codex codex >/dev/null 2>&1; then
+    fail "codex-agent must reject built-in aliases"
+  fi
+  rm -rf "$tmp_agent_home"
   assert_file_contains "$MKSESSION" '"rtk" to "rtk"'
   assert_file_contains "$MKSESSION" 'input.copyTo(output)'
   assert_file_contains "$INIT_ASSET" 'ensure_codex_preview'
@@ -1754,7 +1772,7 @@ EOF
     fail "normal codex did not use an isolated profile runtime"
   printf '%s\n' "$output" | grep -F '/sqlite-builds/' >/dev/null 2>&1 ||
     fail "normal codex did not isolate SQLite by binary build"
-  printf '%s\n' "$output" | grep -F 'apk-2.5.9' >/dev/null 2>&1 ||
+  printf '%s\n' "$output" | grep -F 'apk-2.5.10' >/dev/null 2>&1 ||
     fail "normal codex did not include the APK runtime epoch in SQLite isolation"
   printf '%s\n' "$output" | grep -F "$tmp/prefix/local/bin" >/dev/null 2>&1 || fail "normal codex did not carry app bridge bin in PATH"
   printf '%s\n' "$output" | grep -F 'update-ran' >/dev/null 2>&1 && fail "normal codex invoked update path"

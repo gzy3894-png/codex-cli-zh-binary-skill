@@ -4,7 +4,8 @@ import android.content.Context
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshots.SnapshotStateMap
-import java.util.concurrent.ConcurrentHashMap
+import com.rk.libcommons.child
+import com.rk.libcommons.localDir
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -24,14 +25,8 @@ object SessionIsolation {
     private var store: SessionRegistryStore? = null
     private val records = linkedMapOf<String, SessionRecord>()
     private var currentId: String = ""
-    private var pendingRestore: List<SessionRecord> = emptyList()
-    private var restoreConsumed = false
-    /** Set by clearAll (EXIT); blocks mid-lifecycle allRecords resurrect until process re-init. */
-    private var intentionallyWiped = false
-    private val resumeInjected = ConcurrentHashMap.newKeySet<String>()
-    private val resumeClaims = ConcurrentHashMap.newKeySet<String>()
-    private val resumeDiscoveryExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
-        Thread(runnable, "codex-session-resume-bind").apply { isDaemon = true }
+    private val bindingExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "codex-window-binding").apply { isDaemon = true }
     }
 
     /** Observable titles for Compose (sessionId → displayName). */
@@ -52,19 +47,21 @@ object SessionIsolation {
             val s = SessionRegistryStore(app)
             store = s
             ConversationManager.init(app)
-            val snap = s.load()
+            AgentCatalog.init(app)
+            runCatching {
+                app.localDir().child("session-bind").apply {
+                    if (exists()) deleteRecursively()
+                    mkdirs()
+                }
+            }
+            // PTY windows are process-local runtime state. Restoring old shell
+            // rows after a crash only recreates same-named fresh shells and can
+            // resurrect a broken native PTY forever. Conversation history has
+            // its own durable registry and is intentionally unaffected.
             records.clear()
             displayNames.clear()
-            snap.sessions.forEach {
-                records[it.id] = it
-                displayNames[it.id] = it.displayName
-            }
-            currentId = snap.currentId
-            pendingRestore = snap.sessions.toList()
-            restoreConsumed = false
-            intentionallyWiped = false
-            resumeInjected.clear()
-            resumeClaims.clear()
+            currentId = ""
+            s.save(SessionRegistryStore.Snapshot())
             bumpLocked()
         }
     }
@@ -105,6 +102,8 @@ object SessionIsolation {
         sessionId: String,
         workingMode: Int,
         agentKind: AgentKind = AgentKind.SHELL,
+        agentId: String = agentKind.prefix,
+        role: WindowRole = WindowRole.SHELL_WORKER,
         preferredDisplayName: String? = null,
         agentResumeId: String = "",
         autoNamed: Boolean = true,
@@ -122,10 +121,13 @@ object SessionIsolation {
                         existing.copy(workingMode = workingMode).touch()
                     } else {
                         val resolvedName = preferredDisplayName?.takeIf { it.isNotBlank() }
-                            ?: if (existing.agentKind != agentKind) {
+                            ?: if (existing.agentId != agentId) {
                                 SessionNaming.buildDisplayName(
-                                    agentKind,
-                                    SessionNaming.stripPrefix(existing.displayName),
+                                    agentId,
+                                    SessionNaming.stripPrefix(
+                                        existing.displayName,
+                                        existing.agentId,
+                                    ),
                                 )
                             } else {
                                 existing.displayName
@@ -133,6 +135,8 @@ object SessionIsolation {
                         existing.copy(
                             workingMode = workingMode,
                             agentKind = agentKind,
+                            agentId = agentId,
+                            role = role,
                             agentResumeId = agentResumeId.ifBlank { existing.agentResumeId },
                             displayName = resolvedName,
                             autoNamed = if (preferredDisplayName != null) autoNamed else existing.autoNamed,
@@ -141,11 +145,13 @@ object SessionIsolation {
                 } else {
                     val ordinal = records.size + 1
                     val rawName = preferredDisplayName?.takeIf { it.isNotBlank() }
-                        ?: SessionNaming.defaultTitle(agentKind, ordinal)
+                        ?: "$agentId-新会话$ordinal"
                     SessionRecord(
                         id = sessionId,
-                        displayName = SessionNaming.buildDisplayName(agentKind, rawName),
+                        displayName = SessionNaming.buildDisplayName(agentId, rawName),
                         agentKind = agentKind,
+                        agentId = agentId,
+                        role = role,
                         workingMode = workingMode,
                         agentResumeId = agentResumeId,
                         autoNamed = autoNamed,
@@ -166,8 +172,10 @@ object SessionIsolation {
         }.getOrElse {
             val fallback = SessionRecord(
                 id = sessionId,
-                displayName = "${agentKind.prefix}-$sessionId",
+                displayName = "$agentId-$sessionId",
                 agentKind = agentKind,
+                agentId = agentId,
+                role = role,
                 workingMode = workingMode,
                 agentResumeId = agentResumeId,
                 autoNamed = autoNamed,
@@ -185,7 +193,6 @@ object SessionIsolation {
         synchronized(lock) {
             records.remove(sessionId)
             displayNames.remove(sessionId)
-            resumeInjected.remove(sessionId)
             if (currentId == sessionId) {
                 currentId = records.keys.lastOrNull().orEmpty()
             }
@@ -200,34 +207,9 @@ object SessionIsolation {
         synchronized(lock) {
             records.clear()
             displayNames.clear()
-            resumeInjected.clear()
-            resumeClaims.clear()
             currentId = ""
-            pendingRestore = emptyList()
-            restoreConsumed = true
-            intentionallyWiped = true
             persistLocked()
             bumpLocked()
-        }
-    }
-
-    /**
-     * Sessions to recreate when live map is empty.
-     * Cold snapshot first; if already consumed and not intentionally wiped,
-     * fall back to in-memory records (service restart mid-process).
-     */
-    fun pendingRestoreIfEmpty(liveSessionCount: Int): List<SessionRecord> {
-        if (!enabled) return emptyList()
-        if (liveSessionCount > 0) return emptyList()
-        synchronized(lock) {
-            if (intentionallyWiped) return emptyList()
-            if (!restoreConsumed) {
-                restoreConsumed = true
-                val list = pendingRestore
-                pendingRestore = emptyList()
-                if (list.isNotEmpty()) return list
-            }
-            return records.values.toList()
         }
     }
 
@@ -259,7 +241,7 @@ object SessionIsolation {
             synchronized(lock) {
                 val existing = records[sessionId] ?: return null
                 val next = existing.withDisplayName(
-                    name = SessionNaming.buildDisplayName(existing.agentKind, title),
+                    name = SessionNaming.buildDisplayName(existing.agentId, title),
                     autoNamed = false,
                 )
                 putLocked(next)
@@ -270,15 +252,27 @@ object SessionIsolation {
     }
 
     fun setAgentKind(sessionId: String, kind: AgentKind): SessionRecord? {
+        return setAgentIdentity(sessionId, kind.prefix, kind)
+    }
+
+    fun setAgentIdentity(
+        sessionId: String,
+        agentId: String,
+        kind: AgentKind,
+        role: WindowRole = WindowRole.AGENT_WORKER,
+    ): SessionRecord? {
         if (!enabled) return null
         return runCatching {
             synchronized(lock) {
                 val existing = records[sessionId] ?: return null
-                if (existing.agentKind == kind) return existing
-                val body = SessionNaming.stripPrefix(existing.displayName)
+                if (existing.agentKind == kind && existing.agentId == agentId) return existing
                 val next = existing.copy(
                     agentKind = kind,
-                    displayName = SessionNaming.buildDisplayName(kind, body),
+                    agentId = agentId,
+                    role = role,
+                    agentResumeId = "",
+                    displayName = SessionNaming.buildDisplayName(agentId, "新会话"),
+                    autoNamed = true,
                     lastActiveAt = System.currentTimeMillis(),
                 )
                 putLocked(next)
@@ -298,14 +292,16 @@ object SessionIsolation {
         val line = text.trim()
         if (line.isEmpty()) return false
         return runCatching {
-            val launch = AgentKind.detectLaunch(line)
+            val launch = AgentCatalog.detectLaunch(line)
             if (launch != null) {
-                val changed = setAgentKind(sessionId, launch) != null
+                val changed = setAgentIdentity(
+                    sessionId,
+                    launch.definition.id,
+                    launch.definition.kind,
+                ) != null
                 val explicitResumeId = AgentKind.detectResumeId(line)
                 if (explicitResumeId != null) {
                     bindAgentResumeId(sessionId, explicitResumeId)
-                } else {
-                    scheduleResumeDiscovery(sessionId, launch)
                 }
                 changed
             } else {
@@ -326,7 +322,7 @@ object SessionIsolation {
             synchronized(lock) {
                 val existing = records[sessionId] ?: return false
                 if (!existing.autoNamed) return false
-                val nextName = SessionNaming.fromFirstUserMessage(existing.agentKind, text)
+                val nextName = SessionNaming.fromFirstUserMessage(existing.agentId, text)
                 if (nextName == existing.displayName) {
                     putLocked(existing.copy(autoNamed = false))
                     persistLocked()
@@ -358,62 +354,24 @@ object SessionIsolation {
     }
 
     /**
-     * Bind a newly-created CLI transcript to the window that launched it.
-     *
-     * Codex and Claude create their JSONL file after the shell command is
-     * submitted, so this uses a short bounded retry. Explicit `resume UUID`
-     * commands are handled synchronously in [onUserSubmittedLine].
+     * Consume only the SessionStart event carrying this worker's launch token.
+     * This is deterministic under concurrent Codex launches and never scans for
+     * a globally "latest" transcript.
      */
-    private fun scheduleResumeDiscovery(sessionId: String, kind: AgentKind) {
-        val submittedAt = System.currentTimeMillis()
-        val knownIds = ConversationManager.all().map { it.id }.toSet()
-        listOf(700L, 1_600L, 3_000L).forEach { delay ->
-            resumeDiscoveryExecutor.schedule({
-                val existing = record(sessionId)
-                if (existing == null || existing.agentResumeId.isNotBlank()) return@schedule
-                val candidate = ConversationManager.latestNewConversation(
-                    kind = kind,
-                    knownIds = knownIds,
-                    submittedAt = submittedAt,
-                ) ?: return@schedule
-                if (!resumeClaims.add(candidate.id)) return@schedule
-                if (bindAgentResumeId(sessionId, candidate.id) == null) {
-                    resumeClaims.remove(candidate.id)
+    fun expectCodexBinding(sessionId: String, windowToken: String) {
+        if (!enabled || windowToken.isBlank()) return
+        val context = appContext ?: return
+        val event = context.localDir().child("session-bind").child(windowToken)
+        listOf(1L, 2L, 4L, 8L, 15L, 30L).forEach { delay ->
+            bindingExecutor.schedule({
+                if (record(sessionId)?.agentResumeId?.isNotBlank() != false) return@schedule
+                val resumeId = runCatching { event.readText().trim() }.getOrNull()
+                    ?.takeIf { it.matches(UUID_PATTERN) }
+                    ?: return@schedule
+                if (bindAgentResumeId(sessionId, resumeId) != null) {
+                    runCatching { event.delete() }
                 }
-            }, delay, TimeUnit.MILLISECONDS)
-        }
-    }
-
-    /** Build shell resume command from UUID; null if missing or shell kind. */
-    fun resumeCommand(sessionId: String): String? {
-        if (!enabled) return null
-        synchronized(lock) {
-            val rec = records[sessionId] ?: return null
-            return rec.agentKind.resumeCommand(rec.agentResumeId)
-        }
-    }
-
-    /**
-     * One-shot resume inject so restore does not spam resume on every attach.
-     */
-    fun takeResumeCommandForInject(sessionId: String): String? {
-        val cmd = resumeCommand(sessionId) ?: return null
-        if (!resumeInjected.add(sessionId)) return null
-        return cmd
-    }
-
-    /** @deprecated Prefer [pendingRestoreIfEmpty]; kept for tests/callers. */
-    fun consumePendingRestore(): List<SessionRecord> {
-        return pendingRestoreIfEmpty(0)
-    }
-
-    fun preferredCurrentId(fallback: String): String {
-        synchronized(lock) {
-            return when {
-                currentId.isNotBlank() && records.containsKey(currentId) -> currentId
-                records.isNotEmpty() -> records.keys.last()
-                else -> fallback
-            }
+            }, delay, TimeUnit.SECONDS)
         }
     }
 
@@ -444,6 +402,11 @@ object SessionIsolation {
         revision.value = revision.value + 1
     }
 
+    private val UUID_PATTERN = Regex(
+        "(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-" +
+            "[0-9a-f]{4}-[0-9a-f]{12}$"
+    )
+
     private fun ensureStore() {
         if (store != null) return
         val ctx = appContext ?: return
@@ -459,11 +422,6 @@ object SessionIsolation {
             records.clear()
             displayNames.clear()
             currentId = ""
-            pendingRestore = emptyList()
-            restoreConsumed = false
-            intentionallyWiped = false
-            resumeInjected.clear()
-            resumeClaims.clear()
             ConversationManager.resetForTests()
             revision.value = 0
         }

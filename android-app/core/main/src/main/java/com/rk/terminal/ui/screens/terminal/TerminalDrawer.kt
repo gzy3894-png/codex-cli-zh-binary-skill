@@ -27,6 +27,7 @@ import com.rk.terminal.session.ConversationManager
 import com.rk.terminal.session.ConversationRecord
 import com.rk.terminal.session.SessionIsolation
 import com.rk.terminal.session.SessionIsolationHooks
+import com.rk.terminal.session.WindowRole
 import com.rk.terminal.ui.routes.MainActivityRoutes
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -54,11 +55,19 @@ fun TerminalDrawer(
     @Suppress("UNUSED_VARIABLE")
     val _conversationTick = conversationRevision
     val conversations = ConversationManager.visible.toList()
-    val codexConversations = conversations.filter { it.agentKind == AgentKind.CODEX }
-    val claudeConversations = conversations.filter { it.agentKind == AgentKind.CLAUDE }
-    var codexExpanded by rememberSaveable { mutableStateOf(true) }
-    var claudeExpanded by rememberSaveable { mutableStateOf(true) }
+    val conversationSections = listOf(
+        AgentKind.CODEX to "Codex 对话",
+        AgentKind.CLAUDE to "Claude 对话",
+        AgentKind.GROK to "Grok 对话",
+    ).map { (kind, title) -> Triple(kind, title, conversations.filter { it.agentKind == kind }) }
+    val expandedSections = remember { mutableStateMapOf<AgentKind, Boolean>() }
     var windowsExpanded by rememberSaveable { mutableStateOf(true) }
+    val launcher = sessions.firstOrNull {
+        SessionIsolation.record(it)?.role == WindowRole.LAUNCHER
+    }
+    val workerWindows = sessions.filter {
+        SessionIsolation.record(it)?.role != WindowRole.LAUNCHER
+    }
     val currentConversationId = sessionBinder
         ?.getService()
         ?.currentSession
@@ -103,61 +112,64 @@ fun TerminalDrawer(
                 if (conversations.isEmpty()) {
                     item {
                         Text(
-                            text = "未发现 Codex/Claude 历史；在终端启动 agent 后会自动导入。",
+                            text = "未发现 Codex/Claude/Grok 历史；启动 Agent 后会自动导入。",
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(horizontal = 16.dp)
                         )
                     }
                 }
-                item(key = "codex-section") {
-                    ConversationSectionHeader(
-                        title = "Codex 对话",
-                        count = codexConversations.size,
-                        expanded = codexExpanded,
-                        onToggle = { codexExpanded = !codexExpanded },
-                    )
-                }
-                if (codexExpanded) {
-                    items(codexConversations, key = { "codex-conversation-${it.id}" }) { conversation ->
-                        ConversationCard(
-                            conversation = conversation,
-                            selected = conversation.id == currentConversationId,
-                            onSelect = { onConversationSelected(conversation) },
-                            onArchive = { onConversationArchived(conversation.id) },
+                conversationSections.forEach { (kind, title, sectionConversations) ->
+                    val expanded = expandedSections[kind] ?: true
+                    item(key = "${kind.prefix}-section") {
+                        ConversationSectionHeader(
+                            title = title,
+                            count = sectionConversations.size,
+                            expanded = expanded,
+                            onToggle = { expandedSections[kind] = !expanded },
                         )
+                    }
+                    if (expanded) {
+                        items(
+                            sectionConversations,
+                            key = { "${kind.prefix}-conversation-${it.id}" },
+                        ) { conversation ->
+                            ConversationCard(
+                                conversation = conversation,
+                                selected = conversation.id == currentConversationId,
+                                onSelect = { onConversationSelected(conversation) },
+                                onArchive = { onConversationArchived(conversation.id) },
+                            )
+                        }
                     }
                 }
 
-                item(key = "claude-section") {
-                    ConversationSectionHeader(
-                        title = "Claude 对话",
-                        count = claudeConversations.size,
-                        expanded = claudeExpanded,
-                        onToggle = { claudeExpanded = !claudeExpanded },
-                    )
-                }
-                if (claudeExpanded) {
-                    items(claudeConversations, key = { "claude-conversation-${it.id}" }) { conversation ->
-                        ConversationCard(
-                            conversation = conversation,
-                            selected = conversation.id == currentConversationId,
-                            onSelect = { onConversationSelected(conversation) },
-                            onArchive = { onConversationArchived(conversation.id) },
-                        )
+                launcher?.let { launcherId ->
+                    item(key = "launcher-window") {
+                        SelectableCard(
+                            selected = launcherId == currentId,
+                            onSelect = { onSessionSelected(launcherId) },
+                            modifier = Modifier.fillMaxWidth().padding(8.dp),
+                        ) {
+                            Text(
+                                text = "启动台",
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            )
+                        }
                     }
                 }
 
-                if (sessions.isNotEmpty()) {
+                if (workerWindows.isNotEmpty()) {
                     item(key = "window-section") {
                         ConversationSectionHeader(
-                            title = "终端窗口",
-                            count = sessions.size,
+                            title = "运行窗口",
+                            count = workerWindows.size,
                             expanded = windowsExpanded,
                             onToggle = { windowsExpanded = !windowsExpanded },
                         )
                     }
                     if (windowsExpanded) {
-                        items(sessions, key = { "window-$it" }) { sessionId ->
+                        items(workerWindows, key = { "window-$it" }) { sessionId ->
                             val isSelected = sessionId == currentId
                             val title = SessionIsolationHooks.titleOf(sessionId)
                             SelectableCard(
@@ -165,7 +177,7 @@ fun TerminalDrawer(
                                 onSelect = { onSessionSelected(sessionId) },
                                 onLongClick = {
                                     renameTarget = sessionId
-                                    val prefix = SessionIsolation.record(sessionId)?.agentKind?.prefix
+                                    val prefix = SessionIsolation.record(sessionId)?.agentId
                                         ?: AgentKind.SHELL.prefix
                                     renameDraft = title
                                         .removePrefix("$prefix-")
@@ -201,7 +213,7 @@ fun TerminalDrawer(
                 } else {
                     item(key = "window-section-empty") {
                         ConversationSectionHeader(
-                            title = "终端窗口",
+                            title = "运行窗口",
                             count = 0,
                             expanded = windowsExpanded,
                             onToggle = { windowsExpanded = !windowsExpanded },
@@ -210,7 +222,7 @@ fun TerminalDrawer(
                     if (windowsExpanded) {
                         item(key = "window-empty") {
                             Text(
-                                text = "暂无终端窗口",
+                            text = "暂无运行窗口",
                                 style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                             )
@@ -228,7 +240,7 @@ fun TerminalDrawer(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "窗口标签前缀固定为 ${SessionIsolation.record(targetId)?.agentKind?.prefix ?: "shell"}-（关闭窗口不会删除对话）",
+                        text = "窗口标签前缀固定为 ${SessionIsolation.record(targetId)?.agentId ?: "shell"}-（关闭窗口不会删除对话）",
                         style = MaterialTheme.typography.bodySmall
                     )
                     OutlinedTextField(

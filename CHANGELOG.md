@@ -1,3 +1,17 @@
+## Codex for TUI 2.5.10
+
+Codex for TUI 2.5.10：重构终端窗口生命周期和 Agent 会话绑定，修复并发串绑及删除窗口 native 闪退路径。
+
+- 每次 App 进程启动只创建一个不可删除的全新启动台；旧 PTY 不再冷恢复。
+- 启动台中的明确 Agent 命令创建平级独立窗口，普通自然语言继续由 Shell 处理。
+- Claude/Grok 启动前生成并绑定 UUID；Codex 以窗口 token 消费专属 `SessionStart` 事件，移除全局最新 JSONL 猜测。
+- 侧栏提供 Codex、Claude、Grok 历史分区、固定启动台和运行窗口；历史点击直接执行明确 UUID resume。
+- 用户关窗只请求 SIGTERM，顽固 PTY 留在隐藏 retiring map，不从 UI 路径调用 `finishIfRunning()`。
+- 新增热门 Agent 数据目录和 `codex-agent list/add/remove/show/reset` 自定义注册命令。
+- 修复删除 control 通用配置后被旧 runtime overlay 恢复，以及无 active profile 时压缩策略索引元数据持久化。
+- SQLite epoch `apk-2.5.10`；`versionCode=76`、`versionName=2.5.10`。
+- 发布说明见 `docs/codex-for-tui-2.5.10-release-notes.md`。
+
 ## Codex for TUI 2.5.9
 
 Codex for TUI 2.5.9：修复 2.5.8 设备回归发现的 Codex 历史缺失和侧栏不可折叠问题。

@@ -103,19 +103,6 @@ object ConversationManager {
     fun unarchived(): List<ConversationRecord> =
         synchronized(lock) { records.values.filterNot { it.archived } }
 
-    fun latestNewConversation(
-        kind: AgentKind,
-        knownIds: Set<String>,
-        submittedAt: Long,
-    ): ConversationRecord? {
-        return refreshNow()
-            .asSequence()
-            .filter { it.agentKind == kind }
-            .filter { it.id !in knownIds }
-            .filter { it.lastActivityAt >= submittedAt - DISCOVERY_CLOCK_SKEW_MS }
-            .maxByOrNull { it.lastActivityAt }
-    }
-
     fun resetForTests() {
         synchronized(lock) {
             context = null
@@ -137,5 +124,4 @@ object ConversationManager {
         revision.value += 1
     }
 
-    private const val DISCOVERY_CLOCK_SKEW_MS = 5_000L
 }

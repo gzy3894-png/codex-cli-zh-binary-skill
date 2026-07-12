@@ -230,6 +230,7 @@ class TerminalBackEnd(
     private val lineBuffer = StringBuilder()
     /** Dedup Enter when both onCodePoint(\\r/\\n) and KEYCODE_ENTER fire. */
     private var lastFlushUptimeMs = 0L
+    private var lastFlushRouted = false
 
     private val screenUpdateRunnable = Runnable {
         val burst = synchronized(screenUpdateLock) {
@@ -265,7 +266,15 @@ class TerminalBackEnd(
     override fun onTitleChanged(changedSession: TerminalSession) {}
     override fun onSessionFinished(finishedSession: TerminalSession) {
         cancelPendingScreenUpdate()
-        cleanupSessionTempDir()
+        val sid = sessionId
+        if (sid != null) {
+            activityRef.get()
+                ?.viewModel
+                ?.sessionBinder
+                ?.notifySessionFinished(sid, finishedSession)
+        } else {
+            cleanupSessionTempDir()
+        }
         backendJob.cancel()
     }
 
@@ -367,7 +376,7 @@ class TerminalBackEnd(
         }
 
         if (keyCode == KeyEvent.KEYCODE_ENTER) {
-            flushSubmittedLine()
+            if (flushSubmittedLine(session)) return true
             if (!session.isRunning) {
                 // Shell process exited: close this terminal window (PTY), then
                 // attach another live window if any. Do not finish the Activity
@@ -375,6 +384,15 @@ class TerminalBackEnd(
                 val binder = activity.viewModel.sessionBinder ?: return false
                 val currentId = binder.getService().currentSession.value.first
                 val vm = terminalViewModel()
+                if (
+                    com.rk.terminal.session.SessionIsolation.record(currentId)?.role ==
+                    com.rk.terminal.session.WindowRole.LAUNCHER
+                ) {
+                    // The launcher identity is permanent, its PTY is not. A
+                    // user `exit` gets a fresh fallback shell under the same id.
+                    vm?.changeSession(activity, binder, currentId)
+                    return true
+                }
                 if (vm != null) {
                     vm.closeWindow(activity, binder, currentId)
                 } else {
@@ -412,7 +430,7 @@ class TerminalBackEnd(
         noteUserInput()
         if (ctrlDown) return false
         when (codePoint) {
-            0x0A, 0x0D -> flushSubmittedLine() // \n / \r
+            0x0A, 0x0D -> return flushSubmittedLine(session) // \n / \r
             0x08, 0x7F -> { // BS / DEL
                 if (lineBuffer.isNotEmpty()) lineBuffer.deleteCharAt(lineBuffer.length - 1)
             }
@@ -427,21 +445,32 @@ class TerminalBackEnd(
         return false
     }
 
-    private fun flushSubmittedLine() {
+    private fun flushSubmittedLine(session: TerminalSession): Boolean {
         val now = SystemClock.uptimeMillis()
         if (now - lastFlushUptimeMs < 40L) {
             // Same Enter often delivered as code-point + key event.
             lineBuffer.setLength(0)
-            return
+            return lastFlushRouted
         }
         lastFlushUptimeMs = now
-        if (lineBuffer.isEmpty()) return
+        if (lineBuffer.isEmpty()) {
+            lastFlushRouted = false
+            return false
+        }
         val text = lineBuffer.toString()
         lineBuffer.setLength(0)
         val sid = sessionId
             ?: activityRef.get()?.viewModel?.sessionBinder?.getService()?.currentSession?.value?.first
-            ?: return
-        SessionIsolationHooks.onUserSubmittedLine(sid, text)
+            ?: return false
+        val activity = activityRef.get()
+        val terminal = terminalRef.get()
+        val binder = activity?.viewModel?.sessionBinder
+        lastFlushRouted = activity != null && terminal != null && binder != null &&
+            AgentWindowCoordinator.route(activity, terminal, sid, text, session, true) { workerId ->
+                terminalViewModel()?.changeSession(activity, binder, workerId)
+            }
+        if (!lastFlushRouted) SessionIsolationHooks.onUserSubmittedLine(sid, text)
+        return lastFlushRouted
     }
 
     override fun onEmulatorSet() {

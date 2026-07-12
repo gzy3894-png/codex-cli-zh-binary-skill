@@ -31,6 +31,7 @@ object MkSession {
         "codex-session" to "codex-session",
         "codex-rtk" to "codex-rtk",
         "codex-context" to "codex-context",
+        "codex-agent" to "codex-agent",
         "codex-doctor" to "codex-doctor",
         "codex-clean" to "codex-clean",
         "codex-ops" to "codex-ops",
@@ -212,8 +213,10 @@ object MkSession {
                 }
                 "/system/bin/sh"
             } else {
-                args = pendingCommand.args
-                pendingCommand.shell
+                // The host launcher enters Alpine/proot first, then init.sh
+                // execs these arguments without reconstructing a shell string.
+                args = arrayOf("sh", "-lc", pendingCommand.command)
+                initFile.absolutePath
             }
 
             return TerminalSession(
@@ -234,8 +237,7 @@ object MkSession {
 }
 
 data class PendingCommand(
-    val shell: String,
-    val args: Array<String>,
+    val command: String,
     val workingDir: String?,
     val env: List<String>?
 )

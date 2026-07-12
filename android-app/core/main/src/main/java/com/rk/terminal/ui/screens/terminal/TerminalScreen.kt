@@ -41,6 +41,7 @@ import com.rk.terminal.session.AgentKind
 import com.rk.terminal.session.ConversationManager
 import com.rk.terminal.session.SessionIsolation
 import com.rk.terminal.session.SessionIsolationHooks
+import com.rk.terminal.session.WindowRole
 import com.rk.terminal.ui.screens.settings.SettingsCard
 import com.rk.terminal.ui.screens.settings.WorkingMode
 import com.rk.terminal.ui.screens.terminal.virtualkeys.VirtualKeysListener
@@ -158,15 +159,25 @@ fun TerminalScreen(
                                 val sessionId = SessionIsolationHooks.nextId(
                                     service.sessionList.keys.toList()
                                 )
+                                val resumeCommand = conversation.agentKind
+                                    .resumeCommand(conversation.id)
+                                    ?: return@let
                                 binder.createSession(
                                     sessionId,
                                     TerminalBackEnd(terminal, mainActivity, sessionId),
                                     com.rk.settings.Settings.working_Mode,
+                                    PendingCommand(
+                                        command = resumeCommand,
+                                        workingDir = null,
+                                        env = emptyList(),
+                                    ),
                                 )
                                 SessionIsolation.onSessionCreated(
                                     sessionId = sessionId,
                                     workingMode = com.rk.settings.Settings.working_Mode,
                                     agentKind = conversation.agentKind,
+                                    agentId = conversation.agentKind.prefix,
+                                    role = WindowRole.AGENT_WORKER,
                                     preferredDisplayName = conversation.displayName,
                                     agentResumeId = conversation.id,
                                     preserveExistingIdentity = false,

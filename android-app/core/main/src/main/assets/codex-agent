@@ -1,0 +1,113 @@
+#!/usr/bin/env sh
+set -eu
+
+file="${HOME:-/root}/.codex-for-tui/agents.json"
+
+usage() {
+  printf '%s\n' "用法:"
+  printf '%s\n' "  codex-agent list"
+  printf '%s\n' "  codex-agent add <agent-id> [command] [display-name]"
+  printf '%s\n' "  codex-agent remove <agent-id>"
+  printf '%s\n' "  codex-agent show <agent-id>"
+  printf '%s\n' "  codex-agent reset"
+}
+
+command_name="${1:-list}"
+shift || true
+case "$command_name" in
+  list|add|remove|show|reset) ;;
+  -h|--help|help) usage; exit 0 ;;
+  *) usage >&2; exit 2 ;;
+esac
+
+command -v python3 >/dev/null 2>&1 || {
+  printf '%s\n' "错误: codex-agent 需要 python3" >&2
+  exit 1
+}
+
+python3 - "$file" "$command_name" "$@" <<'PY'
+import json
+import os
+import re
+import sys
+import tempfile
+
+path, action, *args = sys.argv[1:]
+reserved = {
+    "codex", "claude", "grok", "gemini", "opencode", "open", "qwen",
+    "qwen-code", "aider", "goose", "amp", "crush", "cursor-agent",
+    "copilot", "github-copilot", "z",
+}
+valid = re.compile(r"^[a-z0-9][a-z0-9._+-]*$")
+
+def load():
+    try:
+        with open(path, encoding="utf-8") as handle:
+            root = json.load(handle)
+        agents = root.get("agents", [])
+        return {"agents": agents if isinstance(agents, list) else []}
+    except FileNotFoundError:
+        return {"agents": []}
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"错误: 无法读取 {path}: {exc}")
+
+def save(root):
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".agents.", dir=directory, text=True)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(root, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+root = load()
+agents = root["agents"]
+
+if action == "list":
+    if not agents:
+        print("未注册自定义 Agent")
+    for item in agents:
+        print(f"{item.get('id', '')}\t{item.get('displayName', '')}\t{','.join(item.get('commands', []))}")
+elif action == "add":
+    if not args:
+        raise SystemExit("错误: 缺少 agent-id")
+    agent_id = args[0].strip().lower()
+    command = (args[1] if len(args) > 1 else agent_id).strip().lower()
+    display = (args[2] if len(args) > 2 else agent_id).strip()
+    if not valid.fullmatch(agent_id) or not valid.fullmatch(command):
+        raise SystemExit("错误: id/command 只能包含小写字母、数字及 ._+-")
+    if agent_id in reserved or command in reserved:
+        raise SystemExit("错误: 与内置 Agent 名称冲突")
+    for item in agents:
+        if item.get("id") != agent_id and command in item.get("commands", []):
+            raise SystemExit("错误: command 已被其他自定义 Agent 使用")
+    replacement = {"id": agent_id, "displayName": display or agent_id, "commands": [command]}
+    root["agents"] = [item for item in agents if item.get("id") != agent_id] + [replacement]
+    save(root)
+    print(f"已注册: {agent_id} -> {command}")
+elif action == "remove":
+    if not args:
+        raise SystemExit("错误: 缺少 agent-id")
+    agent_id = args[0].strip().lower()
+    root["agents"] = [item for item in agents if item.get("id") != agent_id]
+    save(root)
+    print(f"已移除: {agent_id}")
+elif action == "show":
+    if not args:
+        raise SystemExit("错误: 缺少 agent-id")
+    match = next((item for item in agents if item.get("id") == args[0].strip().lower()), None)
+    if match is None:
+        raise SystemExit("错误: 未找到该自定义 Agent")
+    print(json.dumps(match, ensure_ascii=False, indent=2))
+elif action == "reset":
+    save({"agents": []})
+    print("已清空自定义 Agent")
+PY

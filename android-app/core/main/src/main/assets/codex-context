@@ -602,6 +602,23 @@ run_hook() {
   [ -n "$location" ] || location="unknown"
   [ -n "$session_key" ] || session_key="unknown"
   [ -n "$reason" ] || reason="$event_name:$trigger"
+  if [ "$event_name" = "SessionStart" ] &&
+    [ -n "${CODEX_TUI_WINDOW_TOKEN:-}" ] &&
+    [ "$session_key" != "unknown" ]
+  then
+    case "$CODEX_TUI_WINDOW_TOKEN" in
+      *[!A-Za-z0-9._-]*) ;;
+      *)
+        bind_dir="${PREFIX:-/data/data/com.gzy3894.codexfortui/files}/local/session-bind"
+        mkdir -p "$bind_dir" 2>/dev/null || true
+        if [ -d "$bind_dir" ]; then
+          printf '%s\n' "$session_key" > "$bind_dir/$CODEX_TUI_WINDOW_TOKEN.tmp.$$"
+          mv "$bind_dir/$CODEX_TUI_WINDOW_TOKEN.tmp.$$" \
+            "$bind_dir/$CODEX_TUI_WINDOW_TOKEN" 2>/dev/null || true
+        fi
+        ;;
+    esac
+  fi
   record_event "$event_name" "$trigger" "$location" "$session_key" "$reason"
 }
 

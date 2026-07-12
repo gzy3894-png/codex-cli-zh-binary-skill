@@ -29,7 +29,54 @@ class ConversationDiscovery(private val context: Context) {
             kind = AgentKind.CLAUDE,
             found = found,
         )
+        scanGrok(
+            root = home.child(".grok").child("sessions"),
+            found = found,
+        )
         return found.values.sortedByDescending { it.lastActivityAt }
+    }
+
+    private fun scanGrok(
+        root: File,
+        found: MutableMap<String, ConversationRecord>,
+    ) {
+        if (!root.isDirectory) return
+        root.walkTopDown()
+            .filter { it.isFile && it.name == "summary.json" }
+            .take(MAX_FILES)
+            .forEach { summary ->
+                val id = extractConversationId(summary.parentFile?.name.orEmpty())
+                    ?: return@forEach
+                val rootJson = runCatching { JSONObject(summary.readText()) }.getOrNull()
+                val cwd = rootJson
+                    ?.optJSONObject("info")
+                    ?.optString("cwd")
+                    .orEmpty()
+                val history = summary.parentFile?.child("chat_history.jsonl")
+                val title = history
+                    ?.takeIf { it.isFile }
+                    ?.let { parseMetadata(it, AgentKind.GROK).first }
+                    ?: rootJson?.optString("session_summary")?.takeIf { it.isNotBlank() }
+                val activity = maxOf(
+                    summary.lastModified(),
+                    history?.lastModified() ?: 0L,
+                )
+                val record = ConversationRecord(
+                    id = id,
+                    agentKind = AgentKind.GROK,
+                    displayName = SessionNaming.buildDisplayName(
+                        AgentKind.GROK,
+                        title ?: "历史会话",
+                    ),
+                    workingDirectory = cwd,
+                    sourcePath = summary.absolutePath,
+                    lastActivityAt = activity.coerceAtLeast(0L),
+                )
+                val previous = found[id]
+                if (previous == null || record.lastActivityAt >= previous.lastActivityAt) {
+                    found[id] = record
+                }
+            }
     }
 
     private fun scanTree(

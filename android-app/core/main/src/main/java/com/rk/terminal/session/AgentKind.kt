@@ -10,6 +10,7 @@ package com.rk.terminal.session
 enum class AgentKind(val prefix: String) {
     CODEX("codex"),
     CLAUDE("claude"),
+    GROK("grok"),
     SHELL("shell");
 
     fun resumeCommand(resumeId: String): String? {
@@ -18,6 +19,7 @@ enum class AgentKind(val prefix: String) {
         return when (this) {
             CODEX -> "codex resume $id"
             CLAUDE -> "claude --resume $id"
+            GROK -> "grok --resume $id"
             SHELL -> null
         }
     }
@@ -64,6 +66,7 @@ enum class AgentKind(val prefix: String) {
             return when {
                 cmd == "claude" || cmd.startsWith("claude-") -> CLAUDE
                 cmd == "codex" || cmd.startsWith("codex-") -> CODEX
+                cmd == "grok" || cmd.startsWith("grok-") -> GROK
                 else -> null
             }
         }

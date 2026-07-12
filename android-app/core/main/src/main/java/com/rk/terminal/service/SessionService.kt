@@ -10,6 +10,8 @@ import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.system.Os
+import android.system.OsConstants
 import androidx.annotation.RequiresApi
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -20,11 +22,14 @@ import com.rk.terminal.session.SessionIsolation
 import com.rk.terminal.session.SessionIsolationHooks
 import com.rk.terminal.ui.activities.terminal.MainActivity
 import com.rk.terminal.ui.screens.terminal.MkSession
+import com.rk.terminal.ui.screens.terminal.PendingCommand
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
 
 class SessionService : Service() {
     private val sessions = hashMapOf<String, TerminalSession>()
+    /** Hidden sessions waiting for a graceful process exit after UI removal. */
+    private val retiringSessions = hashMapOf<String, TerminalSession>()
     private val lifecycleLock = Any()
     private val closingSessionIds = mutableSetOf<String>()
     val sessionList = mutableStateMapOf<String, Int>()
@@ -41,7 +46,8 @@ class SessionService : Service() {
         fun createSession(
             id: String,
             client: TerminalSessionClient,
-            workingMode: Int
+            workingMode: Int,
+            pendingCommand: PendingCommand? = null,
         ): TerminalSession {
             // Restore/click races can request the same window twice. Reuse a
             // live PTY instead of tearing it down and recreating the native
@@ -56,7 +62,8 @@ class SessionService : Service() {
                 context = this@SessionService,
                 sessionClient = client,
                 sessionId = id,
-                workingMode = workingMode
+                workingMode = workingMode,
+                pendingCommand = pendingCommand,
             )
             synchronized(lifecycleLock) {
                 sessions[id] = created
@@ -69,7 +76,9 @@ class SessionService : Service() {
             }
         }
 
-        fun getSession(id: String): TerminalSession? = sessions[id]
+        fun getSession(id: String): TerminalSession? = synchronized(lifecycleLock) {
+            sessions[id]?.takeIf { it.isRunning }
+        }
 
         /**
          * Close one terminal window (kill its PTY). Window lifecycle only —
@@ -78,6 +87,10 @@ class SessionService : Service() {
          */
         fun terminateSession(id: String): String? {
             return this@SessionService.terminateSession(id)
+        }
+
+        fun notifySessionFinished(id: String, session: TerminalSession) {
+            this@SessionService.onSessionFinished(id, session)
         }
     }
 
@@ -123,9 +136,11 @@ class SessionService : Service() {
         clearRegistry: Boolean = false,
     ) {
         val dying = synchronized(lifecycleLock) {
-            val snapshot = sessions.toList()
-            closingSessionIds.addAll(sessions.keys)
+            val snapshot = (sessions.toList() + retiringSessions.toList())
+                .distinctBy { it.first }
+            closingSessionIds.addAll(snapshot.map { it.first })
             sessions.clear()
+            retiringSessions.clear()
             sessionList.clear()
             snapshot
         }
@@ -133,10 +148,7 @@ class SessionService : Service() {
         SessionIsolationHooks.ensureInit(this)
         if (clearRegistry) {
             SessionIsolationHooks.clearAll()
-        } else {
-            // Keep registry so cold start can restore tabs after process death.
-            SessionIsolation.saveNow()
-        }
+        } else SessionIsolation.saveNow()
         if (updateNotification) {
             updateNotification()
         }
@@ -161,10 +173,10 @@ class SessionService : Service() {
      * 1) Snapshot remaining + switch [currentSession]
      * 2) Remove from live maps so the drawer updates immediately
      * 3) Persist registry drop ([notifyTerminated]) BEFORE native PTY teardown
-     * 4) Best-effort [finishIfRunning] last
+     * 4) Request graceful process exit; retain stubborn PTYs off-screen
      *
-     * Older builds killed the PTY first; a native crash there left registry rows
-     * intact, so cold restore resurrected "undeletable" side-drawer windows.
+     * Older builds killed the PTY from the close click. Native teardown could
+     * terminate the app process, so user-close no longer calls finishIfRunning.
      *
      * Always leaves [currentSession] pointing at a still-live id when any remain.
      * Avoids [stopSelf] on last-window close while UI may still be bound
@@ -172,6 +184,9 @@ class SessionService : Service() {
      * @return next current id, or null when no windows left.
      */
     private fun terminateSession(id: String): String? {
+        if (SessionIsolation.record(id)?.role == com.rk.terminal.session.WindowRole.LAUNCHER) {
+            return currentSession.value.first
+        }
         val removal = synchronized(lifecycleLock) {
             if (id in closingSessionIds) return currentSession.value.first
             if (!sessionList.containsKey(id) && !sessions.containsKey(id)) return null
@@ -193,6 +208,7 @@ class SessionService : Service() {
                 currentSession.value = "" to com.rk.settings.Settings.working_Mode
             }
             val dying = sessions.remove(id)
+            if (dying != null) retiringSessions[id] = dying
             sessionList.remove(id)
             nextCurrent to dying
         }
@@ -209,12 +225,32 @@ class SessionService : Service() {
         }
         runCatching { updateNotification() }
 
-        runCatching { dying?.finishIfRunning() }
-        cleanupSessionTempDir(id)
-        synchronized(lifecycleLock) {
-            closingSessionIds.remove(id)
+        // Never SIGKILL a user-closed PTY. On affected proot/PTY builds that
+        // tears down the App process before Kotlin can catch anything. SIGTERM
+        // lets the shell/agent unwind; stubborn sessions remain hidden until
+        // process teardown instead of crashing the visible App.
+        if (dying != null && dying.isRunning) {
+            runCatching { Os.kill(dying.pid, OsConstants.SIGTERM) }
+        } else {
+            onSessionFinished(id, dying)
         }
         return nextCurrent
+    }
+
+    private fun onSessionFinished(id: String, finished: TerminalSession?) {
+        synchronized(lifecycleLock) {
+            val active = sessions[id]
+            if (finished == null || active === finished) {
+                sessions.remove(id)
+                sessionList.remove(id)
+            }
+            val retiring = retiringSessions[id]
+            if (finished == null || retiring === finished) {
+                retiringSessions.remove(id)
+            }
+            closingSessionIds.remove(id)
+        }
+        cleanupSessionTempDir(id)
     }
 
     private fun cleanupSessionTempDir(id: String) {

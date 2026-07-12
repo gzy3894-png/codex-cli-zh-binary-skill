@@ -104,7 +104,7 @@ printf 'prefix=%s\n' "$prefix"
 
 for cmd in \
   codex codex-update codex-local codex-browser codex-preview codex-panel \
-  codex-session codex-rtk codex-context codex-doctor codex-clean codex-ops \
+  codex-session codex-rtk codex-context codex-agent codex-doctor codex-clean codex-ops \
   codex-dev-transfer
 do
   need_cmd "$cmd"
