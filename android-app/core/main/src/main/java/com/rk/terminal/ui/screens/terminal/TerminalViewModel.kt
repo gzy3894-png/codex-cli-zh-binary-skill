@@ -284,6 +284,11 @@ class TerminalViewModel : ViewModel() {
      */
     fun closeWindow(context: Context, sessionBinder: SessionService.SessionBinder, sessionId: String) {
         val service = sessionBinder.getService()
+        if (SessionIsolation.record(sessionId)?.role ==
+            com.rk.terminal.session.WindowRole.LAUNCHER
+        ) {
+            return
+        }
         if (!service.sessionList.containsKey(sessionId) && sessionBinder.getSession(sessionId) == null) {
             return
         }

@@ -311,6 +311,7 @@ PY
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/assets/codex-context" 'CODEX_TUI_WINDOW_TOKEN'
   # 2.5.4: close window = kill PTY only (not agent session list); no stopSelf/finish crash path
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt" 'fun closeWindow'
+  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt" 'WindowRole.LAUNCHER'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt" 'Handler(Looper.getMainLooper()).post'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt" 'terminal.attachSession(null)'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalDrawer.kt" 'onCloseWindow'
