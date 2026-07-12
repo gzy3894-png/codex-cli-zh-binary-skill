@@ -6,6 +6,7 @@
 
 - 历史会话恢复不再把 app 私有目录中的 `init-host` 作为直接可执行文件启动；统一由 `/system/bin/sh` 读取脚本，再以位置参数传递恢复命令。
 - 窗口 ID 复用时，显式身份覆盖会同步覆盖空 UUID，不再继承已失败或已关闭窗口的旧 `agentResumeId`。
+- Codex、Claude、Grok 历史分区首次默认折叠；展开状态由常驻页面持有，反复打开侧栏不再全部重置。
 - 保留 2.5.10 的唯一启动台、平级 Agent 窗口、确定性 Codex token 绑定和安全关窗逻辑。
 - Codex、Claude、Grok transcript 仍为只读发现，不删除、不迁移历史内容。
 

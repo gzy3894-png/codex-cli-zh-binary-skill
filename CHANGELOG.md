@@ -4,6 +4,7 @@ Codex for TUI 2.5.11 是 2.5.10 的 P0 前滚热修。
 
 - 修复点击历史会话时直接执行 app 私有目录 `init-host` 被 Android/SELinux 拒绝，导致窗口立即 code 1。
 - 修复失败窗口 ID 被复用后，新窗口在空 UUID 情况下错误继承旧历史 UUID，造成首个新会话串绑。
+- 修复侧栏每次打开都把所有历史分区重置为展开；折叠状态上提到常驻页面并通过参数传给抽屉。
 - 历史 transcript 保持只读；不会删除或迁移既有 Codex、Claude、Grok 会话文件。
 - 新增针对系统 shell 历史启动和 UUID 清空语义的静态门禁。
 - `versionCode=77`、`versionName=2.5.11`、runtime epoch `apk-2.5.11`。

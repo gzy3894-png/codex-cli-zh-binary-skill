@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -64,6 +65,15 @@ fun TerminalScreen(
     val configuration = LocalConfiguration.current
     val drawerWidth = (configuration.screenWidthDp * 0.84).dp
     var showAddDialog by remember { mutableStateOf(false) }
+    var codexHistoryExpanded by rememberSaveable { mutableStateOf(false) }
+    var claudeHistoryExpanded by rememberSaveable { mutableStateOf(false) }
+    var grokHistoryExpanded by rememberSaveable { mutableStateOf(false) }
+    var windowsExpanded by rememberSaveable { mutableStateOf(true) }
+    val expandedConversationKinds = listOfNotNull(
+        AgentKind.CODEX.takeIf { codexHistoryExpanded },
+        AgentKind.CLAUDE.takeIf { claudeHistoryExpanded },
+        AgentKind.GROK.takeIf { grokHistoryExpanded },
+    ).toSet()
 
     val sessionBinder = mainViewModel.sessionBinder
 
@@ -190,6 +200,19 @@ fun TerminalScreen(
                 },
                 onConversationArchived = { id ->
                     ConversationManager.archive(id)
+                },
+                expandedConversationKinds = expandedConversationKinds,
+                windowsExpanded = windowsExpanded,
+                onConversationSectionToggle = { kind ->
+                    when (kind) {
+                        AgentKind.CODEX -> codexHistoryExpanded = !codexHistoryExpanded
+                        AgentKind.CLAUDE -> claudeHistoryExpanded = !claudeHistoryExpanded
+                        AgentKind.GROK -> grokHistoryExpanded = !grokHistoryExpanded
+                        AgentKind.SHELL -> Unit
+                    }
+                },
+                onWindowsSectionToggle = {
+                    windowsExpanded = !windowsExpanded
                 },
                 onCloseWindow = { id ->
                     // Close = kill this terminal PTY window only (not agent session delete).

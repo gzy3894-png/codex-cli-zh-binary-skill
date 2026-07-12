@@ -15,7 +15,6 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -40,6 +39,10 @@ fun TerminalDrawer(
     onSessionSelected: (String) -> Unit,
     onConversationSelected: (ConversationRecord) -> Unit = {},
     onConversationArchived: (String) -> Unit = {},
+    expandedConversationKinds: Set<AgentKind>,
+    windowsExpanded: Boolean,
+    onConversationSectionToggle: (AgentKind) -> Unit,
+    onWindowsSectionToggle: () -> Unit,
     /** Close a terminal window (kill PTY). Not an agent-session delete. */
     onCloseWindow: (String) -> Unit = {},
 ) {
@@ -60,8 +63,6 @@ fun TerminalDrawer(
         AgentKind.CLAUDE to "Claude 对话",
         AgentKind.GROK to "Grok 对话",
     ).map { (kind, title) -> Triple(kind, title, conversations.filter { it.agentKind == kind }) }
-    val expandedSections = remember { mutableStateMapOf<AgentKind, Boolean>() }
-    var windowsExpanded by rememberSaveable { mutableStateOf(true) }
     val launcher = sessions.firstOrNull {
         SessionIsolation.record(it)?.role == WindowRole.LAUNCHER
     }
@@ -119,13 +120,13 @@ fun TerminalDrawer(
                     }
                 }
                 conversationSections.forEach { (kind, title, sectionConversations) ->
-                    val expanded = expandedSections[kind] ?: true
+                    val expanded = kind in expandedConversationKinds
                     item(key = "${kind.prefix}-section") {
                         ConversationSectionHeader(
                             title = title,
                             count = sectionConversations.size,
                             expanded = expanded,
-                            onToggle = { expandedSections[kind] = !expanded },
+                            onToggle = { onConversationSectionToggle(kind) },
                         )
                     }
                     if (expanded) {
@@ -165,7 +166,7 @@ fun TerminalDrawer(
                             title = "运行窗口",
                             count = workerWindows.size,
                             expanded = windowsExpanded,
-                            onToggle = { windowsExpanded = !windowsExpanded },
+                            onToggle = onWindowsSectionToggle,
                         )
                     }
                     if (windowsExpanded) {
@@ -216,7 +217,7 @@ fun TerminalDrawer(
                             title = "运行窗口",
                             count = 0,
                             expanded = windowsExpanded,
-                            onToggle = { windowsExpanded = !windowsExpanded },
+                            onToggle = onWindowsSectionToggle,
                         )
                     }
                     if (windowsExpanded) {
