@@ -1,5 +1,7 @@
 package com.rk.terminal.session
 
+const val LAUNCHER_WINDOW_ID = "main"
+
 /**
  * Persisted metadata for one terminal tab.
  * [id] is the stable in-process session key (e.g. main / main1).

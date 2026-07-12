@@ -22,6 +22,7 @@ import com.rk.terminal.service.SessionService
 import com.rk.terminal.session.SessionIsolation
 import com.rk.terminal.session.SessionIsolationHooks
 import com.rk.terminal.session.WindowRole
+import com.rk.terminal.session.LAUNCHER_WINDOW_ID
 import com.rk.terminal.ui.activities.terminal.MainActivity
 import com.rk.terminal.ui.screens.terminal.virtualkeys.*
 import com.termux.terminal.TerminalColors
@@ -50,7 +51,7 @@ fun TerminalViewLayout(
                     // A process always starts from one fresh, non-deletable launcher.
                     // Historical conversations are resumed lazily when selected;
                     // stale PTY rows are deliberately never reconstructed.
-                    val launcherId = "main"
+                    val launcherId = LAUNCHER_WINDOW_ID
                     val launcherClient = TerminalBackEnd(this, mainActivity, launcherId)
                     if (sessionBinder.getSession(launcherId) == null) {
                         sessionBinder.createSession(

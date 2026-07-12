@@ -256,6 +256,7 @@ test_apk_upgrade_guards() {
   # 2.5.4: session isolation module (standalone; must not require local gradle)
   SESSION_ISO="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/session"
   assert_file_contains "$SESSION_ISO/SessionIsolation.kt" 'object SessionIsolation'
+  assert_file_contains "$SESSION_ISO/SessionRecord.kt" 'const val LAUNCHER_WINDOW_ID = "main"'
   assert_file_contains "$SESSION_ISO/SessionIsolation.kt" 'agentResumeId'
   assert_file_contains "$SESSION_ISO/SessionNaming.kt" 'object SessionNaming'
   assert_file_contains "$SESSION_ISO/AgentKind.kt" 'enum class AgentKind'
@@ -312,6 +313,8 @@ PY
   # 2.5.4: close window = kill PTY only (not agent session list); no stopSelf/finish crash path
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt" 'fun closeWindow'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt" 'WindowRole.LAUNCHER'
+  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt" 'sessionId == LAUNCHER_WINDOW_ID'
+  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/service/SessionService.kt" 'id == LAUNCHER_WINDOW_ID'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt" 'Handler(Looper.getMainLooper()).post'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt" 'terminal.attachSession(null)'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalDrawer.kt" 'onCloseWindow'

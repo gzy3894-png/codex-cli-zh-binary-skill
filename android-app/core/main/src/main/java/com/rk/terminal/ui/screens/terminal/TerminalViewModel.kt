@@ -15,7 +15,10 @@ import androidx.lifecycle.ViewModel
 import com.google.android.material.R
 import com.rk.settings.Settings
 import com.rk.terminal.service.SessionService
+import com.rk.terminal.session.SessionIsolation
 import com.rk.terminal.session.SessionIsolationHooks
+import com.rk.terminal.session.WindowRole
+import com.rk.terminal.session.LAUNCHER_WINDOW_ID
 import com.rk.terminal.ui.activities.terminal.MainActivity
 import com.rk.terminal.ui.screens.terminal.virtualkeys.VirtualKeysListener
 import com.rk.terminal.ui.screens.terminal.virtualkeys.VirtualKeysView
@@ -275,17 +278,18 @@ class TerminalViewModel : ViewModel() {
      * Close one terminal window (kill its PTY). PowerShell multi-window model:
      * the drawer entry is a process/window, not an agent conversation row.
      *
-     * Order matters for crash safety (2.5.5):
+     * Order matters for crash safety:
      * 1) Switch/detach UI off the dying PTY while Compose click is still active.
      * 2) Defer terminateSession to the next main-loop turn so drawer recomposition
      *    does not run against a session mid-teardown.
-     * 3) terminateSession itself persists registry drop BEFORE native finishIfRunning,
-     *    so a PTY crash cannot resurrect legacy 2.5.0–2.5.4 windows on cold restore.
+     * 3) terminateSession persists registry drop and requests SIGTERM; user-close
+     *    never calls native force teardown.
      */
     fun closeWindow(context: Context, sessionBinder: SessionService.SessionBinder, sessionId: String) {
         val service = sessionBinder.getService()
-        if (SessionIsolation.record(sessionId)?.role ==
-            com.rk.terminal.session.WindowRole.LAUNCHER
+        if (
+            sessionId == LAUNCHER_WINDOW_ID ||
+            SessionIsolation.record(sessionId)?.role == WindowRole.LAUNCHER
         ) {
             return
         }
@@ -301,8 +305,8 @@ class TerminalViewModel : ViewModel() {
             if (next != null) {
                 runCatching { changeSession(context, sessionBinder, next) }
             } else {
-                // Last window: drop client callbacks so finishIfRunning cannot
-                // re-enter UI while the native emulator is torn down.
+                // Defensive fallback: launcher should always be in [others],
+                // but detach before removal if lifecycle state is incomplete.
                 runCatching {
                     val session = sessionBinder.getSession(sessionId)
                     val terminal = terminalView
@@ -310,7 +314,7 @@ class TerminalViewModel : ViewModel() {
                         // Detach the Java view before the PTY reader can invoke
                         // emulator/JNI cleanup. Termux's attachSession(null)
                         // clears mTermSession and makes updateSize() a no-op;
-                        // the service drops registry/maps before killing the PTY.
+                        // the service drops registry/maps before requesting exit.
                         terminal.attachSession(null)
                     }
                 }
@@ -318,7 +322,7 @@ class TerminalViewModel : ViewModel() {
         }
 
         // Defer terminate until after the current Compose frame / click handler returns.
-        // terminateSession drops registry before native PTY kill (legacy undelete fix).
+        // terminateSession drops registry before requesting graceful exit.
         Handler(Looper.getMainLooper()).post {
             runCatching {
                 sessionBinder.terminateSession(sessionId)

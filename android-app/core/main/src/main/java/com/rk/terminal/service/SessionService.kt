@@ -20,6 +20,7 @@ import com.rk.resources.drawables
 import com.rk.resources.strings
 import com.rk.terminal.session.SessionIsolation
 import com.rk.terminal.session.SessionIsolationHooks
+import com.rk.terminal.session.LAUNCHER_WINDOW_ID
 import com.rk.terminal.ui.activities.terminal.MainActivity
 import com.rk.terminal.ui.screens.terminal.MkSession
 import com.rk.terminal.ui.screens.terminal.PendingCommand
@@ -184,7 +185,10 @@ class SessionService : Service() {
      * @return next current id, or null when no windows left.
      */
     private fun terminateSession(id: String): String? {
-        if (SessionIsolation.record(id)?.role == com.rk.terminal.session.WindowRole.LAUNCHER) {
+        if (
+            id == LAUNCHER_WINDOW_ID ||
+            SessionIsolation.record(id)?.role == com.rk.terminal.session.WindowRole.LAUNCHER
+        ) {
             return currentSession.value.first
         }
         val removal = synchronized(lifecycleLock) {
