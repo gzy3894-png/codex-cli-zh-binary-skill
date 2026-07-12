@@ -1398,15 +1398,16 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        terminalView.requestFocus()
+        val attachedTerminal = terminalView ?: return
+        attachedTerminal.requestFocus()
         // Keep the submit key separate from the programmatic text write. Codex
         // may classify a same-tick text+enter burst as pasted text and leave it
         // in the composer; a short delay makes this follow the real user key
         // path while still feeling immediate in the tray UI.
-        terminalView.postDelayed({
-            if (SessionTargetResolver.isAttached(terminalView, target)) {
-                terminalView.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
-                terminalView.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+        attachedTerminal.postDelayed({
+            if (SessionTargetResolver.isAttached(attachedTerminal, target)) {
+                attachedTerminal.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
+                attachedTerminal.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
             } else {
                 target.session.write("\r")
             }

@@ -269,6 +269,8 @@ object SessionIsolation {
             synchronized(lock) {
                 val existing = records[sessionId] ?: return null
                 if (existing.agentKind == kind && existing.agentId == agentId) return existing
+                if (existing.role == WindowRole.LAUNCHER) return null
+                if (existing.role == WindowRole.AGENT_WORKER) return null
                 val next = existing.copy(
                     agentKind = kind,
                     agentId = agentId,
@@ -287,7 +289,7 @@ object SessionIsolation {
 
     /**
      * Observe a user-submitted shell line:
-     * 1) If it launches claude/codex, update agent prefix (even mid-session).
+     * 1) If it launches an agent from an unbound shell worker, bind that window.
      * 2) Else if still autoNamed and not noise, name from first message.
      */
     fun onUserSubmittedLine(sessionId: String, text: String): Boolean {
@@ -297,16 +299,23 @@ object SessionIsolation {
         return runCatching {
             val launch = AgentCatalog.detectLaunch(line)
             if (launch != null) {
-                val changed = setAgentIdentity(
+                val existing = record(sessionId)
+                if (
+                    existing?.role == WindowRole.LAUNCHER ||
+                    existing?.role == WindowRole.AGENT_WORKER
+                ) {
+                    return@runCatching false
+                }
+                val bound = setAgentIdentity(
                     sessionId,
                     launch.definition.id,
                     launch.definition.kind,
-                ) != null
+                )
                 val explicitResumeId = AgentKind.detectResumeId(line)
-                if (explicitResumeId != null) {
+                if (bound != null && explicitResumeId != null) {
                     bindAgentResumeId(sessionId, explicitResumeId)
                 }
-                changed
+                bound != null
             } else {
                 applyFirstUserMessage(sessionId, line)
             }

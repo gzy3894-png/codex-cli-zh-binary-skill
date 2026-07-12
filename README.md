@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.5.13-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.5.13)
+[![Release](https://img.shields.io/badge/release-v2.5.14-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.5.14)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.144.1-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,9 +9,9 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.5.13 启动台、历史与默认模型热修
+## 重要：2.5.14 启动台、历史与默认模型热修
 
-2.5.13 是 2.5.12 后的正式前滚热修：启动台只作为永久兜底窗口，Activity/TerminalView 重建会重新附着仍存活的工作窗口，不再把文件托盘、虚拟键或文本发送抢回启动台；覆盖安装会继续迁移 `/root` 与旧 runtime 中的 Codex UUIDv7 历史到当前 `/root/workspace`，并把旧 UUID 纳入侧栏 registry；Default 模式下最近选择的 model/reasoning 会通过轻量 hook 作为下一次会话默认值持久化，普通 runtime 退出不再反向覆盖 profile；配置删除的通用字段不会被旧 runtime 复活。发布说明见 `docs/codex-for-tui-2.5.13-release-notes.md`。
+2.5.14 是 2.5.13 CI 失败后的正式前滚热修：保留启动台只作为永久兜底窗口、Activity/TerminalView 重建重新附着仍存活工作窗口、文件托盘/虚拟键/文本发送只进入显式当前 worker、覆盖安装继续迁移 `/root` 与旧 runtime 中的 Codex UUIDv7 历史到当前 `/root/workspace`、Default 模式 model/reasoning 作为下一次会话默认值持久化，以及通用配置删除不被旧 runtime 复活；同时修复 2.5.13 的 Kotlin nullable 编译失败，并阻止已绑定 Agent worker 因同一 PTY 内再次输入 `claude`/`grok`/`codex` 而被改名串绑。发布说明见 `docs/codex-for-tui-2.5.14-release-notes.md`。
 
 ## 重要：2.5.0 会话隔离（基于 2.4.10）
 
@@ -75,13 +75,14 @@ codex-ops resume-hint
 
 内置 WebView 继续作为 Agent Browser，保留后台打开、DOM 读取、点击、输入、JS、截图、多标签、Cookie/WebStorage 持久化和 userscript；遇到验证码/风控/外部 scheme 时会进入明确的用户协作状态，而不是让 Agent 猜。
 
-已经安装 2.0.x～2.5.12 的用户，直接从 Releases 下载并覆盖安装 2.5.13 APK，然后打开 App。首次启动会自动完成二进制、launcher、脚本、配置档 V2、模型目录、旧 Codex rollout/SQLite 工作区迁移和运行世代升级；之后进入固定启动台。输入 `codex`、`claude` 或 `grok` 会创建独立工作窗口；历史对话按真实 UUID 恢复，关闭窗口不会删除对话。无需再执行任何 Codex 更新或修复命令。
+已经安装 2.0.x～2.5.13 的用户，直接从 Releases 下载并覆盖安装 2.5.14 APK，然后打开 App。首次启动会自动完成二进制、launcher、脚本、配置档 V2、模型目录、旧 Codex rollout/SQLite 工作区迁移和运行世代升级；之后进入固定启动台。输入 `codex`、`claude` 或 `grok` 会创建独立工作窗口；历史对话按真实 UUID 恢复，关闭窗口不会删除对话。无需再执行任何 Codex 更新或修复命令。
 
 升级只使用 APK 内置载荷完成核心迁移。完成后普通启动仍不会远程更新脚本、自动请求第三方 `/models` 或覆盖用户手写配置。`codex 更新` 只用于用户没有更新 APK、明确只想热更新脚本的场景。
 
 ## 2.0 新功能
 
-- 2.5.13：修复启动台抢占、文件托盘目标串绑、Codex UUIDv7 registry 补扫、Default 模型/reasoning 持久化和旧 runtime 通用配置复活。
+- 2.5.14：修复 2.5.13 CI Kotlin nullable 编译失败，并阻止已绑定 Agent worker 二次改身份导致 Grok/Claude 标题与内容串绑；保留启动台抢占、文件托盘目标串绑、Codex UUIDv7 registry 补扫、Default 模型/reasoning 持久化和旧 runtime 通用配置复活修复。
+- 2.5.13：启动台、历史迁移与默认模型热修；该 tag 已推送但正式 APK CI 编译失败，实际安装请使用 2.5.14 或更新版本。
 - 2.5.12：修复 PendingCommand Alpine shell 链；事务性迁移旧工作区与孤立 Codex rollout；`resume --all` 显示全部历史；Activity 重建回固定启动台。
 - 2.5.11：修复历史恢复 `init-host` 执行拒绝与窗口 ID 复用导致的旧 UUID 串绑。
 - 2.5.10：固定启动台与平级 Agent 工作窗口；Codex/Claude/Grok 确定性 UUID 绑定；安全关窗；`codex-agent` 自定义识别。
@@ -178,7 +179,7 @@ codex-ops resume-hint
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.5.13` |
+| Android App | `2.5.14` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug/Test 包名 | `com.gzy3894.codexfortui.test` |
 | Codex CLI | `0.144.1` 中文版 |

@@ -1,6 +1,17 @@
+## Codex for TUI 2.5.14
+
+Codex for TUI 2.5.14 是 2.5.13 CI 编译失败后的正式前滚热修。
+
+- 修复 `MainActivity` 文件托盘/文本托盘提交路径中的 Kotlin nullable 编译错误，避免 2.5.13 tag run 在正式 APK 构建阶段失败。
+- 保留 2.5.13 的启动台兜底、Activity/TerminalView 重建重新附着 live worker、显式发送目标、Codex UUIDv7 registry 补扫、Default model/reasoning 持久化和旧 runtime 通用配置删除修复。
+- 已绑定的 Agent worker 不再因同一 PTY 内再次输入 `claude` / `grok` / `codex` 而改名或改 agentId，避免 Grok 内容被归档成 Claude 名称。
+- 重新同步 APK payload、workflow gate、README、release notes、static guard 和 installed smoke 到 `2.5.14`。
+- `versionCode=80`、`versionName=2.5.14`、runtime epoch `apk-2.5.14`。
+- 发布说明见 `docs/codex-for-tui-2.5.14-release-notes.md`。
+
 ## Codex for TUI 2.5.13
 
-Codex for TUI 2.5.13 是 2.5.12 后的 P0 启动台、历史迁移与默认模型前滚热修。
+Codex for TUI 2.5.13 是 2.5.12 后的 P0 启动台、历史迁移与默认模型前滚热修；该 tag 已推送但正式 APK CI 编译失败，安装版本以前滚 2.5.14 为准。
 
 - 启动台保持永久兜底窗口；Activity/TerminalView 重建会重新附着仍存活的工作窗口，不再把目标强制抢回启动台。
 - 文件托盘、文本托盘与虚拟键统一通过 `SessionService` 解析显式 live target，避免发送到启动台或串到报错窗口。
