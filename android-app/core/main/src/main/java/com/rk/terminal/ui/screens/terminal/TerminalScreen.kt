@@ -170,7 +170,10 @@ fun TerminalScreen(
                                     service.sessionList.keys.toList()
                                 )
                                 val resumeCommand = conversation.agentKind
-                                    .resumeCommand(conversation.id)
+                                    .resumeCommand(
+                                        conversation.id,
+                                        com.rk.terminal.session.DEFAULT_AGENT_WORKSPACE,
+                                    )
                                     ?: return@let
                                 binder.createSession(
                                     sessionId,

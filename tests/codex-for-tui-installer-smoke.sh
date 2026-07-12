@@ -345,6 +345,7 @@ test_generated_launcher_has_no_preflight_or_profile_refresh() {
   assert_file_not_contains "$tmp/bin/codex" "codex-local-resume"
   assert_file_not_contains "$tmp/bin/codex" "refresh"
   assert_file_not_contains "$tmp/bin/codex" "AGENTS.md"
+  assert_file_contains "$tmp/bin/codex" 'set -- resume --all "$@"'
   rm -rf "$tmp"
 }
 

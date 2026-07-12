@@ -15,6 +15,9 @@ APP_MANIFEST="$ROOT_DIR/android-app/app/src/main/AndroidManifest.xml"
 APK_UPGRADER="$SCRIPT_DIR/codex-apk-upgrade.sh"
 APK_PAYLOAD_PREPARE="$ROOT_DIR/android-app/prepare-codex-apk-payload.sh"
 APK_UPGRADE_SMOKE="$ROOT_DIR/tests/codex-for-tui-apk-upgrade-smoke.sh"
+WORKSPACE_MIGRATION_SMOKE="$ROOT_DIR/tests/codex-for-tui-workspace-migration-smoke.sh"
+WORKSPACE_MIGRATOR="$SCRIPT_DIR/libexec/codex-workspace-migrate.py"
+WORKSPACE_HISTORY_AUDITOR="$ROOT_DIR/tests/codex-for-tui-workspace-history-audit.py"
 APK_PAYLOAD_INSPECT="$ROOT_DIR/tests/codex-for-tui-apk-payload-inspect.sh"
 MODEL_PTY_SMOKE="$ROOT_DIR/tests/codex-for-tui-model-pty-smoke.py"
 UPDATE_MANAGER="$ROOT_DIR/android-app/core/main/src/main/java/com/rk/update/UpdateManager.kt"
@@ -166,8 +169,8 @@ test_apk_upgrade_guards() {
   assert_nonempty_file "$MODEL_PTY_SMOKE"
   python3 -m py_compile "$MODEL_PTY_SMOKE" || fail "model PTY smoke Python syntax failed"
 
-  assert_file_contains "$APK_UPGRADER" 'RELEASE="2.5.11"'
-  assert_file_contains "$APK_UPGRADER" 'VERSION_CODE="77"'
+  assert_file_contains "$APK_UPGRADER" 'RELEASE="2.5.12"'
+  assert_file_contains "$APK_UPGRADER" 'VERSION_CODE="78"'
   assert_file_contains "$APK_UPGRADER" 'EXPECTED_ARCHIVE_SHA256="1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61"'
   assert_file_contains "$APK_UPGRADER" 'EXPECTED_BINARY_SHA256="0cde6d6bad02855732ee0ee2867005408d169c46753d414e6a487884d49e0767"'
   assert_file_contains "$APK_UPGRADER" 'LOCK_DIR="$STATE_ROOT/apk-upgrade.lock"'
@@ -185,8 +188,8 @@ test_apk_upgrade_guards() {
   assert_file_contains "$APK_UPGRADER" 'best_effort_refresh'
   assert_file_contains "$APK_UPGRADER" '第三方模型目录联网刷新失败，已保留离线重建结果。'
 
-  assert_file_contains "$APK_PAYLOAD_PREPARE" 'RELEASE="2.5.11"'
-  assert_file_contains "$APK_PAYLOAD_PREPARE" 'VERSION_CODE="77"'
+  assert_file_contains "$APK_PAYLOAD_PREPARE" 'RELEASE="2.5.12"'
+  assert_file_contains "$APK_PAYLOAD_PREPARE" 'VERSION_CODE="78"'
   assert_file_contains "$APK_PAYLOAD_PREPARE" "tar \\"
   assert_file_contains "$APK_PAYLOAD_PREPARE" "--sort=name"
   assert_file_contains "$APK_PAYLOAD_PREPARE" "--mtime='UTC 1970-01-01'"
@@ -315,6 +318,33 @@ PY
   # Android can deny direct exec of app-private scripts; pending resume goes through system sh.
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MkSession.kt" 'val shell = "/system/bin/sh"'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MkSession.kt" 'initFile.absolutePath,'
+  assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MkSession.kt" '"/bin/sh",'
+  assert_file_not_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/MkSession.kt" '                    "sh",'
+  assert_file_contains "$SESSION_ISO/AgentKind.kt" 'codex resume --all -C'
+  assert_file_contains "$TERMINAL_VIEW_LAYOUT" 'val activeId = launcherId'
+  assert_file_not_contains "$TERMINAL_VIEW_LAYOUT" 'val activeId = service.currentSession.value.first'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'set -- resume --all "$@"'
+  assert_nonempty_file "$WORKSPACE_MIGRATOR"
+  assert_nonempty_file "$WORKSPACE_MIGRATION_SMOKE"
+  assert_nonempty_file "$WORKSPACE_HISTORY_AUDITOR"
+  python3 -m py_compile "$WORKSPACE_MIGRATOR" ||
+    fail "workspace migrator Python syntax failed"
+  python3 -m py_compile "$WORKSPACE_HISTORY_AUDITOR" ||
+    fail "workspace history auditor Python syntax failed"
+  assert_file_contains "$WORKSPACE_MIGRATOR" 'tail_sha256'
+  assert_file_contains "$WORKSPACE_MIGRATOR" 'payload.get("id") or payload.get("session_id")'
+  assert_file_contains "$WORKSPACE_MIGRATOR" 'discover_legacy_imports'
+  assert_file_contains "$WORKSPACE_MIGRATOR" 'after-imports'
+  assert_file_contains "$WORKSPACE_MIGRATOR" 'os.utime(path, ns=(atime_ns, mtime_ns))'
+  assert_file_contains "$WORKSPACE_MIGRATOR" 'connection.execute("BEGIN IMMEDIATE")'
+  assert_file_contains "$WORKSPACE_MIGRATOR" 'recover_incomplete(home)'
+  assert_file_contains "$APK_UPGRADER" '--import-legacy-runtimes'
+  assert_file_contains "$APK_UPGRADER" 'after-workspace-migration'
+  assert_file_contains "$APK_UPGRADER" 'rollback_workspace'
+  assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'local/alpine/root'
+  assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'CODEX_TUI_TRANSCRIPT_BASELINE'
+  assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'workspace history audit failed'
+  assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-workspace-migration-smoke.sh'
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/assets/codex-context" 'CODEX_TUI_WINDOW_TOKEN'
   # 2.5.4: close window = kill PTY only (not agent session list); no stopSelf/finish crash path
   assert_file_contains "$ROOT_DIR/android-app/core/main/src/main/java/com/rk/terminal/ui/screens/terminal/TerminalViewModel.kt" 'fun closeWindow'
@@ -423,13 +453,13 @@ PY
     'test_bootstrap_dependency_cancel_does_not_install'
 
   assert_file_contains "$APP_BUILD_GRADLE" 'val verifyCodexUpgradePayload by tasks.registering'
-  assert_file_contains "$APP_BUILD_GRADLE" 'release"] != "2.5.11"'
-  assert_file_contains "$APP_BUILD_GRADLE" 'version_code"] != "77"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'release"] != "2.5.12"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'version_code"] != "78"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex APK manifest SHA256 mismatch'
   assert_file_contains "$APP_BUILD_GRADLE" 'AAPT strips that asset suffix; use .tgz'
   assert_file_contains "$APP_BUILD_GRADLE" 'dependsOn(verifyCodexUpgradePayload)'
-  assert_file_contains "$CODEX_COMMON" ': "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.5.11}"'
-  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'epoch="${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.11}"'
+  assert_file_contains "$CODEX_COMMON" ': "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.5.12}"'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'epoch="${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.12}"'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" '配置引擎未返回独立运行目录；未启动 Codex。'
   assert_file_not_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'config-profiles/current'
   assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'if model.get("tool_mode") == "code_mode_only":'
@@ -457,16 +487,16 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 77'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.5.11"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 78'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.5.12"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" '- "release/codex-for-tui-*"'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "77"'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.5.11'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "78"'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.5.12'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -506,7 +536,7 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'sha256sum *.apk > SHA256SUMS'
   assert_file_contains "$BUILD_WORKFLOW" 'android-app/app/build/outputs/apk/release/SHA256SUMS'
   assert_file_contains "$BUILD_WORKFLOW" 'softprops/action-gh-release@v2'
-  assert_file_contains "$BUILD_WORKFLOW" 'body_path: docs/codex-for-tui-2.5.11-release-notes.md'
+  assert_file_contains "$BUILD_WORKFLOW" 'body_path: docs/codex-for-tui-2.5.12-release-notes.md'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Publish verified GitHub release'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Download verified release assets'
   assert_file_order "$BUILD_WORKFLOW" 'name: Promote verified tag to installer channel' 'name: Publish verified GitHub release'
@@ -1787,7 +1817,7 @@ EOF
     fail "normal codex did not use an isolated profile runtime"
   printf '%s\n' "$output" | grep -F '/sqlite-builds/' >/dev/null 2>&1 ||
     fail "normal codex did not isolate SQLite by binary build"
-  printf '%s\n' "$output" | grep -F 'apk-2.5.11' >/dev/null 2>&1 ||
+  printf '%s\n' "$output" | grep -F 'apk-2.5.12' >/dev/null 2>&1 ||
     fail "normal codex did not include the APK runtime epoch in SQLite isolation"
   printf '%s\n' "$output" | grep -F "$tmp/prefix/local/bin" >/dev/null 2>&1 || fail "normal codex did not carry app bridge bin in PATH"
   printf '%s\n' "$output" | grep -F 'update-ran' >/dev/null 2>&1 && fail "normal codex invoked update path"

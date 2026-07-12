@@ -3,8 +3,8 @@ set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 APK="${1:-}"
-EXPECTED_RELEASE="${CODEX_TUI_EXPECTED_VERSION_NAME:-2.5.11}"
-EXPECTED_VERSION_CODE="${CODEX_TUI_EXPECTED_VERSION_CODE:-77}"
+EXPECTED_RELEASE="${CODEX_TUI_EXPECTED_VERSION_NAME:-2.5.12}"
+EXPECTED_VERSION_CODE="${CODEX_TUI_EXPECTED_VERSION_CODE:-78}"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -58,7 +58,7 @@ expected_manifest_sha="$(
   fail "payload versionCode does not match $EXPECTED_VERSION_CODE"
 [ "$(manifest_value codex_version)" = "0.144.1" ] || fail "unexpected Codex version"
 [ "$(manifest_value target)" = "aarch64-unknown-linux-musl" ] || fail "unexpected Codex target"
-[ "$(manifest_value runtime_epoch)" = "apk-2.5.11" ] || fail "unexpected runtime epoch"
+[ "$(manifest_value runtime_epoch)" = "apk-2.5.12" ] || fail "unexpected runtime epoch"
 
 support_archive="$(manifest_value support_archive)"
 binary_archive="$(manifest_value binary_archive)"
@@ -94,6 +94,7 @@ for member in \
   ./lib/codex-zh-common.sh \
   ./lib/codex-zh-local.sh \
   ./libexec/codex-config-engine.py \
+  ./libexec/codex-workspace-migrate.py \
   ./data/openai-models.json
 do
   tar -tzf "$work/$support_archive" | grep -F -x "$member" >/dev/null 2>&1 ||

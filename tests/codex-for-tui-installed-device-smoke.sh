@@ -1,6 +1,9 @@
 #!/usr/bin/env sh
 set -eu
 
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+HISTORY_AUDITOR="$ROOT_DIR/tests/codex-for-tui-workspace-history-audit.py"
+
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
   exit 1
@@ -95,12 +98,15 @@ PY
 
 prefix="$(find_prefix)" || fail "cannot find Codex for TUI app data dir"
 package="${CODEX_TUI_PACKAGE:-${PKG:-$(basename "$prefix")}}"
+app_alpine_home="${CODEX_TUI_APP_ALPINE_HOME:-$prefix/local/alpine/root}"
+app_codex_home="${CODEX_TUI_CODEX_HOME:-$app_alpine_home/.codex}"
 export PREFIX="$prefix"
 export PATH="$prefix/local/bin:$PATH"
 
 printf 'Codex for TUI installed device smoke\n'
 printf 'package=%s\n' "$package"
 printf 'prefix=%s\n' "$prefix"
+printf 'codex_home=%s\n' "$app_codex_home"
 
 for cmd in \
   codex codex-update codex-local codex-browser codex-preview codex-panel \
@@ -120,8 +126,8 @@ if command -v pm >/dev/null 2>&1; then
   fi
 fi
 
-if [ -s "$HOME/.codex/config.toml" ]; then
-  if safe_grep "可用模型" "$HOME/.codex/config.toml"; then
+if [ -s "$app_codex_home/config.toml" ]; then
+  if safe_grep "可用模型" "$app_codex_home/config.toml"; then
     fail "config.toml model field appears polluted by menu text"
   fi
   printf 'config_present=1\n'
@@ -130,7 +136,7 @@ else
 fi
 
 conversation_registry="$prefix/files/conversation-isolation/registry.json"
-codex_transcript_root="$HOME/.codex/sessions"
+codex_transcript_root="$app_codex_home/sessions"
 if [ -d "$codex_transcript_root" ]; then
   need_cmd python3
   conversation_status=""
@@ -181,6 +187,52 @@ PY
   [ -n "$conversation_status" ] ||
     fail "Codex UUIDv7 transcripts were not imported into conversation registry within ${wait_seconds}s"
   printf '%s\n' "$conversation_status"
+fi
+
+workspace_release="${CODEX_TUI_WORKSPACE_MIGRATION_RELEASE:-}"
+if [ -z "$workspace_release" ] &&
+  [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "78" ]
+then
+  workspace_release="2.5.12"
+fi
+if [ -n "$workspace_release" ]; then
+  need_cmd python3
+  [ -s "$HISTORY_AUDITOR" ] ||
+    fail "workspace history auditor missing: $HISTORY_AUDITOR"
+  baseline="${CODEX_TUI_TRANSCRIPT_BASELINE:-}"
+  expected_imports="${CODEX_TUI_EXPECTED_LEGACY_IMPORT_COUNT:-}"
+  expected_migrated="${CODEX_TUI_EXPECTED_MIGRATED_ROLLOUT_COUNT:-}"
+  expected_baseline="${CODEX_TUI_EXPECTED_BASELINE_TRANSCRIPT_COUNT:-}"
+  expected_minimum="${CODEX_TUI_EXPECTED_MIN_TRANSCRIPT_COUNT:-}"
+  if [ "$workspace_release" = "2.5.12" ]; then
+    [ -n "$baseline" ] ||
+      baseline="/root/codex-release-runs/2.5.12/transcript-baseline.log"
+    [ -n "$expected_imports" ] || expected_imports=11
+    [ -n "$expected_migrated" ] || expected_migrated=83
+    [ -n "$expected_baseline" ] || expected_baseline=80
+    [ -n "$expected_minimum" ] || expected_minimum=91
+  fi
+  [ -s "$baseline" ] || fail "transcript baseline missing: $baseline"
+  case "$expected_imports:$expected_migrated:$expected_baseline:$expected_minimum" in
+    *[!0-9:]*|":::"|:*|*::*|*:)
+      fail "workspace history audit expectations are incomplete"
+      ;;
+  esac
+  migration_report="$app_codex_home/install-state/apk-upgrades/$workspace_release/workspace-migration.json"
+  [ -s "$migration_report" ] ||
+    fail "workspace migration report missing: $migration_report"
+  history_status="$(
+    python3 "$HISTORY_AUDITOR" verify \
+      --codex-home "$app_codex_home" \
+      --release-report "$migration_report" \
+      --baseline "$baseline" \
+      --release "$workspace_release" \
+      --expected-import-count "$expected_imports" \
+      --expected-migrated-count "$expected_migrated" \
+      --expected-baseline-count "$expected_baseline" \
+      --expected-min-count "$expected_minimum" 2>&1
+  )" || fail "workspace history audit failed: $history_status"
+  printf '%s\n' "$history_status"
 fi
 
 rtk_status="$(codex-rtk status 2>&1)" || fail "codex-rtk status failed"

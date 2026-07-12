@@ -64,7 +64,7 @@ printf 'fake-codex:%s:%s\n' "${CODEX_HOME:-}" "${CODEX_SQLITE_HOME:-}" >> "${COD
 EOF
   chmod 755 "$fake_binary"
 
-  support_archive="codex-support-2.5.11.tgz"
+  support_archive="codex-support-2.5.12.tgz"
   binary_archive="codex-test-0.144.1.tgz"
   tar -czf "$payload/$support_archive" -C "$support" .
   tar -czf "$payload/$binary_archive" -C "$binary_root" .
@@ -73,11 +73,11 @@ EOF
   binary_sha="$(sha256_file "$fake_binary")"
   cat > "$payload/manifest.properties" <<EOF
 schema_version=1
-release=2.5.11
-version_code=77
+release=2.5.12
+version_code=78
 codex_version=0.144.1
 target=aarch64-unknown-linux-musl
-runtime_epoch=apk-2.5.11
+runtime_epoch=apk-2.5.12
 support_archive=$support_archive
 support_sha256=$support_sha
 support_file_count=31
@@ -183,12 +183,63 @@ test_real_241_fault_upgrade() {
   printf '%s\n' '{"OPENAI_API_KEY":"root-secret"}' > "$home/auth.json"
   printf '%s\n' '{"OPENAI_API_KEY":"krill-secret"}' > "$home/config-profiles/krill/auth.json"
   printf '%s\n' krill > "$home/config-profiles/current"
-  printf '%s\n' '{"session":"root-preserve"}' > "$home/sessions/2026/07/10/root.jsonl"
+  python3 - "$home" <<'PY'
+import json
+import sqlite3
+import sys
+from pathlib import Path
+
+home = Path(sys.argv[1])
+(home / "sessions/2026/07/10/root.jsonl").write_text(
+    json.dumps(
+        {
+            "type": "session_meta",
+            "payload": {
+                "session_id": "019f4b5f-15f3-78f2-8e51-01c370d27522",
+                "cwd": "/root",
+            },
+        },
+        separators=(",", ":"),
+    )
+    + "\n"
+    + '{"type":"message","text":"root-preserve"}\n',
+    encoding="utf-8",
+)
+legacy = home / "config-profiles/krill/sessions/2026/07/10/krill.jsonl"
+legacy.write_text(
+    json.dumps(
+        {
+            "type": "session_meta",
+            "payload": {
+                "session_id": "019f4d07-3b27-7870-8a20-a97580adbdd2",
+                "cwd": "/root",
+                "model_provider": "custom",
+            },
+        },
+        separators=(",", ":"),
+    )
+    + "\n"
+    + '{"type":"message","text":"krill-preserve"}\n',
+    encoding="utf-8",
+)
+db = sqlite3.connect(home / "state_5.sqlite")
+db.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, cwd TEXT)")
+db.execute(
+    "INSERT INTO threads VALUES (?, ?)",
+    ("019f4b5f-15f3-78f2-8e51-01c370d27522", "/root"),
+)
+db.commit()
+db.close()
+legacy_db = sqlite3.connect(home / "config-profiles/krill/state_5.sqlite")
+legacy_db.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, cwd TEXT)")
+legacy_db.execute(
+    "INSERT INTO threads VALUES (?, ?)",
+    ("019f4d07-3b27-7870-8a20-a97580adbdd2", "/root"),
+)
+legacy_db.commit()
+legacy_db.close()
+PY
   printf '%s\n' '{"history":"root-preserve"}' > "$home/history.jsonl"
-  printf '%s\n' old-root-sqlite > "$home/state_5.sqlite"
-  printf '%s\n' '{"session":"krill-preserve"}' \
-    > "$home/config-profiles/krill/sessions/2026/07/10/krill.jsonl"
-  printf '%s\n' old-krill-sqlite > "$home/config-profiles/krill/state_5.sqlite"
 
   run_upgrade "$home" "$install" "$scripts"
 
@@ -225,6 +276,38 @@ assert (runtime / "history.jsonl").is_file()
 assert not (runtime / "state_5.sqlite").exists()
 assert (home / "state_5.sqlite").is_file()
 assert (home / "config-profiles/krill/state_5.sqlite").is_file()
+rollout = json.loads(
+    (home / "sessions/2026/07/10/root.jsonl").read_text(encoding="utf-8").splitlines()[0]
+)
+assert rollout["payload"]["cwd"] == "/root/workspace"
+import sqlite3
+db = sqlite3.connect(home / "state_5.sqlite")
+assert db.execute("SELECT cwd FROM threads").fetchone()[0] == "/root/workspace"
+db.close()
+migration = json.loads(
+    (home / "install-state/apk-upgrades/2.5.12/workspace-migration.json").read_text(
+        encoding="utf-8"
+    )
+)
+assert migration["import_count"] == 1
+assert migration["rollout_count"] == 2
+assert migration["sqlite_count"] == 2
+assert Path(migration["backup"], "manifest.json").is_file()
+canonical_krill = home / "sessions/2026/07/10/krill.jsonl"
+assert canonical_krill.is_file()
+canonical_meta = json.loads(
+    canonical_krill.read_text(encoding="utf-8").splitlines()[0]
+)
+assert canonical_meta["payload"]["cwd"] == "/root/workspace"
+legacy_meta = json.loads(
+    (
+        home / "config-profiles/krill/sessions/2026/07/10/krill.jsonl"
+    ).read_text(encoding="utf-8").splitlines()[0]
+)
+assert legacy_meta["payload"]["cwd"] == "/root"
+legacy_db = sqlite3.connect(home / "config-profiles/krill/state_5.sqlite")
+assert legacy_db.execute("SELECT cwd FROM threads").fetchone()[0] == "/root/workspace"
+legacy_db.close()
 krill_runtime = Path(krill[0]["runtime_home"])
 assert krill_runtime != home / "config-profiles/krill"
 # Krill's private V1 sessions migrate into shared control home on materialize.
@@ -240,10 +323,10 @@ assert sol["default_reasoning_level"] == "low"
 assert [item["effort"] for item in sol["supported_reasoning_levels"]][-2:] == ["max", "ultra"]
 assert models["codex-auto-review"]["visibility"] == "hide"
 launch = json.loads(
-    (home / "install-state/apk-upgrades/2.5.11/launch-check.json").read_text(encoding="utf-8")
+    (home / "install-state/apk-upgrades/2.5.12/launch-check.json").read_text(encoding="utf-8")
 )
 assert launch["runtime_home"] == str(runtime)
-assert "apk-2.5.11" in launch["sqlite_home"]
+assert "apk-2.5.12" in launch["sqlite_home"]
 assert (install / "codex").is_file()
 PY
 }
@@ -328,7 +411,7 @@ test_failure_rolls_back_managed_and_config() {
     fail "failed APK upgrade did not restore root config"
   [ ! -e "$home/config-profiles-v2/index.json" ] ||
     fail "failed APK upgrade left V2 state active"
-  [ ! -e "$home/install-state/apk-upgrades/2.5.11/complete" ] ||
+  [ ! -e "$home/install-state/apk-upgrades/2.5.12/complete" ] ||
     fail "failed APK upgrade wrote a completion marker"
 }
 
@@ -381,7 +464,7 @@ assert (runtime / "sessions/2026/07/10/preserve.jsonl").is_file()
 assert (home / "sessions/2026/07/10/preserve.jsonl").is_file()
 assert not (runtime / "state_5.sqlite").exists()
 assert (home / "state_5.sqlite").is_file()
-corrupt = home / "install-state/apk-upgrades/2.5.11/corrupt"
+corrupt = home / "install-state/apk-upgrades/2.5.12/corrupt"
 assert any(path.name.startswith("index.json-") for path in corrupt.iterdir())
 assert any(path.name.startswith("config-v2-transaction.json-") for path in corrupt.iterdir())
 PY
@@ -473,9 +556,9 @@ assert (mixed_runtime / "sessions/2026/07/10/mixed.jsonl").is_file()
 root_config = (home / "config.toml").read_text(encoding="utf-8")
 assert "model_auto_compact_token_limit = 180000" in root_config
 launch = json.loads(
-    (home / "install-state/apk-upgrades/2.5.11/launch-check.json").read_text(encoding="utf-8")
+    (home / "install-state/apk-upgrades/2.5.12/launch-check.json").read_text(encoding="utf-8")
 )
-assert "apk-2.5.11" in launch["sqlite_home"]
+assert "apk-2.5.12" in launch["sqlite_home"]
 assert "old-2.4.1-build" not in launch["sqlite_home"]
 assert (before_runtime / "sqlite-builds/old-2.4.1-build/state_5.sqlite").is_file()
 # 2.5.5+: keep shared conversation state (symlink to control CODEX_HOME).
@@ -494,7 +577,7 @@ test_v1_runtime_is_unchanged_after_late_rollback() {
   install="$root/usr/local/bin"
   scripts="$root/root/.local/share/codex-zh/scripts"
   legacy="$home/config-profiles/legacy"
-  mkdir -p "$legacy" "$install"
+  mkdir -p "$legacy/sessions/2026/07/10" "$install"
   write_old_catalog "$legacy/model_catalog.json"
   write_third_party_config \
     "$legacy/config.toml" "Legacy Rollback" \
@@ -502,6 +585,60 @@ test_v1_runtime_is_unchanged_after_late_rollback() {
     "$legacy/model_catalog.json"
   printf '%s\n' '{"OPENAI_API_KEY":"legacy-rollback-secret"}' > "$legacy/auth.json"
   printf '%s\n' legacy > "$home/config-profiles/current"
+  mkdir -p "$home/sessions/2026/07/10"
+  python3 - "$home" <<'PY'
+import json
+import sqlite3
+import sys
+from pathlib import Path
+
+home = Path(sys.argv[1])
+(home / "sessions/2026/07/10/rollback.jsonl").write_text(
+    json.dumps(
+        {
+            "type": "session_meta",
+            "payload": {
+                "session_id": "019f4b5f-15f3-78f2-8e51-01c370d27522",
+                "cwd": "/root",
+            },
+        },
+        separators=(",", ":"),
+    )
+    + "\n",
+    encoding="utf-8",
+)
+(home / "config-profiles/legacy/sessions/2026/07/10/orphan.jsonl").write_text(
+    json.dumps(
+        {
+            "type": "session_meta",
+            "payload": {
+                "session_id": "019f4d07-3b27-7870-8a20-a97580adbdd2",
+                "cwd": "/root",
+                "model_provider": "custom",
+            },
+        },
+        separators=(",", ":"),
+    )
+    + "\n",
+    encoding="utf-8",
+)
+db = sqlite3.connect(home / "state_5.sqlite")
+db.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, cwd TEXT)")
+db.execute(
+    "INSERT INTO threads VALUES (?, ?)",
+    ("019f4b5f-15f3-78f2-8e51-01c370d27522", "/root"),
+)
+db.commit()
+db.close()
+legacy_db = sqlite3.connect(home / "config-profiles/legacy/state_5.sqlite")
+legacy_db.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, cwd TEXT)")
+legacy_db.execute(
+    "INSERT INTO threads VALUES (?, ?)",
+    ("019f4d07-3b27-7870-8a20-a97580adbdd2", "/root"),
+)
+legacy_db.commit()
+legacy_db.close()
+PY
   before_config="$(sha256_file "$legacy/config.toml")"
   before_catalog="$(sha256_file "$legacy/model_catalog.json")"
 
@@ -517,6 +654,28 @@ test_v1_runtime_is_unchanged_after_late_rollback() {
     fail "late rollback modified the original V1 model catalog"
   [ ! -e "$home/config-profiles-v2/index.json" ] ||
     fail "late rollback left V2 state active"
+  python3 - "$home" <<'PY'
+import json
+import sqlite3
+import sys
+from pathlib import Path
+
+home = Path(sys.argv[1])
+rollout = json.loads(
+    (home / "sessions/2026/07/10/rollback.jsonl").read_text(encoding="utf-8")
+)
+assert rollout["payload"]["cwd"] == "/root"
+db = sqlite3.connect(home / "state_5.sqlite")
+assert db.execute("SELECT cwd FROM threads").fetchone()[0] == "/root"
+db.close()
+legacy = home / "config-profiles/legacy/sessions/2026/07/10/orphan.jsonl"
+legacy_meta = json.loads(legacy.read_text(encoding="utf-8").splitlines()[0])
+assert legacy_meta["payload"]["cwd"] == "/root"
+assert not (home / "sessions/2026/07/10/orphan.jsonl").exists()
+legacy_db = sqlite3.connect(home / "config-profiles/legacy/state_5.sqlite")
+assert legacy_db.execute("SELECT cwd FROM threads").fetchone()[0] == "/root"
+legacy_db.close()
+PY
 }
 
 test_missing_binary_is_installed() {
@@ -532,7 +691,7 @@ test_missing_binary_is_installed() {
 
   [ -x "$install/codex-zh-bin" ] || fail "missing Codex binary was not installed"
   [ -x "$install/codex" ] || fail "launcher was not installed with missing binary"
-  assert_contains "$home/install-state/apk-upgrades/2.5.11/complete" "version_code=77"
+  assert_contains "$home/install-state/apk-upgrades/2.5.12/complete" "version_code=78"
 }
 
 test_stale_empty_lock_is_recovered() {
@@ -546,7 +705,7 @@ test_stale_empty_lock_is_recovered() {
   run_upgrade "$home" "$install" "$scripts" \
     env CODEX_APK_UPGRADE_LOCK_WAIT_SECONDS=5
 
-  [ -s "$home/install-state/apk-upgrades/2.5.11/complete" ] ||
+  [ -s "$home/install-state/apk-upgrades/2.5.12/complete" ] ||
     fail "stale lock recovery did not complete the upgrade"
   [ ! -d "$home/install-state/apk-upgrade.lock" ] ||
     fail "stale lock recovery left the lock behind"
@@ -572,7 +731,7 @@ test_concurrent_upgrade_is_serialized() {
   second_pid=$!
   wait "$first_pid"
   wait "$second_pid"
-  [ -s "$home/install-state/apk-upgrades/2.5.11/complete" ] ||
+  [ -s "$home/install-state/apk-upgrades/2.5.12/complete" ] ||
     fail "concurrent upgrade did not complete"
   [ ! -d "$home/install-state/apk-upgrade.lock" ] ||
     fail "concurrent upgrade left the lock behind"
@@ -613,7 +772,7 @@ test_corrupt_payload_is_rejected_before_install() {
   set -e
   [ "$rc" -ne 0 ] || fail "corrupt payload unexpectedly succeeded"
   assert_contains "$install/codex" "old"
-  [ ! -e "$home/install-state/apk-upgrades/2.5.11/complete" ] ||
+  [ ! -e "$home/install-state/apk-upgrades/2.5.12/complete" ] ||
     fail "corrupt payload wrote a completion marker"
 }
 

@@ -1,5 +1,7 @@
 package com.rk.terminal.session
 
+const val DEFAULT_AGENT_WORKSPACE = "/root/workspace"
+
 /**
  * Fixed agent prefix for terminal session labels.
  * Display names always start with one of these prefixes; resume identity uses UUID separately.
@@ -13,11 +15,14 @@ enum class AgentKind(val prefix: String) {
     GROK("grok"),
     SHELL("shell");
 
-    fun resumeCommand(resumeId: String): String? {
+    fun resumeCommand(
+        resumeId: String,
+        workingDirectory: String = DEFAULT_AGENT_WORKSPACE,
+    ): String? {
         val id = resumeId.trim()
         if (id.isEmpty()) return null
         return when (this) {
-            CODEX -> "codex resume $id"
+            CODEX -> "codex resume --all -C ${shellQuote(workingDirectory)} $id"
             CLAUDE -> "claude --resume $id"
             GROK -> "grok --resume $id"
             SHELL -> null
@@ -29,6 +34,9 @@ enum class AgentKind(val prefix: String) {
             "(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-" +
                 "[0-9a-f]{4}-[0-9a-f]{12}"
         )
+
+        private fun shellQuote(value: String): String =
+            "'" + value.replace("'", "'\\''") + "'"
 
         fun fromRaw(raw: String?): AgentKind {
             val key = raw?.trim()?.lowercase().orEmpty()

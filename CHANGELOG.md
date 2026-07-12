@@ -1,3 +1,16 @@
+## Codex for TUI 2.5.12
+
+Codex for TUI 2.5.12 是 2.5.11 后的 P0 工作区与历史恢复前滚热修。
+
+- PendingCommand 固定经 `/system/bin/sh → init-host → /bin/sh -lc` 执行，修复 Alpine 内裸 `sh` 返回 code 127。
+- 新增参数化工作区迁移器：只改 rollout 首条 `session_meta.payload.cwd` 与 SQLite `threads.cwd`，保留 UUID、正文、mtime、权限位，并用 journal、SQLite backup API、SHA-256 校验和 retained manifest 支持崩溃恢复与显式回滚。
+- 旧 `config-profiles` / `config-runtimes` 中未进入 canonical `sessions/` 的 Codex rollout 会按真实 `payload.id` 去重导入；相同 UUID 内容冲突时拒绝迁移，源副本不删除。
+- `codex resume` 自动补 `--all`；侧栏 UUID resume 固定 `-C /root/workspace`，不再被 cwd 过滤隐藏旧历史。
+- Activity/TerminalView 重建固定进入不可删除启动台，旧 worker PTY 不再占用 App 入口。
+- installed-device 验收显式读取 App Alpine `CODEX_HOME`，校验迁移报告、回滚 manifest、transcript 正文前缀/mtime、canonical 计数及所有 live SQLite cwd。
+- `versionCode=78`、`versionName=2.5.12`、runtime epoch `apk-2.5.12`。
+- 发布说明见 `docs/codex-for-tui-2.5.12-release-notes.md`。
+
 ## Codex for TUI 2.5.11
 
 Codex for TUI 2.5.11 是 2.5.10 的 P0 前滚热修。

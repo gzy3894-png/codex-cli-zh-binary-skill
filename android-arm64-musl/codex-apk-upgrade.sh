@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
-RELEASE="2.5.11"
-VERSION_CODE="77"
+RELEASE="2.5.12"
+VERSION_CODE="78"
 EXPECTED_CODEX_VERSION="0.144.1"
 EXPECTED_TARGET="aarch64-unknown-linux-musl"
 EXPECTED_ARCHIVE_SHA256="1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61"
@@ -26,6 +26,8 @@ UPGRADE_ACTIVE=0
 LOCK_HELD=0
 CONFIG_BACKUP=""
 STAGED_ENGINE=""
+WORKSPACE_BACKUP=""
+WORKSPACE_MIGRATOR=""
 
 info() {
   printf '%s\n' "$*"
@@ -193,11 +195,21 @@ rollback_config() {
     warn "配置恢复点自动回滚失败：$CONFIG_BACKUP"
 }
 
+rollback_workspace() {
+  [ -n "$WORKSPACE_BACKUP" ] || return 0
+  [ -s "$WORKSPACE_MIGRATOR" ] || return 0
+  PYTHONNOUSERSITE=1 python3 "$WORKSPACE_MIGRATOR" \
+    --codex-home "$CONTROL_HOME" rollback --backup "$WORKSPACE_BACKUP" \
+    > "$RELEASE_STATE/rollback-workspace.json" 2> "$RELEASE_STATE/rollback-workspace.err" ||
+    warn "工作区迁移自动回滚失败：$WORKSPACE_BACKUP"
+}
+
 finish() {
   rc=$?
   trap - EXIT HUP INT TERM
   if [ "$rc" -ne 0 ] && [ "$UPGRADE_ACTIVE" = "1" ]; then
     warn "APK 环境升级失败，正在恢复升级前状态。"
+    rollback_workspace
     rollback_config
     restore_managed
     {
@@ -291,6 +303,7 @@ for required in \
   lib/codex-zh-config.sh \
   lib/codex-zh-local.sh \
   libexec/codex-config-engine.py \
+  libexec/codex-workspace-migrate.py \
   data/openai-models.json
 do
   [ -s "$SUPPORT_DIR/$required" ] || fail "支持脚本归档缺少：$required"
@@ -329,14 +342,19 @@ codex_local_write_launcher
 codex_local_install_support_scripts
 STAGED_ENGINE="$STAGE_SCRIPTS/libexec/codex-config-engine.py"
 [ -s "$STAGED_ENGINE" ] || fail "暂存配置引擎缺失"
+WORKSPACE_MIGRATOR="$STAGE_SCRIPTS/libexec/codex-workspace-migrate.py"
+[ -s "$WORKSPACE_MIGRATOR" ] || fail "暂存工作区迁移器缺失"
 
 if [ -s "$JOURNAL" ]; then
   CONFIG_BACKUP="$(sed -n 's/^config_backup=//p' "$JOURNAL" | sed -n '1p')"
+  WORKSPACE_BACKUP="$(sed -n 's/^workspace_backup=//p' "$JOURNAL" | sed -n '1p')"
   warn "检测到上次未完成的 APK 环境升级，先恢复再重试。"
+  rollback_workspace
   rollback_config
   restore_managed
   rm -f "$JOURNAL"
   CONFIG_BACKUP=""
+  WORKSPACE_BACKUP=""
 fi
 
 rm -rf "$MANAGED_BACKUP"
@@ -416,6 +434,31 @@ PY
 
 [ "${CODEX_APK_UPGRADE_FAILPOINT:-}" != "after-config-upgrade" ] ||
   fail "APK 升级故障注入：after-config-upgrade"
+
+PYTHONNOUSERSITE=1 python3 "$WORKSPACE_MIGRATOR" \
+  --codex-home "$CONTROL_HOME" migrate \
+  --from /root --to /root/workspace --release "$RELEASE" \
+  --import-legacy-runtimes \
+  > "$RELEASE_STATE/workspace-migration.json"
+WORKSPACE_BACKUP="$(
+  python3 - "$RELEASE_STATE/workspace-migration.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    print(json.load(handle).get("backup", ""))
+PY
+)"
+
+{
+  printf 'release=%s\n' "$RELEASE"
+  printf 'phase=workspace-migrated\n'
+  printf 'manifest_sha256=%s\n' "$manifest_expected"
+  printf 'config_backup=%s\n' "$CONFIG_BACKUP"
+  printf 'workspace_backup=%s\n' "$WORKSPACE_BACKUP"
+} > "$JOURNAL"
+
+[ "${CODEX_APK_UPGRADE_FAILPOINT:-}" != "after-workspace-migration" ] ||
+  fail "APK 升级故障注入：after-workspace-migration"
 
 verify_sha256 "$INSTALL_DIR/codex-zh-bin" "$binary_sha"
 sh -n "$INSTALL_DIR/codex"

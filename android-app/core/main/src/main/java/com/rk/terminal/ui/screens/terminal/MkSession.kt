@@ -218,7 +218,7 @@ object MkSession {
                 // while preserving the pending command as positional arguments.
                 args = arrayOf(
                     initFile.absolutePath,
-                    "sh",
+                    "/bin/sh",
                     "-lc",
                     pendingCommand.command,
                 )

@@ -70,14 +70,11 @@ fun TerminalViewLayout(
                         preserveExistingIdentity = false,
                     )
 
-                    val activeId = service.currentSession.value.first
-                        .takeIf { service.sessionList.containsKey(it) }
-                        ?: launcherId
-                    val activeClient = if (activeId == launcherId) {
-                        launcherClient
-                    } else {
-                        TerminalBackEnd(this, mainActivity, activeId)
-                    }
+                    // Every Activity/TerminalView reconstruction starts on the
+                    // permanent launcher. Worker PTYs stay in the drawer but a
+                    // failed/stopped worker must never capture the app entrypoint.
+                    val activeId = launcherId
+                    val activeClient = launcherClient
                     val session = sessionBinder.getSession(activeId)
                         ?: sessionBinder.createSession(
                             activeId,

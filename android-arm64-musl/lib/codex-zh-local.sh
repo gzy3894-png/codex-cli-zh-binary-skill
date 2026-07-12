@@ -190,7 +190,7 @@ codex_for_tui_binary_build_key() {
     [0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]) ;;
     *) return 1 ;;
   esac
-  epoch="${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.11}"
+  epoch="${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.12}"
   epoch="$(printf '%s' "$epoch" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-32)"
   [ -n "$epoch" ] || epoch="runtime"
   printf '%s-%s-%s\n' "$version" "$epoch" "$digest"
@@ -563,6 +563,16 @@ codex_for_tui_configure_if_missing
 codex_for_tui_prepare_runtime || exit $?
 codex_for_tui_offer_hook_auth "$@"
 codex_for_tui_offer_official_login "$@"
+if [ "${1:-}" = "resume" ]; then
+  resume_has_all=0
+  for resume_arg in "$@"; do
+    [ "$resume_arg" != "--all" ] || resume_has_all=1
+  done
+  if [ "$resume_has_all" = "0" ]; then
+    shift
+    set -- resume --all "$@"
+  fi
+fi
 codex_for_tui_run_real "$@"
 exit $?
 EOF
