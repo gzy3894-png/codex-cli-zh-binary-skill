@@ -62,7 +62,7 @@ class SessionService : Service() {
                 sessions[id] = created
                 sessionList[id] = workingMode
             }
-            created.also {
+            return created.also {
                 // Metadata only — does not alter PTY / env setup.
                 SessionIsolationHooks.notifyCreated(id, workingMode)
                 updateNotification()

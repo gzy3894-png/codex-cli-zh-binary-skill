@@ -1,3 +1,12 @@
+## Codex for TUI 2.5.8
+
+Codex for TUI 2.5.8：2.5.7 对话恢复实现的 CI 编译前滚修复。
+
+- 修复 `SessionBinder.createSession()` 缺少显式 `return` 导致 Android Kotlin 编译失败。
+- 保持 2.5.7 的 Codex/Claude UUID 对话导入、归档、PTY 幂等关闭和配置一致性修复。
+- SQLite epoch `apk-2.5.8`；`versionCode=74`、`versionName=2.5.8`。
+- 发布说明见 `docs/codex-for-tui-2.5.8-release-notes.md`。
+
 ## Codex for TUI 2.5.7
 
 Codex for TUI 2.5.7：对话恢复闭环、PTY 关闭竞态修复与配置删除一致性修复。
