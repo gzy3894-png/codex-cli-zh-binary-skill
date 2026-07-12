@@ -12,7 +12,7 @@ CODEX_ZH_COMMON_LOADED=1
 : "${CODEX_ZH_INSTALL_NAME:=codex}"
 : "${CODEX_ZH_PROVIDER_ID:=custom}"
 : "${CODEX_ZH_PROVIDER_NAME:=OpenAI}"
-: "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.5.12}"
+: "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.5.13}"
 
 CODEX_ZH_ARCHIVE="codex-${CODEX_ZH_VERSION}-zh-${CODEX_ZH_TARGET}.tar.gz"
 CODEX_ZH_ARCHIVE_SHA256="${CODEX_ZH_ARCHIVE_SHA256:-1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61}"
@@ -149,6 +149,7 @@ codex_script_install_root() {
 codex_config_engine_asset_list() {
   cat <<'EOF'
 libexec/codex-config-engine.py
+libexec/codex-session-defaults.py
 libexec/codex-workspace-migrate.py
 data/openai-models.json
 data/openai-models-source.json
@@ -236,27 +237,133 @@ codex_verify_sha256() {
   [ "$actual" = "$expected" ] || codex_die "SHA256 不匹配：$file，实际 $actual，期望 $expected"
 }
 
+codex_binary_file_fingerprint() {
+  stat -c '%d:%i:%s:%Y' "$1" 2>/dev/null
+}
+
+codex_binary_build_cache_path() {
+  printf '%s/binary-build-key-v1\n' "$(codex_state_root)"
+}
+
+codex_binary_cache_value() {
+  cache_file="$1"
+  cache_key="$2"
+  sed -n "s/^${cache_key}=//p" "$cache_file" 2>/dev/null | sed -n '1p'
+}
+
+codex_binary_normalize_version() {
+  printf '%s\n' "$1" |
+    sed -n '1p' |
+    cut -c1-48 |
+    tr -c 'A-Za-z0-9._-' '_'
+}
+
+codex_binary_seed_build_cache() {
+  binary="$1"
+  version_raw="$2"
+  verified_digest="$(printf '%s' "$3" | tr '[:upper:]' '[:lower:]')"
+  epoch_raw="${4:-$CODEX_ZH_RUNTIME_EPOCH}"
+  expected_digest="$(printf '%s' "$CODEX_ZH_BIN_SHA256" | tr '[:upper:]' '[:lower:]')"
+  [ "${#verified_digest}" -eq 64 ] || return 1
+  case "$verified_digest" in *[!0-9a-f]*) return 1 ;; esac
+  [ "$verified_digest" = "$expected_digest" ] || return 1
+  fingerprint="$(codex_binary_file_fingerprint "$binary")" || return 1
+  version="$(codex_binary_normalize_version "$version_raw")"
+  [ -n "$version" ] || version="codex"
+  epoch="$(printf '%s' "$epoch_raw" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-32)"
+  [ -n "$epoch" ] || epoch="runtime"
+  digest_prefix="$(printf '%s' "$verified_digest" | cut -c1-16)"
+  build_key="$version-$epoch-$digest_prefix"
+  case "$build_key" in ""|*[!A-Za-z0-9._-]*) return 1 ;; esac
+
+  cache_file="$(codex_binary_build_cache_path)"
+  codex_ensure_private_dir "$(dirname "$cache_file")"
+  cache_tmp="$cache_file.tmp.$$"
+  (
+    umask 077
+    {
+      printf 'schema=1\n'
+      printf 'binary_path=%s\n' "$binary"
+      printf 'fingerprint=%s\n' "$fingerprint"
+      printf 'expected_sha256=%s\n' "$expected_digest"
+      printf 'runtime_epoch=%s\n' "$epoch"
+      printf 'version=%s\n' "$version"
+      printf 'build_key=%s\n' "$build_key"
+    } > "$cache_tmp"
+  ) || {
+    rm -f "$cache_tmp"
+    return 1
+  }
+  chmod 600 "$cache_tmp" 2>/dev/null || true
+  mv "$cache_tmp" "$cache_file" || {
+    rm -f "$cache_tmp"
+    return 1
+  }
+  printf '%s\n' "$build_key"
+}
+
+codex_binary_build_key() {
+  binary="$1"
+  epoch_raw="${2:-$CODEX_ZH_RUNTIME_EPOCH}"
+  expected_digest="$(printf '%s' "$CODEX_ZH_BIN_SHA256" | tr '[:upper:]' '[:lower:]')"
+  epoch="$(printf '%s' "$epoch_raw" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-32)"
+  [ -n "$epoch" ] || epoch="runtime"
+  fingerprint="$(codex_binary_file_fingerprint "$binary")" || return 1
+  cache_file="$(codex_binary_build_cache_path)"
+  if [ -r "$cache_file" ] &&
+    [ "$(codex_binary_cache_value "$cache_file" schema)" = "1" ] &&
+    [ "$(codex_binary_cache_value "$cache_file" binary_path)" = "$binary" ] &&
+    [ "$(codex_binary_cache_value "$cache_file" fingerprint)" = "$fingerprint" ] &&
+    [ "$(codex_binary_cache_value "$cache_file" expected_sha256)" = "$expected_digest" ] &&
+    [ "$(codex_binary_cache_value "$cache_file" runtime_epoch)" = "$epoch" ]
+  then
+    cached_key="$(codex_binary_cache_value "$cache_file" build_key)"
+    case "$cached_key" in
+      ""|*[!A-Za-z0-9._-]*) ;;
+      *) printf '%s\n' "$cached_key"; return 0 ;;
+    esac
+  fi
+
+  actual_digest="$(codex_sha256_file "$binary" 2>/dev/null | tr '[:upper:]' '[:lower:]')" ||
+    return 1
+  [ "$actual_digest" = "$expected_digest" ] || return 1
+  version_raw="$("$binary" --version 2>/dev/null | sed -n '1p')" || return 1
+  [ -n "$version_raw" ] || version_raw="codex"
+  codex_binary_seed_build_cache "$binary" "$version_raw" "$actual_digest" "$epoch"
+}
+
+codex_write_system_path_profile() {
+  path_dir="$1"
+  [ "$(id -u 2>/dev/null || printf 1)" = "0" ] || return 0
+  [ -d /etc/profile.d ] || return 0
+  case "$path_dir" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  case "$path_dir" in *'
+'*) return 1 ;; esac
+  {
+    printf 'case ":${PATH:-}:" in\n'
+    printf '  *":%s:"*) ;;\n' "$path_dir"
+    printf '  *) export PATH="%s:${PATH:-}" ;;\n' "$path_dir"
+    printf 'esac\n'
+  } > /etc/profile.d/codex-zh.sh 2>/dev/null || return 1
+  chmod 644 /etc/profile.d/codex-zh.sh 2>/dev/null || true
+}
+
 codex_persist_path() {
-  dir="$1"
+  path_dir="$1"
   [ "${CODEX_ZH_SKIP_PERSIST_PATH:-0}" != "1" ] || return 0
-  mkdir -p "$dir"
+  mkdir -p "$path_dir"
   for profile_file in "$HOME/.profile" "$HOME/.ashrc" "$HOME/.bashrc"; do
     [ -f "$profile_file" ] || : > "$profile_file" 2>/dev/null || continue
-    grep -F "$dir" "$profile_file" >/dev/null 2>&1 && continue
+    grep -F "$path_dir" "$profile_file" >/dev/null 2>&1 && continue
     {
       printf '\n# codex-zh\n'
-      printf 'case ":${PATH:-}:" in *":%s:"*) ;; *) export PATH="%s:${PATH:-}" ;; esac\n' "$dir" "$dir"
+      printf 'case ":${PATH:-}:" in *":%s:"*) ;; *) export PATH="%s:${PATH:-}" ;; esac\n' "$path_dir" "$path_dir"
     } >> "$profile_file"
   done
-  if [ "$(id -u 2>/dev/null || printf 1)" = "0" ] && [ -d /etc/profile.d ]; then
-    {
-      printf 'case ":${PATH:-}:" in\n'
-      printf '  *":%s:"*) ;;\n' "$dir"
-      printf '  *) export PATH="%s:${PATH:-}" ;;\n' "$dir"
-      printf 'esac\n'
-    } > /etc/profile.d/codex-zh.sh 2>/dev/null || true
-    chmod 644 /etc/profile.d/codex-zh.sh 2>/dev/null || true
-  fi
+  codex_write_system_path_profile "$path_dir" || true
 }
 
 codex_install_case_variants() {

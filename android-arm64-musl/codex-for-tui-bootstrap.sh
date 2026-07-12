@@ -114,6 +114,7 @@ script_urls() {
 config_engine_assets() {
   cat <<'EOF'
 libexec/codex-config-engine.py
+libexec/codex-session-defaults.py
 data/openai-models.json
 data/openai-models-source.json
 vendor/python/tomlkit/__init__.py

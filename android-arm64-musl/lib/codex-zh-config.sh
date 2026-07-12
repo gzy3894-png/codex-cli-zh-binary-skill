@@ -36,6 +36,7 @@ codex_config_engine_assets() {
   fi
   cat <<'EOF'
 libexec/codex-config-engine.py
+libexec/codex-session-defaults.py
 data/openai-models.json
 data/openai-models-source.json
 vendor/python/tomlkit/__init__.py
@@ -59,6 +60,7 @@ EOF
 codex_config_engine_root_valid() {
   engine_root="$1"
   [ -x "$engine_root/libexec/codex-config-engine.py" ] || return 1
+  [ -x "$engine_root/libexec/codex-session-defaults.py" ] || return 1
   [ -s "$engine_root/data/openai-models.json" ] || return 1
   [ -s "$engine_root/vendor/python/tomlkit/__init__.py" ] || return 1
   [ -s "$engine_root/vendor/python/tomlkit/parser.py" ] || return 1
@@ -527,6 +529,7 @@ codex_config_append_default_hook_blocks() {
   mkdir -p "$(dirname "$codex_hooks_cfg")" || codex_die "无法创建 hooks 配置目录：$(dirname "$codex_hooks_cfg")"
   codex_hooks_strip_rtk="$codex_hooks_cfg.strip-rtk.$$"
   codex_hooks_strip_context="$codex_hooks_cfg.strip-context.$$"
+  codex_hooks_strip_defaults="$codex_hooks_cfg.strip-session-defaults.$$"
   codex_hooks_out="$(codex_config_tmp_path "$codex_hooks_cfg")"
   codex_config_strip_managed_block \
     "# codex-for-tui-rtk-hook begin" \
@@ -536,8 +539,12 @@ codex_config_append_default_hook_blocks() {
     "# codex-for-tui-context-hook begin" \
     "# codex-for-tui-context-hook end" \
     "$codex_hooks_strip_rtk" "$codex_hooks_strip_context"
+  codex_config_strip_managed_block \
+    "# codex-for-tui-session-defaults-hook begin" \
+    "# codex-for-tui-session-defaults-hook end" \
+    "$codex_hooks_strip_context" "$codex_hooks_strip_defaults"
   {
-    cat "$codex_hooks_strip_context"
+    cat "$codex_hooks_strip_defaults"
     if command -v codex-rtk >/dev/null 2>&1 && codex-rtk status >/dev/null 2>&1; then
       printf '\n# codex-for-tui-rtk-hook begin\n'
       printf '[[hooks.PreToolUse]]\n'
@@ -574,8 +581,26 @@ codex_config_append_default_hook_blocks() {
       printf 'statusMessage = "Recording Codex session start"\n'
       printf '# codex-for-tui-context-hook end\n'
     fi
+    if command -v codex-session-defaults >/dev/null 2>&1 &&
+      codex-session-defaults status >/dev/null 2>&1
+    then
+      printf '\n# codex-for-tui-session-defaults-hook begin\n'
+      printf '[[hooks.UserPromptSubmit]]\n\n'
+      printf '[[hooks.UserPromptSubmit.hooks]]\n'
+      printf 'type = "command"\n'
+      printf 'command = "codex-session-defaults hook"\n'
+      printf 'timeout = 5\n'
+      printf 'statusMessage = "Saving Codex session defaults"\n\n'
+      printf '[[hooks.Stop]]\n\n'
+      printf '[[hooks.Stop.hooks]]\n'
+      printf 'type = "command"\n'
+      printf 'command = "codex-session-defaults hook"\n'
+      printf 'timeout = 5\n'
+      printf 'statusMessage = "Saving Codex session defaults"\n'
+      printf '# codex-for-tui-session-defaults-hook end\n'
+    fi
   } > "$codex_hooks_out"
-  rm -f "$codex_hooks_strip_rtk" "$codex_hooks_strip_context"
+  rm -f "$codex_hooks_strip_rtk" "$codex_hooks_strip_context" "$codex_hooks_strip_defaults"
   codex_config_atomic_install_file "$codex_hooks_out" "$codex_hooks_cfg" 600 ||
     codex_die "无法写入默认 hooks 配置：$codex_hooks_cfg"
 }
@@ -585,6 +610,7 @@ codex_config_strip_default_hook_blocks() {
   [ -f "$codex_hooks_cfg" ] || return 0
   codex_hooks_strip_rtk="$codex_hooks_cfg.strip-rtk.$$"
   codex_hooks_strip_context="$codex_hooks_cfg.strip-context.$$"
+  codex_hooks_strip_defaults="$codex_hooks_cfg.strip-session-defaults.$$"
   codex_config_strip_managed_block \
     "# codex-for-tui-rtk-hook begin" \
     "# codex-for-tui-rtk-hook end" \
@@ -593,9 +619,13 @@ codex_config_strip_default_hook_blocks() {
     "# codex-for-tui-context-hook begin" \
     "# codex-for-tui-context-hook end" \
     "$codex_hooks_strip_rtk" "$codex_hooks_strip_context"
-  codex_config_atomic_install_file "$codex_hooks_strip_context" "$codex_hooks_cfg" 600 ||
+  codex_config_strip_managed_block \
+    "# codex-for-tui-session-defaults-hook begin" \
+    "# codex-for-tui-session-defaults-hook end" \
+    "$codex_hooks_strip_context" "$codex_hooks_strip_defaults"
+  codex_config_atomic_install_file "$codex_hooks_strip_defaults" "$codex_hooks_cfg" 600 ||
     codex_die "无法清理默认 hooks 配置：$codex_hooks_cfg"
-  rm -f "$codex_hooks_strip_rtk"
+  rm -f "$codex_hooks_strip_rtk" "$codex_hooks_strip_context" "$codex_hooks_strip_defaults"
 }
 
 codex_config_append_managed_hook_blocks() {
@@ -642,6 +672,22 @@ codex_config_append_managed_hook_blocks() {
       printf 'timeout = 5\n'
       printf 'statusMessage = "Recording Codex session start"\n'
     fi
+    if command -v codex-session-defaults >/dev/null 2>&1 &&
+      codex-session-defaults status >/dev/null 2>&1
+    then
+      printf '[[hooks.UserPromptSubmit]]\n\n'
+      printf '[[hooks.UserPromptSubmit.hooks]]\n'
+      printf 'type = "command"\n'
+      printf 'command = "codex-session-defaults hook"\n'
+      printf 'timeout = 5\n'
+      printf 'statusMessage = "Saving Codex session defaults"\n\n'
+      printf '[[hooks.Stop]]\n\n'
+      printf '[[hooks.Stop.hooks]]\n'
+      printf 'type = "command"\n'
+      printf 'command = "codex-session-defaults hook"\n'
+      printf 'timeout = 5\n'
+      printf 'statusMessage = "Saving Codex session defaults"\n'
+    fi
     printf '# codex-for-tui-managed-hooks end\n'
   } > "$codex_hooks_out"
   rm -f "$codex_hooks_strip"
@@ -650,6 +696,8 @@ codex_config_append_managed_hook_blocks() {
 }
 
 codex_config_managed_hooks_available() {
+  command -v codex-session-defaults >/dev/null 2>&1 &&
+    codex-session-defaults status >/dev/null 2>&1 && return 0
   command -v codex-rtk >/dev/null 2>&1 && codex-rtk status >/dev/null 2>&1 && return 0
   command -v codex-context >/dev/null 2>&1 && codex-context status >/dev/null 2>&1 && return 0
   return 1

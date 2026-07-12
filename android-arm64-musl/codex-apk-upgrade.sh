@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
-RELEASE="2.5.12"
-VERSION_CODE="78"
+RELEASE="2.5.13"
+VERSION_CODE="79"
 EXPECTED_CODEX_VERSION="0.144.1"
 EXPECTED_TARGET="aarch64-unknown-linux-musl"
 EXPECTED_ARCHIVE_SHA256="1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61"
@@ -10,6 +10,7 @@ EXPECTED_BINARY_SHA256="0cde6d6bad02855732ee0ee2867005408d169c46753d414e6a487884
 
 HOME="${HOME:-/root}"
 CONTROL_HOME="${CODEX_APK_UPGRADE_CODEX_HOME:-$HOME/.codex}"
+export CODEX_HOME="$CONTROL_HOME"
 INSTALL_DIR="${CODEX_APK_UPGRADE_INSTALL_DIR:-/usr/local/bin}"
 SCRIPT_ROOT="${CODEX_APK_UPGRADE_SCRIPT_ROOT:-$HOME/.local/share/codex-zh/scripts}"
 STATE_ROOT="${CODEX_APK_UPGRADE_STATE_ROOT:-$CONTROL_HOME/install-state}"
@@ -28,6 +29,7 @@ CONFIG_BACKUP=""
 STAGED_ENGINE=""
 WORKSPACE_BACKUP=""
 WORKSPACE_MIGRATOR=""
+SESSION_DEFAULTS_ADAPTER=""
 
 info() {
   printf '%s\n' "$*"
@@ -93,6 +95,7 @@ quick_complete() {
   grep -F -x "version_code=$VERSION_CODE" "$COMPLETE_MARKER" >/dev/null 2>&1 || return 1
   [ -x "$INSTALL_DIR/codex-zh-bin" ] || return 1
   [ -x "$INSTALL_DIR/codex" ] || return 1
+  [ -x "$INSTALL_DIR/codex-session-defaults" ] || return 1
   [ -s "$SCRIPT_ROOT/libexec/codex-config-engine.py" ] || return 1
   return 0
 }
@@ -114,6 +117,26 @@ best_effort_refresh() {
       > "$RELEASE_STATE/refresh-attempted"
     warn "第三方模型目录联网刷新失败，已保留离线重建结果。"
   fi
+}
+
+refresh_existing_hook_blocks() {
+  [ "${CODEX_APK_UPGRADE_SKIP_HOOK_REFRESH:-0}" != "1" ] || return 0
+  (
+    export HOME CODEX_HOME="$CONTROL_HOME"
+    export PATH="$INSTALL_DIR:$PATH"
+    if codex_config_managed_hooks_enabled; then
+      codex_config_ensure_managed_hooks
+      exit 0
+    fi
+    config="$CONTROL_HOME/config.toml"
+    [ -f "$config" ] || exit 0
+    if grep -F '# codex-for-tui-rtk-hook begin' "$config" >/dev/null 2>&1 ||
+      grep -F '# codex-for-tui-context-hook begin' "$config" >/dev/null 2>&1 ||
+      grep -F '# codex-for-tui-session-defaults-hook begin' "$config" >/dev/null 2>&1
+    then
+      codex_config_ensure_default_hooks
+    fi
+  )
 }
 
 process_start_token() {
@@ -303,6 +326,7 @@ for required in \
   lib/codex-zh-config.sh \
   lib/codex-zh-local.sh \
   libexec/codex-config-engine.py \
+  libexec/codex-session-defaults.py \
   libexec/codex-workspace-migrate.py \
   data/openai-models.json
 do
@@ -328,8 +352,12 @@ verify_sha256 "$binary_source" "$binary_sha"
 cp "$binary_source" "$STAGE_BIN/codex-zh-bin"
 chmod 755 "$STAGE_BIN/codex-zh-bin"
 
+export CODEX_ZH_BIN_SHA256="$binary_sha"
+export CODEX_ZH_RUNTIME_EPOCH="apk-$RELEASE"
 # shellcheck disable=SC1090
 . "$SUPPORT_DIR/lib/codex-zh-common.sh"
+# shellcheck disable=SC1090
+. "$SUPPORT_DIR/lib/codex-zh-config.sh"
 # shellcheck disable=SC1090
 . "$SUPPORT_DIR/lib/codex-zh-local.sh"
 export CODEX_ZH_ACTIVE_SCRIPT_DIR="$SUPPORT_DIR"
@@ -344,6 +372,8 @@ STAGED_ENGINE="$STAGE_SCRIPTS/libexec/codex-config-engine.py"
 [ -s "$STAGED_ENGINE" ] || fail "暂存配置引擎缺失"
 WORKSPACE_MIGRATOR="$STAGE_SCRIPTS/libexec/codex-workspace-migrate.py"
 [ -s "$WORKSPACE_MIGRATOR" ] || fail "暂存工作区迁移器缺失"
+SESSION_DEFAULTS_ADAPTER="$STAGE_SCRIPTS/libexec/codex-session-defaults.py"
+[ -s "$SESSION_DEFAULTS_ADAPTER" ] || fail "暂存会话默认值适配器缺失"
 
 if [ -s "$JOURNAL" ]; then
   CONFIG_BACKUP="$(sed -n 's/^config_backup=//p' "$JOURNAL" | sed -n '1p')"
@@ -368,6 +398,10 @@ for staged in "$STAGE_BIN"/*; do
     cp -a "$INSTALL_DIR/$name" "$MANAGED_BACKUP/bin/$name"
   fi
 done
+if [ "$INSTALL_DIR" = "/usr/local/bin" ]; then
+  codex_write_system_path_profile "$INSTALL_DIR" ||
+    warn "系统 PATH 托管片段修复失败；不影响本次会话。"
+fi
 if [ -d "$SCRIPT_ROOT" ]; then
   cp -a "$SCRIPT_ROOT" "$MANAGED_BACKUP/scripts"
 fi
@@ -465,6 +499,22 @@ sh -n "$INSTALL_DIR/codex"
 sh -n "$SCRIPT_ROOT/lib/codex-zh-common.sh"
 sh -n "$SCRIPT_ROOT/lib/codex-zh-config.sh"
 sh -n "$SCRIPT_ROOT/lib/codex-zh-local.sh"
+PYTHONNOUSERSITE=1 PYTHONPYCACHEPREFIX="$WORK_ROOT/pycache" python3 -m py_compile \
+  "$SCRIPT_ROOT/libexec/codex-config-engine.py" \
+  "$SCRIPT_ROOT/libexec/codex-session-defaults.py" \
+  "$SCRIPT_ROOT/libexec/codex-workspace-migrate.py"
+refresh_existing_hook_blocks
+
+version_raw="$("$INSTALL_DIR/codex-zh-bin" --version 2>/dev/null | sed -n '1p' || true)"
+[ -n "$version_raw" ] || version_raw="codex"
+build_key="$(
+  codex_binary_seed_build_cache \
+    "$INSTALL_DIR/codex-zh-bin" \
+    "$version_raw" \
+    "$binary_sha" \
+    "apk-$RELEASE"
+)" || fail "无法写入已校验 Codex 构建缓存"
+
 PYTHONNOUSERSITE=1 python3 "$SCRIPT_ROOT/libexec/codex-config-engine.py" \
   --codex-home "$CONTROL_HOME" status > "$RELEASE_STATE/status.json"
 
@@ -491,10 +541,41 @@ with open(sys.argv[1], encoding="utf-8") as handle:
 PY
 )"
 if [ -n "$active_profile" ]; then
-  version_line="$("$INSTALL_DIR/codex-zh-bin" --version 2>/dev/null | sed -n '1p' | cut -c1-48 | tr -c 'A-Za-z0-9._-' '_' || true)"
-  [ -n "$version_line" ] || version_line="codex"
-  digest_prefix="$(printf '%s' "$binary_sha" | cut -c1-16)"
-  build_key="$version_line-apk-$RELEASE-$digest_prefix"
+  PYTHONNOUSERSITE=1 python3 "$SCRIPT_ROOT/libexec/codex-config-engine.py" \
+    --codex-home "$CONTROL_HOME" profile show "$active_profile" \
+    > "$RELEASE_STATE/profile-before-session-defaults.json"
+  profile_generation="$(
+    codex_config_v2_json_value \
+      "$RELEASE_STATE/profile-before-session-defaults.json" profile.generation
+  )"
+  baseline_model="$(
+    codex_config_v2_json_value \
+      "$RELEASE_STATE/profile-before-session-defaults.json" profile.model
+  )"
+  baseline_effort="$(
+    codex_config_v2_json_value \
+      "$RELEASE_STATE/profile-before-session-defaults.json" profile.reasoning_effort ||
+      true
+  )"
+  model_provider_id="$(
+    codex_config_v2_json_value \
+      "$RELEASE_STATE/profile-before-session-defaults.json" profile.provider_id ||
+      true
+  )"
+  profile_runtime="$(
+    codex_config_v2_json_value \
+      "$RELEASE_STATE/profile-before-session-defaults.json" profile.runtime_home
+  )"
+  CODEX_FOR_TUI_CONTROL_HOME="$CONTROL_HOME" \
+  CODEX_FOR_TUI_PROFILE_ID="$active_profile" \
+  CODEX_FOR_TUI_PROFILE_GENERATION="$profile_generation" \
+  CODEX_FOR_TUI_BASELINE_MODEL="$baseline_model" \
+  CODEX_FOR_TUI_BASELINE_REASONING_EFFORT="$baseline_effort" \
+  CODEX_FOR_TUI_MODEL_PROVIDER_ID="$model_provider_id" \
+  CODEX_HOME="$profile_runtime" \
+    "$INSTALL_DIR/codex-session-defaults" migrate-latest \
+      > "$RELEASE_STATE/session-defaults-migration.json" ||
+    fail "无法迁移最近一次模型/思考等级选择"
   PYTHONNOUSERSITE=1 python3 "$SCRIPT_ROOT/libexec/codex-config-engine.py" \
     --codex-home "$CONTROL_HOME" profile launch \
     --sqlite-build-key "$build_key" > "$RELEASE_STATE/launch-check.json"

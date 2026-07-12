@@ -111,7 +111,7 @@ printf 'codex_home=%s\n' "$app_codex_home"
 for cmd in \
   codex codex-update codex-local codex-browser codex-preview codex-panel \
   codex-session codex-rtk codex-context codex-agent codex-doctor codex-clean codex-ops \
-  codex-dev-transfer
+  codex-dev-transfer codex-session-defaults
 do
   need_cmd "$cmd"
   printf 'cmd_%s=%s\n' "$cmd" "$(command -v "$cmd")"
@@ -130,9 +130,25 @@ if [ -s "$app_codex_home/config.toml" ]; then
   if safe_grep "可用模型" "$app_codex_home/config.toml"; then
     fail "config.toml model field appears polluted by menu text"
   fi
+  if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "79" ]; then
+    safe_grep '"/root/workspace"' "$app_codex_home/config.toml" &&
+      safe_grep 'trust_level = "trusted"' "$app_codex_home/config.toml" ||
+      fail "/root/workspace trust was not inherited into control config"
+  fi
+  if [ -n "${CODEX_TUI_EXPECTED_REASONING:-}" ]; then
+    safe_grep "model_reasoning_effort = \"${CODEX_TUI_EXPECTED_REASONING}\"" "$app_codex_home/config.toml" ||
+      fail "expected reasoning was not materialized: $CODEX_TUI_EXPECTED_REASONING"
+  fi
   printf 'config_present=1\n'
 else
   warn "config.toml not present; skipping config pollution check"
+fi
+
+build_key_file="$app_codex_home/install-state/binary-build-key-v1"
+if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "79" ]; then
+  [ -s "$build_key_file" ] || fail "binary build key cache missing: $build_key_file"
+  safe_grep "runtime_epoch=apk-2.5.13" "$build_key_file" ||
+    fail "binary build key cache has wrong runtime epoch"
 fi
 
 conversation_registry="$prefix/files/conversation-isolation/registry.json"
@@ -142,9 +158,16 @@ if [ -d "$codex_transcript_root" ]; then
   conversation_status=""
   elapsed=0
   wait_seconds="${CODEX_TUI_INSTALLED_WAIT_SECONDS:-20}"
+  expected_min_registry="${CODEX_TUI_EXPECTED_CODEX_REGISTRY_MIN:-}"
+  expected_uuid="${CODEX_TUI_EXPECTED_CODEX_UUID:-}"
+  if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "79" ]; then
+    [ -n "$expected_min_registry" ] || expected_min_registry=91
+    [ -n "$expected_uuid" ] ||
+      expected_uuid="019f212d-4b6e-7e93-b3f4-188eefa2657d"
+  fi
   while [ "$elapsed" -lt "$wait_seconds" ]; do
     if conversation_status="$(
-      python3 - "$codex_transcript_root" "$conversation_registry" <<'PY'
+      python3 - "$codex_transcript_root" "$conversation_registry" "$expected_min_registry" "$expected_uuid" <<'PY'
 import json
 import pathlib
 import re
@@ -152,6 +175,8 @@ import sys
 
 transcript_root = pathlib.Path(sys.argv[1])
 registry_path = pathlib.Path(sys.argv[2])
+expected_min = int(sys.argv[3]) if sys.argv[3] else 0
+expected_uuid = sys.argv[4].lower()
 uuid_pattern = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-(7[0-9a-fA-F]{3})-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
@@ -163,7 +188,7 @@ rollout_ids = {
 }
 if not rollout_ids:
     print("codex_rollout_v7=0 registry_codex=0")
-    raise SystemExit(0)
+    raise SystemExit(1 if expected_min else 0)
 if not registry_path.is_file():
     raise SystemExit(1)
 registry = json.loads(registry_path.read_text(encoding="utf-8"))
@@ -174,6 +199,12 @@ registry_ids = {
 }
 missing = rollout_ids - registry_ids
 if missing:
+    raise SystemExit(1)
+if expected_min and len(registry_ids) < expected_min:
+    raise SystemExit(1)
+if expected_uuid and (
+    expected_uuid not in rollout_ids or expected_uuid not in registry_ids
+):
     raise SystemExit(1)
 print(f"codex_rollout_v7={len(rollout_ids)} registry_codex={len(registry_ids)}")
 PY
@@ -191,9 +222,9 @@ fi
 
 workspace_release="${CODEX_TUI_WORKSPACE_MIGRATION_RELEASE:-}"
 if [ -z "$workspace_release" ] &&
-  [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "78" ]
+  [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "79" ]
 then
-  workspace_release="2.5.12"
+  workspace_release="2.5.13"
 fi
 if [ -n "$workspace_release" ]; then
   need_cmd python3
@@ -204,9 +235,12 @@ if [ -n "$workspace_release" ]; then
   expected_migrated="${CODEX_TUI_EXPECTED_MIGRATED_ROLLOUT_COUNT:-}"
   expected_baseline="${CODEX_TUI_EXPECTED_BASELINE_TRANSCRIPT_COUNT:-}"
   expected_minimum="${CODEX_TUI_EXPECTED_MIN_TRANSCRIPT_COUNT:-}"
-  if [ "$workspace_release" = "2.5.12" ]; then
+  if [ "$workspace_release" = "2.5.12" ] || [ "$workspace_release" = "2.5.13" ]; then
     [ -n "$baseline" ] ||
       baseline="/root/codex-release-runs/2.5.12/transcript-baseline.log"
+    if [ ! -s "$baseline" ] && [ "$workspace_release" = "2.5.13" ]; then
+      baseline="/root/codex-release-runs/2.5.13/transcript-baseline.log"
+    fi
     [ -n "$expected_imports" ] || expected_imports=11
     [ -n "$expected_migrated" ] || expected_migrated=83
     [ -n "$expected_baseline" ] || expected_baseline=80

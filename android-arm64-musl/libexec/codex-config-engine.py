@@ -45,6 +45,7 @@ SCHEMA_VERSION = 2
 OFFICIAL_CATALOG_URL = ""
 PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 PROFILE_ID_RE = re.compile(r"^p-[0-9a-f]{12}$")
+PROFILE_GENERATION_RE = re.compile(r"^[0-9a-f]{64}$")
 SQLITE_BUILD_KEY_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 MANAGED_PROVIDER_ID_RE = re.compile(r"^codex_tui_[0-9a-f]{12}$")
 MANAGED_ROOT_KEYS = (
@@ -195,6 +196,7 @@ class Paths:
         self.v2_rollbacks = codex_home / "install-state" / "config-v2-rollbacks"
         self.catalog_cache = codex_home / "model-catalog-cache"
         self.auth_helper = codex_home / "print-openai-api-key.sh"
+        self.session_defaults = codex_home / "install-state" / "session-defaults"
 
     def ensure_v2_dirs(self) -> None:
         ensure_private_dir(self.home)
@@ -415,12 +417,22 @@ def managed_summary(directory: Path) -> dict[str, Any]:
     }
 
 
+def profile_generation(directory: Path) -> str:
+    managed_path = directory / "managed.toml"
+    try:
+        data = managed_path.read_bytes()
+    except OSError as exc:
+        raise EngineError("配置档托管字段缺失", 7, path=str(managed_path)) from exc
+    return hashlib.sha256(data).hexdigest()
+
+
 def redact_profile(paths: Paths, meta: dict[str, Any]) -> dict[str, Any]:
     result = dict(meta)
     directory = profile_dir(paths, str(meta["id"]))
     result.update(managed_summary(directory))
     result["has_auth"] = (directory / "auth.json").is_file()
     result["has_catalog"] = (directory / "model_catalog.json").is_file()
+    result["generation"] = profile_generation(directory)
     return result
 
 
@@ -597,6 +609,28 @@ def load_common_config(paths: Paths, index: dict[str, Any] | None = None) -> TOM
     return tomlkit.document()
 
 
+def inherit_workspace_trust(
+    doc: TOMLDocument,
+    source: str = "/root",
+    destination: str = "/root/workspace",
+) -> bool:
+    """Narrowly inherit an explicit trusted parent for the unified workspace."""
+    projects = doc.get("projects")
+    if not isinstance(projects, dict):
+        return False
+    source_entry = projects.get(source)
+    if not isinstance(source_entry, dict) or source_entry.get("trust_level") != "trusted":
+        return False
+    destination_entry = projects.get(destination)
+    if destination_entry is None:
+        destination_entry = table()
+        projects[destination] = destination_entry
+    if not isinstance(destination_entry, dict) or "trust_level" in destination_entry:
+        return False
+    destination_entry["trust_level"] = "trusted"
+    return True
+
+
 def merge_runtime_local_overlay(doc: TOMLDocument, overlay: TOMLDocument | None) -> None:
     """Apply only explicitly tracked runtime-local keys."""
     if overlay is None:
@@ -609,17 +643,29 @@ def merge_runtime_local_overlay(doc: TOMLDocument, overlay: TOMLDocument | None)
 
 def extract_runtime_local_overlay(
     runtime: TOMLDocument,
-    common_base: TOMLDocument,
+    current_common: TOMLDocument,
+    previous_common: TOMLDocument | None = None,
 ) -> TOMLDocument:
-    """Keep runtime keys absent from the last known common configuration."""
+    """Keep only keys that are genuinely runtime-local.
+
+    Keys present in the previous common snapshot are control-owned. If the user
+    deletes one from control config.toml while an old runtime still contains it,
+    automatic runtime sync must not stage it as local overlay and resurrect it.
+    """
     runtime_clean = strip_managed_fields(runtime)
-    common_clean = strip_managed_fields(common_base)
+    current_clean = strip_managed_fields(current_common)
+    previous_clean = (
+        strip_managed_fields(previous_common)
+        if previous_common is not None
+        else tomlkit.document()
+    )
     overlay = tomlkit.document()
     for key in list(runtime_clean):
         if key in MANAGED_ROOT_KEYS or key in RUNTIME_GENERATED_ROOT_KEYS:
             continue
-        if key not in common_clean:
-            overlay[key] = copy.deepcopy(runtime_clean[key])
+        if key in current_clean or key in previous_clean:
+            continue
+        overlay[key] = copy.deepcopy(runtime_clean[key])
     return overlay
 
 
@@ -993,6 +1039,7 @@ def cmd_profile_update(paths: Paths, args: argparse.Namespace) -> None:
             index = load_index(paths, create=True)
             if index.get("active_profile_id") == current["id"]:
                 materialize_profile(paths, profile_meta(paths, str(current["id"])), index)
+        pending_session_defaults_path(paths, str(current["id"])).unlink(missing_ok=True)
         emit(True, profile=redact_profile(paths, profile_meta(paths, str(current["id"]))))
 
 
@@ -1041,6 +1088,7 @@ def cmd_profile_delete(paths: Paths, args: argparse.Namespace) -> None:
             if index.get("active_profile_id") == meta["id"]:
                 index["active_profile_id"] = None
                 atomic_write_json(paths.index, index)
+        pending_session_defaults_path(paths, str(meta["id"])).unlink(missing_ok=True)
         emit(True, deleted_profile_id=meta["id"], deleted_name=meta["name"])
 
 
@@ -1147,6 +1195,7 @@ def cmd_profile_sync_current(paths: Paths, args: argparse.Namespace) -> None:
             index = load_index(paths, create=True)
             if index.get("active_profile_id") == current["id"]:
                 materialize_profile(paths, meta, index)
+        pending_session_defaults_path(paths, str(current["id"])).unlink(missing_ok=True)
         emit(True, profile=redact_profile(paths, meta))
 
 
@@ -1170,6 +1219,96 @@ def seed_runtime_links(paths: Paths, runtime_home: Path) -> None:
             destination.symlink_to(source, target_is_directory=source.is_dir())
         except OSError:
             continue
+
+
+def pending_session_defaults_path(paths: Paths, profile_id: str) -> Path:
+    return paths.session_defaults / f"{profile_id}.json"
+
+
+def profile_catalog_for_defaults(paths: Paths, meta: dict[str, Any]) -> dict[str, Any]:
+    directory = profile_dir(paths, str(meta["id"]))
+    candidate = directory / "model_catalog.json"
+    if not candidate.is_file():
+        candidate = bundled_catalog_path()
+    return validate_catalog(read_json(candidate))
+
+
+def apply_pending_session_defaults(
+    paths: Paths,
+    meta: dict[str, Any],
+) -> tuple[dict[str, Any] | None, Path | None]:
+    """Apply a hook-staged model/effort only against its launch generation."""
+    profile_id = str(meta["id"])
+    pending_path = pending_session_defaults_path(paths, profile_id)
+    if not pending_path.is_file():
+        return None, None
+    try:
+        pending = read_json(pending_path)
+    except EngineError:
+        return {"status": "rejected", "reason": "invalid-json"}, pending_path
+    if not isinstance(pending, dict) or pending.get("schema_version") != 1:
+        return {"status": "rejected", "reason": "invalid-schema"}, pending_path
+    if pending.get("profile_id") != profile_id:
+        return {"status": "rejected", "reason": "profile-mismatch"}, pending_path
+
+    directory = profile_dir(paths, profile_id)
+    current_generation = profile_generation(directory)
+    base_generation = pending.get("base_generation")
+    if (
+        not isinstance(base_generation, str)
+        or not PROFILE_GENERATION_RE.fullmatch(base_generation)
+        or base_generation != current_generation
+    ):
+        return {"status": "rejected", "reason": "stale-generation"}, pending_path
+
+    managed = read_toml(directory / "managed.toml")
+    summary = managed_summary(directory)
+    model = pending.get("model")
+    effort = pending.get("reasoning_effort")
+    provider_id = pending.get("model_provider_id")
+    if not isinstance(model, str) or not model.strip():
+        return {"status": "rejected", "reason": "invalid-model"}, pending_path
+    model = model.strip()
+    if effort is not None and (not isinstance(effort, str) or not effort.strip()):
+        return {"status": "rejected", "reason": "invalid-reasoning"}, pending_path
+    effort = effort.strip() if isinstance(effort, str) else None
+    expected_provider = str(summary.get("provider_id") or "")
+    if expected_provider and provider_id != expected_provider:
+        return {"status": "rejected", "reason": "provider-mismatch"}, pending_path
+
+    catalog = profile_catalog_for_defaults(paths, meta)
+    model_entry = catalog_by_slug(catalog).get(model)
+    if model_entry is None:
+        return {"status": "rejected", "reason": "model-not-in-catalog"}, pending_path
+    levels = {
+        str(item.get("effort"))
+        for item in model_entry.get("supported_reasoning_levels", [])
+        if isinstance(item, dict) and isinstance(item.get("effort"), str)
+    }
+    if effort is not None and effort not in levels:
+        return {"status": "rejected", "reason": "reasoning-not-supported"}, pending_path
+
+    previous_model = str(managed.get("model") or "")
+    previous_effort = (
+        str(managed["model_reasoning_effort"])
+        if "model_reasoning_effort" in managed
+        else None
+    )
+    if previous_model == model and previous_effort == effort:
+        return {"status": "unchanged", "model": model, "reasoning_effort": effort}, pending_path
+    managed["model"] = model
+    if effort is None:
+        managed.pop("model_reasoning_effort", None)
+    else:
+        managed["model_reasoning_effort"] = effort
+    atomic_write_text(directory / "managed.toml", tomlkit.dumps(managed), 0o600)
+    return {
+        "status": "applied",
+        "model": model,
+        "reasoning_effort": effort,
+        "previous_model": previous_model,
+        "previous_reasoning_effort": previous_effort,
+    }, pending_path
 
 
 def materialize_runtime(
@@ -1215,8 +1354,11 @@ def materialize_runtime(
     previous_common_clean = strip_managed_fields(previous_common)
     for key in list(previous_common_clean):
         runtime_local.pop(key, None)
-    write_runtime_local_overlay(profile_directory, runtime_local)
     doc = read_toml(paths.config)
+    current_common_clean = strip_managed_fields(doc)
+    for key in list(current_common_clean):
+        runtime_local.pop(key, None)
+    write_runtime_local_overlay(profile_directory, runtime_local)
     if paths.catalog.is_file():
         write_catalog_with_visibility_policy(paths.catalog, runtime_catalog)
         doc["model_catalog_json"] = str(runtime_catalog)
@@ -1249,19 +1391,26 @@ def cmd_profile_launch(paths: Paths, args: argparse.Namespace) -> None:
         if not profile_ref:
             raise EngineError("当前没有已激活配置", 4)
         meta = resolve_profile(paths, str(profile_ref))
+        pending_result: dict[str, Any] | None = None
+        consumed_pending: Path | None = None
         with transaction(paths, "profile-launch"):
+            pending_result, consumed_pending = apply_pending_session_defaults(paths, meta)
+            meta = profile_meta(paths, str(meta["id"]))
             runtime_home, sqlite_home = materialize_runtime(
                 paths,
                 meta,
                 index,
                 args.sqlite_build_key,
             )
+        if consumed_pending is not None:
+            consumed_pending.unlink(missing_ok=True)
         emit(
             True,
             active=True,
             profile=redact_profile(paths, meta),
             runtime_home=str(runtime_home),
             sqlite_home=str(sqlite_home),
+            session_defaults=pending_result,
         )
 
 
@@ -1281,25 +1430,37 @@ def cmd_profile_sync_runtime(paths: Paths, args: argparse.Namespace) -> None:
             )
         with transaction(paths, "profile-sync-runtime"):
             runtime_doc = read_toml(source_dir / "config.toml")
-            common_base = load_common_config(paths, load_index(paths, create=True))
-            meta = import_runtime_profile(
-                paths,
-                name=str(current["name"]),
-                source_dir=source_dir,
-                profile_id=str(current["id"]),
-                existing_meta=current,
-                runtime_home=expected_runtime,
-            )
             index = load_index(paths, create=True)
-            directory = profile_dir(paths, str(meta["id"]))
+            directory = profile_dir(paths, str(current["id"]))
+            current_common = load_common_config(paths, index)
+            previous_common_path = directory / COMMON_BASE_FILE
+            if not previous_common_path.is_file():
+                previous_common_path = directory / "legacy-config.toml"
+            previous_common = (
+                read_toml(previous_common_path)
+                if previous_common_path.is_file()
+                else tomlkit.document()
+            )
             write_runtime_local_overlay(
                 directory,
-                extract_runtime_local_overlay(runtime_doc, common_base),
+                extract_runtime_local_overlay(
+                    runtime_doc,
+                    current_common,
+                    previous_common,
+                ),
             )
+            # Runtime processes may be concurrent and stale. Automatic exit
+            # sync never imports profile-owned model/provider/reasoning fields.
+            # Official login credentials are the one runtime-owned exception.
+            if current.get("mode") == "official":
+                runtime_auth = source_dir / "auth.json"
+                if runtime_auth.is_file():
+                    safe_copy(runtime_auth, directory / "auth.json", 0o600)
+                    safe_copy(runtime_auth, paths.auth, 0o600)
             write_profile_base_config(paths.config, directory / COMMON_BASE_FILE)
             if index.get("active_profile_id") == current["id"]:
-                materialize_profile(paths, meta, index)
-        emit(True, profile=redact_profile(paths, meta))
+                materialize_profile(paths, current, index)
+        emit(True, profile=redact_profile(paths, current))
 
 
 def validate_catalog(value: Any) -> dict[str, Any]:
@@ -2259,6 +2420,7 @@ def cmd_apk_upgrade(paths: Paths, args: argparse.Namespace) -> None:
     root_source = release_state / "root-source"
     recovered_transaction = False
     archived_corruption: list[str] = []
+    trust_inherited = False
     with engine_lock(paths):
         if paths.journal.is_file():
             try:
@@ -2272,8 +2434,18 @@ def cmd_apk_upgrade(paths: Paths, args: argparse.Namespace) -> None:
                 if archived:
                     archived_corruption.append(archived)
         snapshot_runtime_source(paths, root_source)
+        root_config = root_source / "config.toml"
+        if root_config.is_file():
+            root_doc = read_toml(root_config)
+            trust_inherited = inherit_workspace_trust(root_doc)
+            if trust_inherited:
+                atomic_write_text(root_config, tomlkit.dumps(root_doc), 0o600)
         with transaction(paths, f"apk-upgrade-{release}", retain_backup=True) as backup:
             paths.ensure_v2_dirs()
+            if trust_inherited and paths.config.is_file():
+                control_doc = read_toml(paths.config)
+                if inherit_workspace_trust(control_doc):
+                    atomic_write_text(paths.config, tomlkit.dumps(control_doc), 0o600)
             valid_index = False
             try:
                 index = load_index(paths) if paths.index.is_file() else default_index()
@@ -2446,6 +2618,7 @@ def cmd_apk_upgrade(paths: Paths, args: argparse.Namespace) -> None:
         copied_runtime_state=copied_runtime_state,
         catalog_reports=catalog_reports,
         effort_fallbacks=effort_fallbacks,
+        workspace_trust_inherited=trust_inherited,
     )
 
 

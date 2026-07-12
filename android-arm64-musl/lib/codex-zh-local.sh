@@ -177,23 +177,7 @@ codex_for_tui_force_configure() {
 }
 
 codex_for_tui_binary_build_key() {
-  version="$("$real_bin" --version 2>/dev/null | sed -n '1p' | cut -c1-48 | tr -c 'A-Za-z0-9._-' '_' || true)"
-  [ -n "$version" ] || version="codex"
-  if command -v sha256sum >/dev/null 2>&1; then
-    digest="$(sha256sum "$real_bin" 2>/dev/null | awk '{print substr($1, 1, 16)}')"
-  elif command -v openssl >/dev/null 2>&1; then
-    digest="$(openssl dgst -sha256 "$real_bin" 2>/dev/null | sed 's/^.*= //' | cut -c1-16)"
-  else
-    digest=""
-  fi
-  case "$digest" in
-    [0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]) ;;
-    *) return 1 ;;
-  esac
-  epoch="${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.12}"
-  epoch="$(printf '%s' "$epoch" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-32)"
-  [ -n "$epoch" ] || epoch="runtime"
-  printf '%s-%s-%s\n' "$version" "$epoch" "$digest"
+  codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.13}"
 }
 
 codex_for_tui_prepare_runtime() {
@@ -201,13 +185,18 @@ codex_for_tui_prepare_runtime() {
   runtime_home="$control_home"
   sqlite_home=""
   profile_id=""
-  if ! build_key="$(codex_for_tui_binary_build_key)"; then
-    printf '%s\n' "错误: 无法计算 Codex 二进制 SHA-256；未启动 Codex。" >&2
-    return 1
-  fi
+  profile_generation=""
+  baseline_model=""
+  baseline_effort=""
+  model_provider_id=""
 
   codex_for_tui_load_config_libs
   codex_init_env
+  if ! build_key="$(codex_for_tui_binary_build_key)"; then
+    printf '%s\n' "错误: Codex 二进制校验或构建缓存失败；未启动 Codex。" >&2
+    return 1
+  fi
+
   if engine_root="$(codex_config_engine_find_root 2>/dev/null)"; then
     CODEX_CONFIG_ENGINE_RESOLVED_ROOT="$engine_root"
     runtime_work="$control_home/install-state/config-v2-launch/$$"
@@ -233,6 +222,10 @@ codex_for_tui_prepare_runtime() {
           runtime_home="$(codex_config_v2_json_value "$runtime_launch" runtime_home 2>/dev/null || true)"
           sqlite_home="$(codex_config_v2_json_value "$runtime_launch" sqlite_home 2>/dev/null || true)"
           profile_id="$(codex_config_v2_json_value "$runtime_launch" profile.id 2>/dev/null || true)"
+          profile_generation="$(codex_config_v2_json_value "$runtime_launch" profile.generation 2>/dev/null || true)"
+          baseline_model="$(codex_config_v2_json_value "$runtime_launch" profile.model 2>/dev/null || true)"
+          baseline_effort="$(codex_config_v2_json_value "$runtime_launch" profile.reasoning_effort 2>/dev/null || true)"
+          model_provider_id="$(codex_config_v2_json_value "$runtime_launch" profile.provider_id 2>/dev/null || true)"
         else
           runtime_error="$(codex_config_v2_json_value "$runtime_launch" error 2>/dev/null || true)"
           printf '%s\n' "错误: ${runtime_error:-无法准备独立配置运行目录}；未启动 Codex。" >&2
@@ -242,6 +235,16 @@ codex_for_tui_prepare_runtime() {
           /*:/*:p-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
           *)
             printf '%s\n' "错误: 配置引擎返回了无效的独立运行目录；未启动 Codex。" >&2
+            return 1
+            ;;
+        esac
+        [ "${#profile_generation}" -eq 64 ] || {
+          printf '%s\n' "错误: 配置引擎未返回有效配置代次；未启动 Codex。" >&2
+          return 1
+        }
+        case "$profile_generation" in
+          *[!0-9a-f]*)
+            printf '%s\n' "错误: 配置引擎返回了无效配置代次；未启动 Codex。" >&2
             return 1
             ;;
         esac
@@ -278,6 +281,10 @@ codex_for_tui_prepare_runtime() {
   export CODEX_FOR_TUI_CONTROL_HOME="$control_home"
   export CODEX_FOR_TUI_RUNTIME_HOME="$runtime_home"
   export CODEX_FOR_TUI_PROFILE_ID="$profile_id"
+  export CODEX_FOR_TUI_PROFILE_GENERATION="$profile_generation"
+  export CODEX_FOR_TUI_BASELINE_MODEL="$baseline_model"
+  export CODEX_FOR_TUI_BASELINE_REASONING_EFFORT="$baseline_effort"
+  export CODEX_FOR_TUI_MODEL_PROVIDER_ID="$model_provider_id"
   export CODEX_FOR_TUI_RUNTIME_WORK="${runtime_work:-}"
   export CODEX_HOME="$runtime_home"
   export CODEX_SQLITE_HOME="$sqlite_home"
@@ -624,7 +631,8 @@ EOF
     lib/codex-zh-local.sh \
     lib/codex-zh-update.sh \
     codex-local-resume.sh \
-    codex-update.sh
+    codex-update.sh \
+    libexec/codex-session-defaults.py
   do
     [ -s "$dest_root/$required" ] || codex_die "安装后缺少支持文件：$required"
   done
@@ -635,6 +643,7 @@ EOF
   [ -s "$dest_root/codex-for-tui-bootstrap.sh" ] && cp "$dest_root/codex-for-tui-bootstrap.sh" "$install_dir/codex-for-tui-bootstrap" && chmod 755 "$install_dir/codex-for-tui-bootstrap"
   [ -s "$dest_root/codex-for-tui-self-test.sh" ] && cp "$dest_root/codex-for-tui-self-test.sh" "$install_dir/codex-self-test" && chmod 755 "$install_dir/codex-self-test"
   [ -s "$dest_root/codex-for-tui-self-test.sh" ] && cp "$dest_root/codex-for-tui-self-test.sh" "$install_dir/codex-test" && chmod 755 "$install_dir/codex-test"
+  [ -s "$dest_root/libexec/codex-session-defaults.py" ] && cp "$dest_root/libexec/codex-session-defaults.py" "$install_dir/codex-session-defaults" && chmod 755 "$install_dir/codex-session-defaults"
   codex_install_app_bridge_wrappers
 }
 

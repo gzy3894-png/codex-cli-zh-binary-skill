@@ -40,13 +40,14 @@ import com.rk.terminal.ui.screens.terminal.TerminalMediaPreview
 import com.rk.terminal.ui.screens.terminal.TerminalMediaPreviewKind
 import com.rk.terminal.ui.screens.terminal.TerminalMediaPreviewSource
 import com.rk.terminal.ui.screens.terminal.TerminalRenderPerformanceMetrics
+import com.rk.terminal.ui.screens.terminal.ResolvedSessionTarget
+import com.rk.terminal.ui.screens.terminal.SessionTargetResolver
 import com.rk.terminal.ui.screens.terminal.TerminalSessionFoldItem
 import com.rk.terminal.ui.screens.terminal.TerminalSessionFoldItemKind
 import com.rk.terminal.ui.screens.terminal.TerminalViewModel
 import com.rk.terminal.ui.screens.terminal.buildPreviewDisplayNames
 import com.rk.terminal.ui.screens.terminal.shortPreviewDisplayName
 import com.rk.terminal.ui.theme.KarbonTheme
-import com.termux.terminal.TerminalSession
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
@@ -1068,11 +1069,15 @@ class MainActivity : ComponentActivity() {
             toast("请先勾选要发送的文件")
             return
         }
-        val session = terminalViewModel.terminalView?.currentSession
-        if (session == null) {
+        val target = SessionTargetResolver.resolveCurrent(viewModel.sessionBinder)
+        if (target == null) {
             toast("当前终端会话不可用")
             return
         }
+        val targetExtra = mapOf(
+            "target_session_id" to target.id,
+            "target_window_role" to target.role.name.lowercase(Locale.ROOT),
+        )
 
         val displayNames = buildPreviewDisplayNames(terminalViewModel.mediaPreviews.toList())
         val cleanMessage = collapseTerminalText(userMessage)
@@ -1101,13 +1106,16 @@ class MainActivity : ComponentActivity() {
                     state = "done",
                     reason = cleanMessage,
                     itemId = refId,
-                    extra = mediaPreviewExtras(preview) + mapOf("display_name" to label)
+                    extra = mediaPreviewExtras(preview) +
+                        mapOf("display_name" to label) +
+                        targetExtra
                 )
                 writeAgentPanelStatus(
                     source = "files",
                     state = "done",
                     reason = "sent_to_terminal",
-                    itemId = refId
+                    itemId = refId,
+                    extra = targetExtra,
                 )
                 appendActiveSessionFoldItem(
                     kind = TerminalSessionFoldItemKind.FILE,
@@ -1121,7 +1129,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         if (prompt.isBlank() || sentLabels.isEmpty()) return
-        submitPromptToSession(session, prompt)
+        submitPromptToSession(target, prompt)
         val toastLabel = if (sentLabels.size == 1) {
             sentLabels.first()
         } else {
@@ -1176,20 +1184,24 @@ class MainActivity : ComponentActivity() {
             return false
         }
 
-        val session = terminalViewModel.terminalView?.currentSession
-        if (session == null) {
+        val target = SessionTargetResolver.resolveCurrent(viewModel.sessionBinder)
+        if (target == null) {
             toast("当前终端会话不可用")
             return false
         }
+        val targetExtra = mapOf(
+            "target_session_id" to target.id,
+            "target_window_role" to target.role.name.lowercase(Locale.ROOT),
+        )
 
         val previewDir = localDir().child("media-preview")
         val mediaDir = previewDir.child("files")
         val stamp = "${System.currentTimeMillis()}.${(0..9999).random()}"
         // Keep on-disk names short; UI renumbers as 文本N for display.
-        val target = mediaDir.child("$stamp-text.txt")
+        val targetFile = mediaDir.child("$stamp-text.txt")
         val written = runCatching {
             mediaDir.mkdirs()
-            target.writeText(text.replace("\r\n", "\n"), Charsets.UTF_8)
+            targetFile.writeText(text.replace("\r\n", "\n"), Charsets.UTF_8)
         }.onFailure { error ->
             toast("无法保存文本：${error.message}")
         }.isSuccess
@@ -1199,11 +1211,11 @@ class MainActivity : ComponentActivity() {
             it.kind == TerminalMediaPreviewKind.TEXT
         } + 1
         val preview = TerminalMediaPreview(
-            path = target.absolutePath,
+            path = targetFile.absolutePath,
             name = "文本$textIndex",
             kind = TerminalMediaPreviewKind.TEXT,
             stamp = stamp,
-            sizeBytes = target.length(),
+            sizeBytes = targetFile.length(),
             mimeType = "text/plain",
             textPreview = text.take(64 * 1024),
             source = TerminalMediaPreviewSource.USER
@@ -1219,7 +1231,7 @@ class MainActivity : ComponentActivity() {
         if (!refWritten) return false
 
         submitPromptToSession(
-            session,
+            target,
             buildString {
                 append("文本[").append(refId).append("] 路径：codex-preview path ").append(refId)
             }
@@ -1230,7 +1242,7 @@ class MainActivity : ComponentActivity() {
             state = "done",
             reason = "composer",
             itemId = refId,
-            extra = mediaPreviewExtras(preview)
+            extra = mediaPreviewExtras(preview) + targetExtra
         )
         syncMediaPreviewStatus(reason = "composer_sent", state = "done")
         writeAgentPanelStatus(
@@ -1238,7 +1250,7 @@ class MainActivity : ComponentActivity() {
             state = "done",
             reason = "composer_sent",
             itemId = refId,
-            extra = mediaPreviewExtras(preview)
+            extra = mediaPreviewExtras(preview) + targetExtra
         )
         appendActiveSessionFoldItem(
             kind = TerminalSessionFoldItemKind.TEXT,
@@ -1345,24 +1357,22 @@ class MainActivity : ComponentActivity() {
         return value.replace(Regex("\\s+"), " ").trim()
     }
 
-    private fun submitPromptToSession(session: TerminalSession, prompt: String) {
+    private fun submitPromptToSession(
+        target: ResolvedSessionTarget,
+        prompt: String,
+    ) {
         val cleanPrompt = prompt.trimEnd('\r', '\n')
-        // File-tray / AI send path: also drive agent prefix + first-message naming.
-        // sessionBinder lives on MainViewModel (viewModel), not TerminalViewModel.
-        val sid: String? = viewModel.sessionBinder
-            ?.getService()
-            ?.currentSession
-            ?.value
-            ?.first
+        // The target was resolved once from SessionService before prompt
+        // construction. Never mix it with ambient TerminalView state here.
         val terminalView = terminalViewModel.terminalView
         if (
-            sid != null && cleanPrompt.isNotBlank() && terminalView != null &&
+            cleanPrompt.isNotBlank() && terminalView != null &&
             AgentWindowCoordinator.route(
                 this,
                 terminalView,
-                sid,
+                target.id,
                 cleanPrompt,
-                session,
+                target.session,
                 false,
             ) { workerId ->
                 viewModel.sessionBinder?.let {
@@ -1372,15 +1382,18 @@ class MainActivity : ComponentActivity() {
         ) {
             return
         }
-        if (sid != null && cleanPrompt.isNotBlank()) {
-            com.rk.terminal.session.SessionIsolationHooks.onUserSubmittedLine(sid, cleanPrompt)
+        if (cleanPrompt.isNotBlank()) {
+            com.rk.terminal.session.SessionIsolationHooks.onUserSubmittedLine(
+                target.id,
+                cleanPrompt,
+            )
         }
-        session.write(cleanPrompt)
+        target.session.write(cleanPrompt)
 
-        if (terminalView?.currentSession !== session) {
+        if (!SessionTargetResolver.isAttached(terminalView, target)) {
             lifecycleScope.launch {
                 delay(TRAY_SEND_ENTER_DELAY_MS)
-                session.write("\r")
+                target.session.write("\r")
             }
             return
         }
@@ -1391,11 +1404,11 @@ class MainActivity : ComponentActivity() {
         // in the composer; a short delay makes this follow the real user key
         // path while still feeling immediate in the tray UI.
         terminalView.postDelayed({
-            if (terminalView.currentSession === session) {
+            if (SessionTargetResolver.isAttached(terminalView, target)) {
                 terminalView.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
                 terminalView.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
             } else {
-                session.write("\r")
+                target.session.write("\r")
             }
         }, TRAY_SEND_ENTER_DELAY_MS)
     }

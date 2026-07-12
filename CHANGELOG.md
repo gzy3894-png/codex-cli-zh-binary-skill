@@ -1,3 +1,16 @@
+## Codex for TUI 2.5.13
+
+Codex for TUI 2.5.13 是 2.5.12 后的 P0 启动台、历史迁移与默认模型前滚热修。
+
+- 启动台保持永久兜底窗口；Activity/TerminalView 重建会重新附着仍存活的工作窗口，不再把目标强制抢回启动台。
+- 文件托盘、文本托盘与虚拟键统一通过 `SessionService` 解析显式 live target，避免发送到启动台或串到报错窗口。
+- Codex UUIDv7 历史扫描增加有限启动重扫与侧栏即时刷新，覆盖安装后旧 `/root` 和 runtime rollout 会继续进入当前工作区 registry。
+- Default 模式下最近选择的 model/reasoning 通过 `codex-session-defaults` hook 作为下一次会话默认值持久化，旧 runtime 退出不再反向覆盖 profile。
+- 修复旧 runtime 把已删除通用配置项复活；补齐二进制 build-key 缓存、`/root/workspace` trust 继承和 `/etc/profile.d/codex-zh.sh` PATH 修复。
+- CI 只产出正式 release APK；不再构建或上传 test APK。
+- `versionCode=79`、`versionName=2.5.13`、runtime epoch `apk-2.5.13`。
+- 发布说明见 `docs/codex-for-tui-2.5.13-release-notes.md`。
+
 ## Codex for TUI 2.5.12
 
 Codex for TUI 2.5.12 是 2.5.11 后的 P0 工作区与历史恢复前滚热修。

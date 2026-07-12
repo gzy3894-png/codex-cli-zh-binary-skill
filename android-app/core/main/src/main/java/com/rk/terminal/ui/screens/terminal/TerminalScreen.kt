@@ -77,6 +77,12 @@ fun TerminalScreen(
 
     val sessionBinder = mainViewModel.sessionBinder
 
+    LaunchedEffect(drawerState.isOpen) {
+        if (drawerState.isOpen) {
+            ConversationManager.refreshAsync()
+        }
+    }
+
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             val customBackground = context.filesDir.child("background")
@@ -231,7 +237,9 @@ fun TerminalScreen(
                 if (terminalViewModel.showToolbar) {
                     TerminalTopBar(
                         sessionBinder = sessionBinder,
-                        onMenuClick = { scope.launch { drawerState.open() } },
+                        onMenuClick = {
+                            scope.launch { drawerState.open() }
+                        },
                         onAddClick = { showAddDialog = true },
                         color = TerminalUtils.getComposeColor(),
                         previewCount = terminalViewModel.mediaPreviews.size,

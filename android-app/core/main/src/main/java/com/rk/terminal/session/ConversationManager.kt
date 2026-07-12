@@ -4,19 +4,22 @@ import android.content.Context
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Owns imported CLI conversations, independently from live PTY windows.
  */
 object ConversationManager {
     private val lock = Any()
-    private val executor = Executors.newSingleThreadExecutor { runnable ->
+    private val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "codex-conversation-scan").apply { isDaemon = true }
     }
     private var context: Context? = null
     private var store: ConversationRegistryStore? = null
     private var discovery: ConversationDiscovery? = null
     private val records = linkedMapOf<String, ConversationRecord>()
+    private val refreshQueued = AtomicBoolean(false)
 
     val visible: MutableList<ConversationRecord> = mutableStateListOf()
     val revision = mutableStateOf(0)
@@ -32,11 +35,24 @@ object ConversationManager {
             store?.load()?.forEach { records[it.id] = it }
             publishLocked()
         }
-        refreshAsync()
+        // APK workspace/history migration runs in the first launcher PTY and
+        // can finish after the Application-level initial scan. Keep retries
+        // finite and independent from the migrator; opening the drawer also
+        // requests an immediate refresh.
+        STARTUP_REFRESH_DELAYS_SECONDS.forEach { delay ->
+            executor.schedule({ refreshNow() }, delay, TimeUnit.SECONDS)
+        }
     }
 
     fun refreshAsync() {
-        executor.execute { refreshNow() }
+        if (!refreshQueued.compareAndSet(false, true)) return
+        executor.execute {
+            try {
+                refreshNow()
+            } finally {
+                refreshQueued.set(false)
+            }
+        }
     }
 
     fun refreshNow(): List<ConversationRecord> {
@@ -111,6 +127,7 @@ object ConversationManager {
             records.clear()
             visible.clear()
             revision.value = 0
+            refreshQueued.set(false)
         }
     }
 
@@ -124,4 +141,6 @@ object ConversationManager {
         revision.value += 1
     }
 
+    private val STARTUP_REFRESH_DELAYS_SECONDS =
+        longArrayOf(0L, 2L, 5L, 10L, 20L, 40L, 60L, 90L)
 }

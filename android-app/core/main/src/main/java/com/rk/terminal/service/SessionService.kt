@@ -34,7 +34,9 @@ class SessionService : Service() {
     private val lifecycleLock = Any()
     private val closingSessionIds = mutableSetOf<String>()
     val sessionList = mutableStateMapOf<String, Int>()
-    var currentSession = mutableStateOf(Pair("main", com.rk.settings.Settings.working_Mode))
+    var currentSession = mutableStateOf(
+        Pair(LAUNCHER_WINDOW_ID, com.rk.settings.Settings.working_Mode)
+    )
 
     inner class SessionBinder : Binder() {
         fun getService(): SessionService = this@SessionService

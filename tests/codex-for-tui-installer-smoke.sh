@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+export CODEX_ZH_SKIP_PERSIST_PATH=1
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 SCRIPT_DIR="$ROOT_DIR/android-arm64-musl"

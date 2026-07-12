@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+export CODEX_ZH_SKIP_PERSIST_PATH=1
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 SCRIPT_DIR="$ROOT_DIR/android-arm64-musl"
@@ -47,7 +48,7 @@ EOF
 write_hook_tool_stubs() {
   bin_dir="$1"
   mkdir -p "$bin_dir"
-  for tool in codex-rtk codex-context; do
+  for tool in codex-rtk codex-context codex-session-defaults; do
     cat > "$bin_dir/$tool" <<'EOF'
 #!/usr/bin/env sh
 case "${1:-}" in
@@ -67,6 +68,7 @@ write_launcher() {
     export HOME="$tmp/home"
     export CODEX_HOME="$tmp/home/.codex"
     export CODEX_ZH_INSTALL_DIR="$tmp/bin"
+    export CODEX_ZH_BIN_SHA256="$(sha256sum "$tmp/bin/codex-zh-bin" | awk '{print $1}')"
     codex_local_write_launcher
   )
 }
@@ -96,6 +98,7 @@ test_normal_codex_start_preserves_existing_config() {
     export HOME="$tmp/home"
     export CODEX_HOME="$tmp/home/.codex"
     export CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR"
+    export CODEX_ZH_BIN_SHA256="$(sha256sum "$tmp/bin/codex-zh-bin" | awk '{print $1}')"
     export CODEX_FOR_TUI_HOOK_AUTH_PROMPT=0
     export CODEX_FOR_TUI_OFFICIAL_LOGIN_PROMPT=0
     PATH="$tmp/bin:/bin:/usr/bin:${PATH:-}" "$tmp/bin/codex" >"$tmp/stdout" 2>"$tmp/stderr"
@@ -129,6 +132,7 @@ test_hook_quick_auth_writes_only_after_explicit_choice_and_backs_up() {
     export HOME="$tmp/home"
     export CODEX_HOME="$tmp/home/.codex"
     export CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR"
+    export CODEX_ZH_BIN_SHA256="$(sha256sum "$tmp/bin/codex-zh-bin" | awk '{print $1}')"
     export CODEX_ZH_FORCE_STDIN=1
     export CODEX_FOR_TUI_REQUIREMENTS_FILE="$req"
     export PATH="$tmp/bin:/bin:/usr/bin:${PATH:-}"
@@ -150,6 +154,7 @@ test_hook_quick_auth_writes_only_after_explicit_choice_and_backs_up() {
     export HOME="$tmp/home"
     export CODEX_HOME="$tmp/home/.codex"
     export CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR"
+    export CODEX_ZH_BIN_SHA256="$(sha256sum "$tmp/bin/codex-zh-bin" | awk '{print $1}')"
     export CODEX_ZH_FORCE_STDIN=1
     export CODEX_FOR_TUI_REQUIREMENTS_FILE="$bad_parent/requirements.toml"
     export PATH="$tmp/bin:/bin:/usr/bin:${PATH:-}"
@@ -166,6 +171,7 @@ test_hook_quick_auth_writes_only_after_explicit_choice_and_backs_up() {
     export HOME="$tmp/home"
     export CODEX_HOME="$tmp/home/.codex"
     export CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR"
+    export CODEX_ZH_BIN_SHA256="$(sha256sum "$tmp/bin/codex-zh-bin" | awk '{print $1}')"
     export CODEX_ZH_FORCE_STDIN=1
     export CODEX_FOR_TUI_REQUIREMENTS_FILE="$req"
     export PATH="$tmp/bin:/bin:/usr/bin:${PATH:-}"
@@ -180,6 +186,7 @@ test_hook_quick_auth_writes_only_after_explicit_choice_and_backs_up() {
   assert_file_contains "$req" "# codex-for-tui-managed-hooks begin"
   assert_file_contains "$req" 'command = "codex-rtk hook"'
   assert_file_contains "$req" 'command = "codex-context hook"'
+  assert_file_contains "$req" 'command = "codex-session-defaults hook"'
   assert_file_contains "$tmp/home/.codex/config.toml" "configured = true"
   find "$tmp/home/.codex" -type f -path '*/install-state/backups/*/requirements.toml' \
     -exec grep -l 'existing_requirement = true' {} \; |

@@ -70,11 +70,21 @@ fun TerminalViewLayout(
                         preserveExistingIdentity = false,
                     )
 
-                    // Every Activity/TerminalView reconstruction starts on the
-                    // permanent launcher. Worker PTYs stay in the drawer but a
-                    // failed/stopped worker must never capture the app entrypoint.
-                    val activeId = launcherId
-                    val activeClient = launcherClient
+                    // Cold process start falls back to the permanent launcher.
+                    // Activity/TerminalView reconstruction in the same process
+                    // reattaches the still-live service target instead of
+                    // silently stealing selection from a worker window.
+                    val requestedId = service.currentSession.value.first
+                    val activeId = requestedId.takeIf {
+                        it.isNotBlank() &&
+                            service.sessionList.containsKey(it) &&
+                            sessionBinder.getSession(it) != null
+                    } ?: launcherId
+                    val activeClient = if (activeId == launcherId) {
+                        launcherClient
+                    } else {
+                        TerminalBackEnd(this, mainActivity, activeId)
+                    }
                     val session = sessionBinder.getSession(activeId)
                         ?: sessionBinder.createSession(
                             activeId,
@@ -179,23 +189,29 @@ private fun VirtualKeysPager(viewModel: TerminalViewModel, mainActivity: MainAct
                             setOnEditorActionListener { _, actionId, _ ->
                                 if (actionId == EditorInfo.IME_ACTION_DONE) {
                                     val terminal = viewModel.terminalView
+                                    val binder = mainActivity.viewModel.sessionBinder
+                                    val target = SessionTargetResolver.resolveCurrent(binder)
                                     if (text.isEmpty()) {
-                                        terminal?.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
-                                        terminal?.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+                                        if (SessionTargetResolver.isAttached(terminal, target)) {
+                                            terminal?.dispatchKeyEvent(
+                                                KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER)
+                                            )
+                                            terminal?.dispatchKeyEvent(
+                                                KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER)
+                                            )
+                                        } else {
+                                            target?.session?.write("\r")
+                                        }
                                     } else {
-                                        val binder = mainActivity.viewModel.sessionBinder
-                                        val sid = binder?.getService()?.currentSession?.value?.first
-                                        val sourceSession = terminal?.currentSession
                                         val routed = if (
-                                            binder != null && sid != null &&
-                                            terminal != null && sourceSession != null
+                                            binder != null && target != null && terminal != null
                                         ) {
                                             AgentWindowCoordinator.route(
                                                 mainActivity,
                                                 terminal,
-                                                sid,
+                                                target.id,
                                                 text,
-                                                sourceSession,
+                                                target.session,
                                                 false,
                                             ) { workerId ->
                                                 viewModel.changeSession(mainActivity, binder, workerId)
@@ -204,10 +220,13 @@ private fun VirtualKeysPager(viewModel: TerminalViewModel, mainActivity: MainAct
                                             false
                                         }
                                         if (!routed) {
-                                            if (sid != null) {
-                                                SessionIsolationHooks.onUserSubmittedLine(sid, text)
+                                            if (target != null) {
+                                                SessionIsolationHooks.onUserSubmittedLine(
+                                                    target.id,
+                                                    text,
+                                                )
+                                                target.session.write(text)
                                             }
-                                            sourceSession?.write(text)
                                         }
                                         setText("")
                                     }

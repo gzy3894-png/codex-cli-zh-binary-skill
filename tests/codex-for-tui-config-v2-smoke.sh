@@ -390,8 +390,12 @@ test_profile_runtime_config_persistence_and_isolation() {
   engine "$home" profile sync-runtime alpha \
     --source-dir "$alpha_runtime" > "$home/alpha-sync.json"
   alpha_base="$home/config-profiles-v2/profiles/$alpha_id/legacy-config.toml"
-  assert_contains "$alpha_base" "# alpha-runtime-only"
-  assert_contains "$alpha_base" 'runtime_note = "alpha-only"'
+  alpha_profile_dir="$home/config-profiles-v2/profiles/$alpha_id"
+  alpha_runtime_local="$alpha_profile_dir/runtime-local.toml"
+  [ -s "$alpha_runtime_local" ] ||
+    fail "runtime-local overlay was not persisted after sync"
+  assert_contains "$alpha_runtime_local" "# alpha-runtime-only"
+  assert_contains "$alpha_runtime_local" 'runtime_note = "alpha-only"'
   assert_not_contains "$alpha_base" "sqlite_home"
 
   engine "$home" profile launch alpha \
@@ -697,6 +701,22 @@ PY
   engine "$home" profile sync-runtime upgraded \
     --source-dir "$runtime_home" >/dev/null
   python3 - "$profile_catalog" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+models = {
+    item["slug"]: item
+    for item in json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["models"]
+}
+assert models["gpt-5.4"]["visibility"] != "hide"
+assert models["codex-auto-review"]["visibility"] == "list"
+assert models["codex-auto-fast"]["visibility"] == "list"
+PY
+  engine "$home" profile launch upgraded \
+    --sqlite-build-key codex-cli-0.144.1-existing-catalog-b > "$home/relaunch.json"
+  runtime_home="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["runtime_home"])' "$home/relaunch.json")"
+  python3 - "$runtime_home/model_catalog.json" <<'PY'
 import json
 import sys
 from pathlib import Path
