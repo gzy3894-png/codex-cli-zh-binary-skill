@@ -403,6 +403,35 @@ test_profile_runtime_config_persistence_and_isolation() {
   assert_contains "$alpha_runtime/config.toml" 'runtime_note = "alpha-only"'
   assert_contains "$alpha_runtime/sessions/alpha.jsonl" '"session":"alpha-stays-alive"'
   assert_not_contains "$beta_runtime/config.toml" "alpha-runtime-only"
+
+  # 2.5.6: materialize uses control common ⊕ managed, not legacy-config snapshots.
+  # Write root-level common key (prepend) so TOML round-trip keeps it.
+  python3 - "$home/config.toml" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+if 'common_marker = "keep-me"' not in text:
+    path.write_text('common_marker = "keep-me"\n' + text, encoding="utf-8")
+PY
+  printf '%s\n' '# POISON_LEGACY' 'poison_legacy = true' >> "$alpha_base"
+  engine "$home" profile launch alpha \
+    --sqlite-build-key codex-cli-0.144.1-build-c > "$home/alpha-common-launch.json"
+  assert_contains "$home/config.toml" 'common_marker = "keep-me"'
+  assert_not_contains "$home/config.toml" 'poison_legacy'
+  assert_not_contains "$home/config.toml" 'POISON_LEGACY'
+  assert_contains "$alpha_runtime/config.toml" 'common_marker = "keep-me"'
+  assert_not_contains "$alpha_runtime/config.toml" 'poison_legacy'
+
+  # Global compact policy is index-owned; profile meta copies are not the source of truth.
+  engine "$home" compact-policy fixed 250000 > "$home/compact-fixed.json"
+  assert_contains "$home/config.toml" 'model_auto_compact_token_limit = 250000'
+  engine "$home" profile activate beta >/dev/null
+  engine "$home" profile launch beta \
+    --sqlite-build-key codex-cli-0.144.1-build-c > "$home/beta-common-launch.json"
+  assert_contains "$home/config.toml" 'model_auto_compact_token_limit = 250000'
+  assert_contains "$home/config.toml" 'common_marker = "keep-me"'
+  assert_contains "$beta_runtime/config.toml" 'model_auto_compact_token_limit = 250000'
 }
 
 write_v1_official_fixture() {

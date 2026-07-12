@@ -540,12 +540,69 @@ def replace_directory(staged: Path, destination: Path) -> None:
     fsync_dir(destination.parent)
 
 
+def strip_managed_fields(
+    doc: TOMLDocument,
+    *,
+    previous_provider: str | None = None,
+) -> TOMLDocument:
+    """Return a copy of doc with profile-variable / runtime-only fields removed.
+
+    Common defaults live in the remaining document. Profile materialization
+    re-applies managed variables as a patch instead of replaying a full snapshot.
+    """
+    cleaned = copy.deepcopy(doc)
+    cleaned.pop("sqlite_home", None)
+    for key in MANAGED_ROOT_KEYS:
+        cleaned.pop(key, None)
+    # compact threshold is owned by global compact_policy, not profile snapshots
+    cleaned.pop("model_auto_compact_token_limit", None)
+    providers = cleaned.get("model_providers")
+    if providers:
+        for provider_id in list(providers):
+            if (
+                provider_id == previous_provider
+                or MANAGED_PROVIDER_ID_RE.fullmatch(str(provider_id))
+            ):
+                del providers[provider_id]
+        if not providers:
+            cleaned.pop("model_providers", None)
+    return cleaned
+
+
 def write_profile_base_config(source: Path, destination: Path) -> None:
+    """Persist a non-managed snapshot for migration/backup only (not materialize base)."""
     if not source.is_file():
         return
-    doc = read_toml(source)
-    doc.pop("sqlite_home", None)
+    doc = strip_managed_fields(read_toml(source))
     atomic_write_text(destination, tomlkit.dumps(doc), 0o600)
+
+
+def load_common_config(paths: Paths, index: dict[str, Any] | None = None) -> TOMLDocument:
+    """Load control-home common defaults with managed variables stripped."""
+    runtime_managed = (index or {}).get("runtime_managed") if isinstance(index, dict) else None
+    previous_provider = None
+    if isinstance(runtime_managed, dict):
+        previous_provider = runtime_managed.get("provider_id")
+        if previous_provider is not None:
+            previous_provider = str(previous_provider)
+    if paths.config.is_file():
+        return strip_managed_fields(read_toml(paths.config), previous_provider=previous_provider)
+    return tomlkit.document()
+
+
+def merge_runtime_local_overlay(doc: TOMLDocument, previous: TOMLDocument | None) -> None:
+    """Preserve runtime-only non-managed keys across relaunch (patch, not full replace)."""
+    if previous is None:
+        return
+    for key in list(previous):
+        if key in MANAGED_ROOT_KEYS or key in {
+            "sqlite_home",
+            "model_auto_compact_token_limit",
+            "model_providers",
+        }:
+            continue
+        if key not in doc:
+            doc[key] = copy.deepcopy(previous[key])
 
 
 def create_profile_directory(
@@ -576,7 +633,8 @@ def create_profile_directory(
         "mode": mode,
         "compatibility_model": compatibility_model,
         "runtime_home": str(runtime_home or default_runtime_home(paths, profile_id)),
-        "compact_policy": compact_policy or compact_policy_from_config(base_config_file),
+        # Compact policy is global; profile field is informational only (not used to materialize).
+        "compact_policy": compact_policy or {"mode": "follow-model"},
         "created_at": existing_created_at or now,
         "updated_at": now,
     }
@@ -631,9 +689,12 @@ def profile_compact_policy(
     meta: dict[str, Any] | None,
     index: dict[str, Any],
 ) -> dict[str, Any]:
-    policy = meta.get("compact_policy") if isinstance(meta, dict) else None
-    if not isinstance(policy, dict):
-        policy = index.get("compact_policy")
+    """Compact policy is global (index). Profile meta is ignored on purpose.
+
+    `meta` is retained for call-site compatibility only.
+    """
+    _ = meta
+    policy = index.get("compact_policy")
     if not isinstance(policy, dict):
         return {"mode": "follow-model"}
     if policy.get("mode") == "fixed":
@@ -665,23 +726,12 @@ def apply_compact_policy(
 
 def materialize_profile(paths: Paths, meta: dict[str, Any], index: dict[str, Any]) -> None:
     directory = profile_dir(paths, str(meta["id"]))
-    base_config = directory / "legacy-config.toml"
-    doc = read_toml(base_config if base_config.is_file() else paths.config)
+    # Common defaults from control home, then patch managed profile variables.
+    # legacy-config.toml is migration/backup only and is never the materialize base.
+    doc = load_common_config(paths, index)
     runtime_managed = index.setdefault("runtime_managed", {"provider_id": None, "root_keys": []})
     previous_provider = runtime_managed.get("provider_id")
     previous_keys = set(runtime_managed.get("root_keys") or [])
-    providers = doc.get("model_providers")
-    if providers:
-        for provider_id in list(providers):
-            if (
-                provider_id == previous_provider
-                or MANAGED_PROVIDER_ID_RE.fullmatch(str(provider_id))
-            ):
-                del providers[provider_id]
-        if not providers:
-            doc.pop("model_providers", None)
-    for key in MANAGED_ROOT_KEYS:
-        doc.pop(key, None)
 
     mode = meta.get("mode")
     new_owned: set[str] = set()
@@ -1014,10 +1064,7 @@ def import_runtime_profile(
             )
         ),
         compact_policy=(
-            existing_meta.get("compact_policy")
-            if isinstance(existing_meta, dict)
-            and isinstance(existing_meta.get("compact_policy"), dict)
-            else compact_policy_from_config(config)
+            {"mode": "follow-model"}
         ),
     )
     if existing_meta is not None:
@@ -1104,6 +1151,7 @@ def materialize_runtime(
     runtime_catalog = runtime_home / "model_catalog.json"
     runtime_marker = runtime_home / "install-state" / "official-login-mode"
 
+    previous_runtime = read_toml(runtime_config) if runtime_config.is_file() else None
     doc = read_toml(paths.config)
     if paths.catalog.is_file():
         write_catalog_with_visibility_policy(paths.catalog, runtime_catalog)
@@ -1112,6 +1160,8 @@ def materialize_runtime(
         runtime_catalog.unlink(missing_ok=True)
         doc.pop("model_catalog_json", None)
     doc["sqlite_home"] = str(sqlite_home)
+    # Keep only non-managed runtime-local extras (e.g. user notes), never restamp managed vars.
+    merge_runtime_local_overlay(doc, previous_runtime)
     atomic_write_text(runtime_config, tomlkit.dumps(doc), 0o600)
 
     if paths.auth.is_file():
@@ -1579,14 +1629,8 @@ def cmd_compact_policy(paths: Paths, args: argparse.Namespace) -> None:
         paths.ensure_v2_dirs()
         recover_transaction(paths)
         index = load_index(paths, create=True)
-        active_ref = index.get("active_profile_id")
-        active_meta = (
-            profile_meta(paths, str(active_ref))
-            if isinstance(active_ref, str) and active_ref
-            else None
-        )
         if args.mode == "show":
-            emit(True, compact_policy=profile_compact_policy(active_meta, index))
+            emit(True, compact_policy=profile_compact_policy(None, index))
             return
         if args.mode == "follow-model":
             policy = {"mode": "follow-model"}
@@ -1595,18 +1639,17 @@ def cmd_compact_policy(paths: Paths, args: argparse.Namespace) -> None:
                 raise EngineError("固定压缩阈值必须是正整数", 2)
             policy = {"mode": "fixed", "value": args.value}
         with transaction(paths, "compact-policy"):
+            # Global policy only — profiles do not own compact thresholds.
             index["compact_policy"] = policy
+            atomic_write_json(paths.index, index)
             active = index.get("active_profile_id")
             if active:
                 meta = profile_meta(paths, str(active))
-                meta["compact_policy"] = policy
-                atomic_write_json(profile_dir(paths, str(active)) / "profile.json", meta)
                 materialize_profile(paths, meta, index)
             else:
-                doc = read_toml(paths.config)
+                doc = load_common_config(paths, index)
                 apply_compact_policy(doc, index)
-                atomic_write_text(paths.config, tomlkit.dumps(doc))
-                atomic_write_json(paths.index, index)
+                atomic_write_text(paths.config, tomlkit.dumps(doc), 0o600)
         emit(True, compact_policy=policy)
 
 

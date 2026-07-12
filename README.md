@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.5.5-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.5.5)
+[![Release](https://img.shields.io/badge/release-v2.5.6-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.5.6)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.144.1-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,9 +9,9 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.5.5 终端窗口模型（基于 2.5.2）
+## 重要：2.5.6 配置分层（基于 2.5.5）
 
-2.5.5 前滚修复「老窗口删不掉」：关窗先写 registry 再杀 PTY；保留 2.5.4 的配置共享会话与统一 workspace。侧栏仍是**终端窗口**（PTY）列表。发布说明见 `docs/codex-for-tui-2.5.5-release-notes.md`。
+2.5.6 在 2.5.5 关窗修复之上，把配置物化改为「通用底稿 ⊕ 中转站变量补丁」，压缩策略全局生效。侧栏仍是**终端窗口**（PTY）列表。发布说明见 `docs/codex-for-tui-2.5.5-release-notes.md`。
 
 ## 重要：2.5.0 会话隔离（基于 2.4.10）
 
@@ -75,12 +75,13 @@ codex-ops resume-hint
 
 内置 WebView 继续作为 Agent Browser，保留后台打开、DOM 读取、点击、输入、JS、截图、多标签、Cookie/WebStorage 持久化和 userscript；遇到验证码/风控/外部 scheme 时会进入明确的用户协作状态，而不是让 Agent 猜。
 
-已经安装 2.0.x～2.5.4 的用户，直接从 Releases 下载并覆盖安装 2.5.5 APK，然后打开 App。首次启动会自动完成二进制、launcher、脚本、配置档 V2、模型目录和 SQLite 运行世代升级；之后默认进入 shell（引导结束后 cwd 为统一 workspace `/root/workspace`，无需 Ctrl+C），输入 `codex` 再启动。会话抽屉支持带前缀显示名与冷启动恢复；不同配置档共享 CLI 会话列表。无需再执行任何 Codex 更新或修复命令。
+已经安装 2.0.x～2.5.5 的用户，直接从 Releases 下载并覆盖安装 2.5.6 APK，然后打开 App。首次启动会自动完成二进制、launcher、脚本、配置档 V2、模型目录和 SQLite 运行世代升级；之后默认进入 shell（引导结束后 cwd 为统一 workspace `/root/workspace`，无需 Ctrl+C），输入 `codex` 再启动。会话抽屉支持带前缀显示名与冷启动恢复；不同配置档共享 CLI 会话列表。无需再执行任何 Codex 更新或修复命令。
 
 升级只使用 APK 内置载荷完成核心迁移。完成后普通启动仍不会远程更新脚本、自动请求第三方 `/models` 或覆盖用户手写配置。`codex 更新` 只用于用户没有更新 APK、明确只想热更新脚本的场景。
 
 ## 2.0 新功能
 
+- 2.5.6：配置 common⊕managed 补丁物化；全局固定自动压缩策略。
 - 2.5.5：关窗先落盘 registry 再杀 PTY，修复 2.5.0–2.5.4 老窗口删不掉。
 - 2.5.4：关窗闪退前滚 + 配置共享会话 + 工作区路径统一；侧栏=终端窗口。
 - 2.5.2：自动 Agent 前缀 + 首条消息命名 + 审查修复；含 2.5.1 闪退热修。
@@ -170,7 +171,7 @@ codex-ops resume-hint
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.5.5` |
+| Android App | `2.5.6` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug/Test 包名 | `com.gzy3894.codexfortui.test` |
 | Codex CLI | `0.144.1` 中文版 |

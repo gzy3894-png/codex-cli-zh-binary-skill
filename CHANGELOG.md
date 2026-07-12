@@ -1,3 +1,13 @@
+## Codex for TUI 2.5.6
+
+Codex for TUI 2.5.6：配置物化改为 common⊕managed 补丁合并；自动压缩策略全局固定真源。
+
+- `materialize_profile` 不再以 `legacy-config.toml` 整包为底稿，改为 control common 剥离 managed 后补丁写入。
+- `compact_policy` 仅认 `config-profiles-v2/index.json`；`compact-policy fixed 250000` 等一次改全局生效。
+- Runtime relaunch 保留非 managed 本地附加键；legacy 仅迁移/备份。
+- SQLite epoch `apk-2.5.6`；`versionCode=72`、`versionName=2.5.6`。
+- 发布说明见 `docs/codex-for-tui-2.5.6-release-notes.md`。
+
 ## Codex for TUI 2.5.5
 
 Codex for TUI 2.5.5：关窗「先落盘再杀 PTY」，修复 2.5.0–2.5.4 老窗口删不掉。
