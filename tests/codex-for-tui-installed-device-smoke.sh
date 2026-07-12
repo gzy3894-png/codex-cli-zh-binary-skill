@@ -130,7 +130,7 @@ if [ -s "$app_codex_home/config.toml" ]; then
   if safe_grep "可用模型" "$app_codex_home/config.toml"; then
     fail "config.toml model field appears polluted by menu text"
   fi
-  if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "80" ]; then
+  if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "81" ]; then
     safe_grep '"/root/workspace"' "$app_codex_home/config.toml" &&
       safe_grep 'trust_level = "trusted"' "$app_codex_home/config.toml" ||
       fail "/root/workspace trust was not inherited into control config"
@@ -145,9 +145,9 @@ else
 fi
 
 build_key_file="$app_codex_home/install-state/binary-build-key-v1"
-if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "80" ]; then
+if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "81" ]; then
   [ -s "$build_key_file" ] || fail "binary build key cache missing: $build_key_file"
-  safe_grep "runtime_epoch=apk-2.5.14" "$build_key_file" ||
+  safe_grep "runtime_epoch=apk-2.5.15" "$build_key_file" ||
     fail "binary build key cache has wrong runtime epoch"
 fi
 
@@ -160,7 +160,7 @@ if [ -d "$codex_transcript_root" ]; then
   wait_seconds="${CODEX_TUI_INSTALLED_WAIT_SECONDS:-20}"
   expected_min_registry="${CODEX_TUI_EXPECTED_CODEX_REGISTRY_MIN:-}"
   expected_uuid="${CODEX_TUI_EXPECTED_CODEX_UUID:-}"
-  if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "80" ]; then
+  if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "81" ]; then
     [ -n "$expected_min_registry" ] || expected_min_registry=91
     [ -n "$expected_uuid" ] ||
       expected_uuid="019f212d-4b6e-7e93-b3f4-188eefa2657d"
@@ -222,9 +222,9 @@ fi
 
 workspace_release="${CODEX_TUI_WORKSPACE_MIGRATION_RELEASE:-}"
 if [ -z "$workspace_release" ] &&
-  [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "80" ]
+  [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "81" ]
 then
-  workspace_release="2.5.14"
+  workspace_release="2.5.15"
 fi
 if [ -n "$workspace_release" ]; then
   need_cmd python3
@@ -235,11 +235,11 @@ if [ -n "$workspace_release" ]; then
   expected_migrated="${CODEX_TUI_EXPECTED_MIGRATED_ROLLOUT_COUNT:-}"
   expected_baseline="${CODEX_TUI_EXPECTED_BASELINE_TRANSCRIPT_COUNT:-}"
   expected_minimum="${CODEX_TUI_EXPECTED_MIN_TRANSCRIPT_COUNT:-}"
-  if [ "$workspace_release" = "2.5.12" ] || [ "$workspace_release" = "2.5.14" ]; then
+  if [ "$workspace_release" = "2.5.12" ] || [ "$workspace_release" = "2.5.15" ]; then
     [ -n "$baseline" ] ||
       baseline="/root/codex-release-runs/2.5.12/transcript-baseline.log"
-    if [ ! -s "$baseline" ] && [ "$workspace_release" = "2.5.14" ]; then
-      baseline="/root/codex-release-runs/2.5.14/transcript-baseline.log"
+    if [ ! -s "$baseline" ] && [ "$workspace_release" = "2.5.15" ]; then
+      baseline="/root/codex-release-runs/2.5.15/transcript-baseline.log"
     fi
     [ -n "$expected_imports" ] || expected_imports=11
     [ -n "$expected_migrated" ] || expected_migrated=83

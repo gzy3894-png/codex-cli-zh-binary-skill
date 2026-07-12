@@ -268,7 +268,7 @@ def runtime_home_for_profile(paths: Paths, meta: dict[str, Any]) -> Path:
     )
     if not runtime_home.is_absolute():
         runtime_home = paths.home / runtime_home
-    resolved_home = paths.home.resolve()
+    resolved_home = paths.home.resolve(strict=False)
     resolved_runtime = runtime_home.resolve(strict=False)
     try:
         resolved_runtime.relative_to(resolved_home)
@@ -278,6 +278,29 @@ def runtime_home_for_profile(paths: Paths, meta: dict[str, Any]) -> Path:
             7,
             runtime_home=str(runtime_home),
         ) from exc
+    # Reject nested runtimes such as:
+    #   $CODEX_HOME/config-runtimes/p-xxx/config-runtimes/p-yyy
+    # which appear when CODEX_HOME was already a runtime path.
+    try:
+        relative = resolved_runtime.relative_to(resolved_home)
+    except ValueError:
+        relative = Path()
+    parts = relative.parts
+    if parts.count("config-runtimes") > 1:
+        raise EngineError(
+            "配置运行目录禁止连环嵌套",
+            7,
+            runtime_home=str(runtime_home),
+        )
+    if "config-runtimes" in parts:
+        idx = parts.index("config-runtimes")
+        # Expect config-runtimes/<profile-id>[/...]
+        if idx + 1 >= len(parts) or not PROFILE_ID_RE.fullmatch(parts[idx + 1]):
+            raise EngineError(
+                "配置运行目录路径无效",
+                7,
+                runtime_home=str(runtime_home),
+            )
     return resolved_runtime
 
 

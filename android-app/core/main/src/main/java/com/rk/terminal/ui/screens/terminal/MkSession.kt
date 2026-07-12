@@ -133,7 +133,8 @@ object MkSession {
         sessionClient: TerminalSessionClient,
         sessionId: String,
         workingMode: Int,
-        pendingCommand: PendingCommand? = null
+        pendingCommand: PendingCommand? = null,
+        extraEnv: List<String>? = null,
     ): TerminalSession {
         with(context) {
             val envVariables = mapOf(
@@ -203,9 +204,15 @@ object MkSession {
             pendingCommand?.env?.let {
                 env.addAll(it)
             }
+            extraEnv?.let {
+                env.addAll(it)
+            }
 
             val args: Array<String>
             val shell = "/system/bin/sh"
+            // Agent/resume launch paths must create a normal interactive shell and
+            // type commands into the worker PTY. PendingCommand remains only for
+            // rare non-interactive bootstrap callers that still need argv injection.
             if (pendingCommand == null) {
                 args = if (workingMode == WorkingMode.ALPINE) {
                     arrayOf("-c", initFile.absolutePath)

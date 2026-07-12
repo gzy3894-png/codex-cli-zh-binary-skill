@@ -171,17 +171,82 @@ codex_for_tui_configure_if_missing() {
 }
 
 codex_for_tui_force_configure() {
+  if [ "${CODEX_FOR_TUI_CONFIG_MODE:-0}" = "1" ]; then
+    printf '%s\n' "错误: 配置模式已在运行，拒绝连环嵌套进入。" >&2
+    return 1
+  fi
   codex_for_tui_load_config_libs
+  # Always configure against control home, never a nested runtime CODEX_HOME.
+  case "${CODEX_HOME:-}" in
+    */config-runtimes/*)
+      control_home="$CODEX_HOME"
+      while [ -n "$control_home" ] && [ "$(basename "$control_home")" != "config-runtimes" ]; do
+        control_home="$(dirname "$control_home")"
+      done
+      control_home="$(dirname "$control_home")"
+      [ -n "$control_home" ] && export CODEX_HOME="$control_home"
+      ;;
+  esac
   codex_init_env
-  codex_config_menu
+  export CODEX_FOR_TUI_CONFIG_MODE=1
+  config_rc=0
+  codex_config_menu || config_rc=$?
+  unset CODEX_FOR_TUI_CONFIG_MODE
+  return "$config_rc"
 }
 
 codex_for_tui_binary_build_key() {
-  codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.14}"
+  codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.15}"
+}
+
+
+codex_for_tui_import_runtime_sessions() {
+  control_home="${1:-${CODEX_FOR_TUI_CONTROL_HOME:-}}"
+  runtime_home="${2:-${CODEX_FOR_TUI_RUNTIME_HOME:-}}"
+  [ -n "$control_home" ] && [ -n "$runtime_home" ] || return 0
+  [ "$control_home" != "$runtime_home" ] || return 0
+  engine_root="$(codex_config_engine_find_root 2>/dev/null || true)"
+  importer=""
+  for candidate in \
+    ${engine_root:+"$engine_root/libexec/codex-runtime-session-import.py"} \
+    "${CODEX_ZH_ACTIVE_SCRIPT_DIR:-}/libexec/codex-runtime-session-import.py" \
+    "$(codex_script_install_root 2>/dev/null || true)/libexec/codex-runtime-session-import.py"
+  do
+    [ -n "$candidate" ] || continue
+    if [ -s "$candidate" ]; then
+      importer="$candidate"
+      break
+    fi
+  done
+  [ -n "$importer" ] || return 0
+  journal_dir="$control_home/install-state/runtime-session-import"
+  mkdir -p "$journal_dir" 2>/dev/null || true
+  import_out="$journal_dir/last-import.json"
+  if ! PYTHONNOUSERSITE=1 python3 \
+    "$importer" \
+    --control-home "$control_home" \
+    --runtime-home "$runtime_home" \
+    --journal-dir "$journal_dir" > "$import_out" 2>/dev/null
+  then
+    printf '%s\n' "警告: 旧会话导入到运行目录失败；原生 /resume 可能仍看不到历史。" >&2
+    return 0
+  fi
+  return 0
 }
 
 codex_for_tui_prepare_runtime() {
+  # If a previous nested launch left CODEX_HOME on a runtime path, climb back to
+  # the real control home so config-runtimes are never nested under runtimes.
   control_home="$CODEX_HOME"
+  case "$control_home" in
+    */config-runtimes/*)
+      while [ -n "$control_home" ] && [ "$(basename "$control_home")" != "config-runtimes" ]; do
+        control_home="$(dirname "$control_home")"
+      done
+      control_home="$(dirname "$control_home")"
+      ;;
+  esac
+  [ -n "$control_home" ] || control_home="${HOME:-/root}/.codex"
   runtime_home="$control_home"
   sqlite_home=""
   profile_id=""
@@ -191,6 +256,9 @@ codex_for_tui_prepare_runtime() {
   model_provider_id=""
 
   codex_for_tui_load_config_libs
+  # Force engine/status against the control home even if the shell still has a
+  # stale runtime CODEX_HOME from an earlier launch in the same process tree.
+  export CODEX_HOME="$control_home"
   codex_init_env
   if ! build_key="$(codex_for_tui_binary_build_key)"; then
     printf '%s\n' "错误: Codex 二进制校验或构建缓存失败；未启动 Codex。" >&2
@@ -286,6 +354,9 @@ codex_for_tui_prepare_runtime() {
   export CODEX_FOR_TUI_BASELINE_REASONING_EFFORT="$baseline_effort"
   export CODEX_FOR_TUI_MODEL_PROVIDER_ID="$model_provider_id"
   export CODEX_FOR_TUI_RUNTIME_WORK="${runtime_work:-}"
+  # Physically place old rollouts under the active runtime sessions tree before
+  # native Codex starts, so /resume can enumerate them from $CODEX_HOME/sessions.
+  codex_for_tui_import_runtime_sessions "$control_home" "$runtime_home"
   export CODEX_HOME="$runtime_home"
   export CODEX_SQLITE_HOME="$sqlite_home"
 }

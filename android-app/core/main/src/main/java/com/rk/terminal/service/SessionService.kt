@@ -51,6 +51,7 @@ class SessionService : Service() {
             client: TerminalSessionClient,
             workingMode: Int,
             pendingCommand: PendingCommand? = null,
+            extraEnv: List<String>? = null,
         ): TerminalSession {
             // Restore/click races can request the same window twice. Reuse a
             // live PTY instead of tearing it down and recreating the native
@@ -67,6 +68,7 @@ class SessionService : Service() {
                 sessionId = id,
                 workingMode = workingMode,
                 pendingCommand = pendingCommand,
+                extraEnv = extraEnv,
             )
             synchronized(lifecycleLock) {
                 sessions[id] = created

@@ -42,7 +42,6 @@ import com.rk.terminal.session.AgentKind
 import com.rk.terminal.session.ConversationManager
 import com.rk.terminal.session.SessionIsolation
 import com.rk.terminal.session.SessionIsolationHooks
-import com.rk.terminal.session.WindowRole
 import com.rk.terminal.ui.screens.settings.SettingsCard
 import com.rk.terminal.ui.screens.settings.WorkingMode
 import com.rk.terminal.ui.screens.terminal.virtualkeys.VirtualKeysListener
@@ -172,36 +171,24 @@ fun TerminalScreen(
                         } else {
                             val terminal = terminalViewModel.terminalView
                             if (terminal != null) {
-                                val sessionId = SessionIsolationHooks.nextId(
-                                    service.sessionList.keys.toList()
-                                )
                                 val resumeCommand = conversation.agentKind
                                     .resumeCommand(
                                         conversation.id,
                                         com.rk.terminal.session.DEFAULT_AGENT_WORKSPACE,
                                     )
                                     ?: return@let
-                                binder.createSession(
-                                    sessionId,
-                                    TerminalBackEnd(terminal, mainActivity, sessionId),
-                                    com.rk.settings.Settings.working_Mode,
-                                    PendingCommand(
-                                        command = resumeCommand,
-                                        workingDir = null,
-                                        env = emptyList(),
-                                    ),
-                                )
-                                SessionIsolation.onSessionCreated(
-                                    sessionId = sessionId,
-                                    workingMode = com.rk.settings.Settings.working_Mode,
+                                WorkerCommandLauncher.launch(
+                                    activity = mainActivity,
+                                    terminal = terminal,
                                     agentKind = conversation.agentKind,
                                     agentId = conversation.agentKind.prefix,
-                                    role = WindowRole.AGENT_WORKER,
+                                    command = resumeCommand,
                                     preferredDisplayName = conversation.displayName,
                                     agentResumeId = conversation.id,
-                                    preserveExistingIdentity = false,
+                                    switchWindow = { workerId ->
+                                        terminalViewModel.changeSession(context, binder, workerId)
+                                    },
                                 )
-                                terminalViewModel.changeSession(context, binder, sessionId)
                             }
                         }
                     }

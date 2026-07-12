@@ -37,6 +37,7 @@ codex_config_engine_assets() {
   cat <<'EOF'
 libexec/codex-config-engine.py
 libexec/codex-session-defaults.py
+libexec/codex-runtime-session-import.py
 data/openai-models.json
 data/openai-models-source.json
 vendor/python/tomlkit/__init__.py
@@ -1674,14 +1675,27 @@ codex_config_profile_new() {
 }
 
 codex_config_menu() {
+  if [ "${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-0}" != "0" ] && [ "${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-0}" != "" ]; then
+    # Depth>0 means a recursive call from inside an active menu tree.
+    if [ "${CODEX_FOR_TUI_CONFIG_MENU_DEPTH}" -ge 1 ] 2>/dev/null; then
+      codex_warn "配置模式已在运行，忽略连环嵌套进入。"
+      return 1
+    fi
+  fi
+  CODEX_FOR_TUI_CONFIG_MENU_DEPTH=$(( ${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-0} + 1 ))
+  export CODEX_FOR_TUI_CONFIG_MENU_DEPTH
   if codex_config_v2_prepare; then
     :
   else
     v2_menu_prepare_rc=$?
     if [ "$v2_menu_prepare_rc" -eq 2 ]; then
       codex_info "已返回 shell，未迁移配置。"
+      CODEX_FOR_TUI_CONFIG_MENU_DEPTH=$(( ${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-1} - 1 ))
+      export CODEX_FOR_TUI_CONFIG_MENU_DEPTH
       return 0
     fi
+    CODEX_FOR_TUI_CONFIG_MENU_DEPTH=$(( ${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-1} - 1 ))
+    export CODEX_FOR_TUI_CONFIG_MENU_DEPTH
     return "$v2_menu_prepare_rc"
   fi
   while :; do
@@ -1723,15 +1737,21 @@ codex_config_menu() {
       9|"")
         codex_config_v2_dirty_guard "退出配置模式" || continue
         codex_info "已退出配置模式。"
+        CODEX_FOR_TUI_CONFIG_MENU_DEPTH=$(( ${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-1} - 1 ))
+        export CODEX_FOR_TUI_CONFIG_MENU_DEPTH
         return 0
         ;;
       0|q|Q|quit|QUIT|退出)
         codex_config_v2_dirty_guard "退出配置模式" || continue
+        CODEX_FOR_TUI_CONFIG_MENU_DEPTH=$(( ${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-1} - 1 ))
+        export CODEX_FOR_TUI_CONFIG_MENU_DEPTH
         codex_config_exit_config_mode
         ;;
       b|B|back|BACK|返回)
         codex_config_v2_dirty_guard "退出配置模式" || continue
         codex_info "已退出配置模式。"
+        CODEX_FOR_TUI_CONFIG_MENU_DEPTH=$(( ${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-1} - 1 ))
+        export CODEX_FOR_TUI_CONFIG_MENU_DEPTH
         return 0
         ;;
       *) codex_warn "请输入 0 到 9，或输入 b 返回。" ;;
