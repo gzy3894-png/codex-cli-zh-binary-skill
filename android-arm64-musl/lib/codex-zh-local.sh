@@ -196,7 +196,7 @@ codex_for_tui_force_configure() {
 }
 
 codex_for_tui_binary_build_key() {
-  codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.22}"
+  codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.23}"
 }
 
 
@@ -681,7 +681,14 @@ case "${1:-}" in
   配置模式|configure|config)
     shift
     if codex_for_tui_force_configure; then
-      exit 0
+      # User may request launch after selecting 使用并启动 / 保存并启动.
+      if [ "${CODEX_FOR_TUI_LAUNCH_AFTER_CONFIG:-0}" = "1" ]; then
+        unset CODEX_FOR_TUI_LAUNCH_AFTER_CONFIG
+        # Fall through to normal runtime prepare + run below.
+        set --
+      else
+        exit 0
+      fi
     else
       config_rc=$?
       printf '%s\n' "错误: 配置模式未完成，未启动 Codex。" >&2

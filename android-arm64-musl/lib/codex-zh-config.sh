@@ -36,6 +36,8 @@ codex_config_engine_assets() {
   fi
   cat <<'EOF'
 libexec/codex-config-engine.py
+libexec/codex-config-select.py
+libexec/codex-config-secret-read.py
 libexec/codex-session-defaults.py
 libexec/codex-runtime-session-import.py
 data/openai-models.json
@@ -86,6 +88,12 @@ codex_config_engine_find_root() {
 
 codex_config_engine_ensure() {
   codex_have python3 || codex_die "配置引擎需要 python3。请先运行 apk add python3，或重新执行完整安装。"
+  # Reuse a still-valid resolved root to avoid repeated path probes each engine call.
+  if [ -n "${CODEX_CONFIG_ENGINE_RESOLVED_ROOT:-}" ] &&
+    codex_config_engine_root_valid "$CODEX_CONFIG_ENGINE_RESOLVED_ROOT"
+  then
+    return 0
+  fi
   if engine_root="$(codex_config_engine_find_root 2>/dev/null)"; then
     CODEX_CONFIG_ENGINE_RESOLVED_ROOT="$engine_root"
     return 0
@@ -767,12 +775,14 @@ codex_config_tty_read() {
 }
 
 codex_config_tty_confirm() {
+  # Enter confirms; q/0 cancels. Default text is only a hint; empty Enter still confirms.
   prompt="$1"
-  default="${2:-n}"
-  ans="$(codex_config_tty_read "$prompt" "$default")"
+  default="${2:-}"
+  # Prefer an empty default so bare Enter means confirm without typing y.
+  ans="$(codex_config_tty_read "${prompt}（回车确认，q 取消）" "$default")"
   case "$ans" in
-    y|Y|yes|YES|Yes|是) return 0 ;;
-    *) return 1 ;;
+    q|Q|0|n|N|no|NO|No|取消|否) return 1 ;;
+    *) return 0 ;;
   esac
 }
 
@@ -795,11 +805,24 @@ codex_config_exit_config_mode() {
   exit 0
 }
 
+# Request launcher to start Codex after config mode returns successfully.
+codex_config_request_launch() {
+  export CODEX_FOR_TUI_LAUNCH_AFTER_CONFIG=1
+}
+
+# Unwind menu with launch request. Return code 10 means "leave for launch".
+codex_config_leave_for_launch() {
+  codex_config_request_launch
+  codex_info "配置完成，准备启动 Codex…"
+  return 10
+}
+
 # Unified list picker.
 # Items file lines: id|label
 # On success: sets CODEX_CONFIG_SELECT_ID / CODEX_CONFIG_SELECT_LABEL / CODEX_CONFIG_SELECT_INDEX (1-based)
 # Return: 0=ok 1=cancel/back 2=quit-config
-# Interactive TTY: ↑/↓ or j/k, Enter confirm, b/Esc back, q quit.
+# Interactive TTY: ↑/↓ or j/k, Enter confirm, b=back, q=quit.
+# Bare Esc is ignored (never back) so delayed arrow CSI cannot eject the user.
 # Piped / FORCE_STDIN: numbered fallback (tests and non-TTY).
 codex_config_select() {
   v2_sel_title="$1"
@@ -853,132 +876,63 @@ codex_config_select() {
   fi
 
   if [ "$v2_sel_use_interactive" = "1" ]; then
-    v2_sel_result="$(
-      CODEX_CONFIG_SELECT_TITLE="$v2_sel_title" \
-      CODEX_CONFIG_SELECT_FILE="$v2_sel_file" \
-      CODEX_CONFIG_SELECT_DEFAULT="$v2_sel_default_index" \
-      python3 - <<'PY'
-import os
-import sys
-import termios
-import tty
-
-title = os.environ.get("CODEX_CONFIG_SELECT_TITLE", "")
-path = os.environ["CODEX_CONFIG_SELECT_FILE"]
-default = int(os.environ.get("CODEX_CONFIG_SELECT_DEFAULT") or "1")
-
-items = []
-with open(path, encoding="utf-8") as handle:
-    for line in handle:
-        line = line.rstrip("\n")
-        if not line:
-            continue
-        if "|" in line:
-            item_id, label = line.split("|", 1)
-        else:
-            item_id, label = line, line
-        items.append((item_id, label))
-
-if not items:
-    sys.exit(3)
-
-index = max(0, min(len(items) - 1, default - 1))
-tty_in = open("/dev/tty", "r")
-tty_out = open("/dev/tty", "w")
-fd = tty_in.fileno()
-old = termios.tcgetattr(fd)
-
-def render():
-    tty_out.write("\033[2J\033[H")
-    if title:
-        tty_out.write(f"{title}\n")
-    tty_out.write("↑/↓ 移动  回车确认  b返回  q退出\n")
-    tty_out.write("────────────────────────\n")
-    for i, (_item_id, label) in enumerate(items):
-        mark = "›" if i == index else " "
-        tty_out.write(f" {mark} {label}\n")
-    tty_out.write("────────────────────────\n")
-    tty_out.flush()
-
-try:
-    tty.setcbreak(fd)
-    while True:
-        render()
-        ch = tty_in.read(1)
-        if ch in ("\r", "\n"):
-            item_id, label = items[index]
-            sys.stdout.write(f"{index + 1}|{item_id}|{label}\n")
-            sys.exit(0)
-        if ch in ("b", "B", "\x1b"):
-            # Esc alone or b = back. Arrow sequences start with Esc — handle below.
-            if ch == "\x1b":
-                # Peek for CSI arrow: Esc [ A/B/C/D
-                tty_in_fd = fd
-                # non-blocking-ish: read rest of sequence with short timeout
-                import select as select_mod
-                rest = ""
-                if select_mod.select([tty_in_fd], [], [], 0.05)[0]:
-                    rest = tty_in.read(1)
-                    if rest == "[":
-                        if select_mod.select([tty_in_fd], [], [], 0.05)[0]:
-                            rest2 = tty_in.read(1)
-                            if rest2 == "A":  # up
-                                index = (index - 1) % len(items)
-                                continue
-                            if rest2 == "B":  # down
-                                index = (index + 1) % len(items)
-                                continue
-                            # ignore left/right
-                            continue
-                # bare Esc = back
-                sys.exit(1)
-            sys.exit(1)
-        if ch in ("q", "Q", "0"):
-            sys.exit(2)
-        if ch in ("k", "K"):
-            index = (index - 1) % len(items)
-            continue
-        if ch in ("j", "J"):
-            index = (index + 1) % len(items)
-            continue
-        # digit jump 1-9
-        if ch.isdigit() and ch != "0":
-            jump = int(ch)
-            if 1 <= jump <= len(items):
-                index = jump - 1
-            continue
-finally:
-    termios.tcsetattr(fd, termios.TCSADRAIN, old)
-    tty_in.close()
-    tty_out.close()
-PY
-    )"
-    v2_sel_rc=$?
-    case "$v2_sel_rc" in
-      0)
-        CODEX_CONFIG_SELECT_INDEX="$(printf '%s\n' "$v2_sel_result" | cut -d '|' -f 1)"
-        CODEX_CONFIG_SELECT_ID="$(printf '%s\n' "$v2_sel_result" | cut -d '|' -f 2)"
-        CODEX_CONFIG_SELECT_LABEL="$(printf '%s\n' "$v2_sel_result" | cut -d '|' -f 3-)"
-        return 0
-        ;;
-      1) return 1 ;;
-      2) return 2 ;;
-      *)
-        codex_warn "交互选择失败，改用编号输入。"
-        ;;
-    esac
+    v2_sel_py=""
+    for v2_sel_candidate in \
+      "${CODEX_CONFIG_ENGINE_RESOLVED_ROOT:-}/libexec/codex-config-select.py" \
+      "${CODEX_ZH_ACTIVE_SCRIPT_DIR:-}/libexec/codex-config-select.py" \
+      "$(codex_script_install_root 2>/dev/null || true)/libexec/codex-config-select.py" \
+      "$(codex_script_cache_root 2>/dev/null || true)/libexec/codex-config-select.py"
+    do
+      [ -n "$v2_sel_candidate" ] || continue
+      if [ -f "$v2_sel_candidate" ]; then
+        v2_sel_py="$v2_sel_candidate"
+        break
+      fi
+    done
+    if [ -z "$v2_sel_py" ]; then
+      # Engine ensure may still be needed for other assets; try after ensure.
+      if codex_config_engine_ensure 2>/dev/null; then
+        if [ -f "${CODEX_CONFIG_ENGINE_RESOLVED_ROOT:-}/libexec/codex-config-select.py" ]; then
+          v2_sel_py="$CODEX_CONFIG_ENGINE_RESOLVED_ROOT/libexec/codex-config-select.py"
+        fi
+      fi
+    fi
+    if [ -n "$v2_sel_py" ]; then
+      v2_sel_result="$(
+        PYTHONNOUSERSITE=1 python3 "$v2_sel_py" \
+          --title "$v2_sel_title" \
+          --file "$v2_sel_file" \
+          --default "$v2_sel_default_index" \
+          --tty /dev/tty
+      )"
+      v2_sel_rc=$?
+      case "$v2_sel_rc" in
+        0)
+          CODEX_CONFIG_SELECT_INDEX="$(printf '%s\n' "$v2_sel_result" | cut -d '|' -f 1)"
+          CODEX_CONFIG_SELECT_ID="$(printf '%s\n' "$v2_sel_result" | cut -d '|' -f 2)"
+          CODEX_CONFIG_SELECT_LABEL="$(printf '%s\n' "$v2_sel_result" | cut -d '|' -f 3-)"
+          return 0
+          ;;
+        1) return 1 ;;
+        2) return 2 ;;
+        *)
+          codex_warn "交互选择失败，改用编号输入。"
+          ;;
+      esac
+    else
+      codex_warn "缺少 codex-config-select.py，改用编号输入。"
+    fi
   fi
 
   # Numbered fallback (tests / non-TTY / interactive failure)
   while :; do
-    printf '%s\n' "$v2_sel_title" >&2
+    printf '\n%s\n\n' "$v2_sel_title" >&2
     awk -F '|' '{
       label = (NF >= 2 ? $2 : $1)
-      printf "%2d. %s\n", NR, label
+      printf "  %2d  %s\n", NR, label
     }' "$v2_sel_file" >&2
-    printf '%s\n' "b. 返回" >&2
-    printf '%s\n' "0. 退出配置模式" >&2
-    v2_sel_choice="$(codex_config_tty_read "请选择编号" "$v2_sel_default_index")"
+    printf '\n  b  返回\n  0  退出\n\n' >&2
+    v2_sel_choice="$(codex_config_tty_read "编号" "$v2_sel_default_index")"
     codex_config_is_back_choice "$v2_sel_choice" && return 1
     codex_config_is_exit_choice "$v2_sel_choice" && return 2
     case "$v2_sel_choice" in
@@ -1119,20 +1073,80 @@ codex_config_v2_prompt_name() {
   done
 }
 
+codex_config_v2_secret_reader_path() {
+  # Resolve codex-config-secret-read.py the same way as the list picker.
+  v2_sec_py=""
+  for v2_sec_candidate in \
+    "${CODEX_CONFIG_ENGINE_RESOLVED_ROOT:-}/libexec/codex-config-secret-read.py" \
+    "${CODEX_ZH_ACTIVE_SCRIPT_DIR:-}/libexec/codex-config-secret-read.py" \
+    "$(codex_script_install_root 2>/dev/null || true)/libexec/codex-config-secret-read.py" \
+    "$(codex_script_cache_root 2>/dev/null || true)/libexec/codex-config-secret-read.py"
+  do
+    [ -n "$v2_sec_candidate" ] || continue
+    if [ -f "$v2_sec_candidate" ]; then
+      v2_sec_py="$v2_sec_candidate"
+      break
+    fi
+  done
+  if [ -z "$v2_sec_py" ]; then
+    if codex_config_engine_ensure 2>/dev/null; then
+      if [ -f "${CODEX_CONFIG_ENGINE_RESOLVED_ROOT:-}/libexec/codex-config-secret-read.py" ]; then
+        v2_sec_py="$CODEX_CONFIG_ENGINE_RESOLVED_ROOT/libexec/codex-config-secret-read.py"
+      fi
+    fi
+  fi
+  printf '%s' "$v2_sec_py"
+}
+
 codex_config_v2_read_secret() {
+  # Masked API Key entry.
+  # - Interactive TTY: python reader shows • per character (not blank no-echo).
+  # - FORCE_STDIN / piped tests: plain one-line read so stdin sequencing stays correct.
+  # Enter submits; type b / q as the whole line to back / quit (caller checks).
   v2_secret_prompt="$1"
+  v2_secret_allow_empty="${2:-0}"
   v2_secret_value=""
+  v2_secret_use_masked=0
   if [ "${CODEX_ZH_FORCE_STDIN:-0}" != "1" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    v2_secret_use_masked=1
+  fi
+
+  if [ "$v2_secret_use_masked" = "1" ]; then
+    v2_sec_py="$(codex_config_v2_secret_reader_path)"
+    if [ -n "$v2_sec_py" ]; then
+      if [ "$v2_secret_allow_empty" = "1" ]; then
+        v2_secret_value="$(
+          PYTHONNOUSERSITE=1 python3 "$v2_sec_py" \
+            --prompt "$v2_secret_prompt" \
+            --tty /dev/tty \
+            --allow-empty
+        )" || v2_secret_value=""
+      else
+        v2_secret_value="$(
+          PYTHONNOUSERSITE=1 python3 "$v2_sec_py" \
+            --prompt "$v2_secret_prompt" \
+            --tty /dev/tty
+        )" || v2_secret_value=""
+      fi
+      printf '%s' "$v2_secret_value"
+      return 0
+    fi
+
+    # Fallback when secret-read.py is missing: stty -echo, announce so it doesn't look stuck.
+    printf '%s\n' "（密文输入，不回显；回车确认）" > /dev/tty
     printf '%s: ' "$v2_secret_prompt" > /dev/tty
     v2_stty_state="$(stty -g < /dev/tty 2>/dev/null || true)"
     [ -z "$v2_stty_state" ] || stty -echo < /dev/tty 2>/dev/null || true
     IFS= read -r v2_secret_value < /dev/tty || v2_secret_value=""
     [ -z "$v2_stty_state" ] || stty "$v2_stty_state" < /dev/tty 2>/dev/null || true
     printf '\n' > /dev/tty
-  else
-    printf '%s: ' "$v2_secret_prompt" >&2
-    IFS= read -r v2_secret_value || v2_secret_value=""
+    printf '%s' "$v2_secret_value"
+    return 0
   fi
+
+  # Piped / FORCE_STDIN: one shell line from stdin (keeps multi-step UI smokes aligned).
+  printf '%s: ' "$v2_secret_prompt" >&2
+  IFS= read -r v2_secret_value || v2_secret_value=""
   printf '%s' "$v2_secret_value"
 }
 
@@ -1439,7 +1453,7 @@ codex_config_v2_create_official() {
   [ -z "$CODEX_CONFIG_V2_REASONING" ] ||
     v2_official_summary="$v2_official_summary / $CODEX_CONFIG_V2_REASONING"
   printf '%s\n' "将创建官方配置：$v2_official_summary" >&2
-  codex_config_tty_confirm "确认创建并切换？" "y" || return 1
+  codex_config_tty_confirm "创建并切换到该配置？" "" || return 1
   v2_official_work="$(codex_config_v2_work_root)"
   codex_config_v2_run "$v2_official_work/create-official.json" \
     profile create \
@@ -1467,7 +1481,7 @@ codex_config_v2_create_third_party() {
   v2_create_base="$(codex_config_normalize_api_base "$v2_create_raw_base")"
   v2_create_key="${CODEX_ZH_API_KEY:-}"
   while [ -z "$v2_create_key" ]; do
-    v2_create_key="$(codex_config_v2_read_secret "API Key（输入 b 返回，0 退出）")"
+    v2_create_key="$(codex_config_v2_read_secret "API Key（回车确认；b 返回，q 退出）")"
     codex_config_is_back_choice "$v2_create_key" && return 1
     codex_config_is_exit_choice "$v2_create_key" && codex_config_exit_config_mode
     [ -n "$v2_create_key" ] || codex_warn "API Key 不能为空。"
@@ -1484,7 +1498,7 @@ codex_config_v2_create_third_party() {
   [ -z "$CODEX_CONFIG_V2_REASONING" ] ||
     v2_create_model_summary="$v2_create_model_summary / $CODEX_CONFIG_V2_REASONING"
   printf '%s\n' "  模型: $v2_create_model_summary" >&2
-  codex_config_tty_confirm "确认创建并切换？" "y" || return 1
+  codex_config_tty_confirm "创建并切换到该配置？" "" || return 1
   v2_create_work="$(codex_config_v2_work_root)"
   v2_create_auth="$v2_create_work/auth-input.json"
   codex_config_v2_write_auth_input "$v2_create_auth" "$v2_create_key"
@@ -1511,13 +1525,14 @@ codex_config_v2_create_third_party() {
 }
 
 codex_config_v2_create_menu() {
+  # Home exposes 新建配置 / 官方登录 separately; keep this as fallback type picker.
   v2_create_work="$(codex_config_v2_work_root)"
   v2_create_items="$v2_create_work/create-type.select"
   {
-    printf '%s\n' "third_party|第三方 Responses API"
-    printf '%s\n' "official|OpenAI 官方登录"
+    printf '%s\n' "third_party|新建第三方配置"
+    printf '%s\n' "official|OpenAI 官方登录配置"
   } > "$v2_create_items"
-  codex_config_select_or_exit "新建中转站" "$v2_create_items" "third_party" || return 1
+  codex_config_select_or_exit "新建配置" "$v2_create_items" "third_party" || return 1
   case "$CODEX_CONFIG_SELECT_ID" in
     third_party) codex_config_v2_create_third_party; return $? ;;
     official) codex_config_v2_create_official; return $? ;;
@@ -1609,7 +1624,7 @@ codex_config_v2_edit_official_field() {
       return 1
       ;;
   esac
-  codex_config_tty_confirm "确认保存修改？" "y" || return 1
+  codex_config_tty_confirm "保存修改？" "" || return 1
   v2_edit_work="$(codex_config_v2_work_root)"
   codex_config_v2_run "$v2_edit_work/edit-official.json" \
     profile update "$v2_edit_id" \
@@ -1683,7 +1698,7 @@ codex_config_v2_edit_third_party_field() {
       v2_edit_catalog_args=1
       ;;
     key)
-      v2_edit_key="$(codex_config_v2_read_secret "API Key（输入新值；b 返回，0 退出）")"
+      v2_edit_key="$(codex_config_v2_read_secret "API Key（回车确认；b 返回，q 退出）")"
       codex_config_is_back_choice "$v2_edit_key" && return 1
       codex_config_is_exit_choice "$v2_edit_key" && codex_config_exit_config_mode
       [ -n "$v2_edit_key" ] || {
@@ -1726,7 +1741,7 @@ codex_config_v2_edit_third_party_field() {
         codex_warn "API Base URL 无效，必须是不含账号、查询参数或片段的 http(s) URL。"
       done
       v2_edit_new_base="$(codex_config_normalize_api_base "$v2_edit_raw_base")"
-      v2_edit_key="$(codex_config_v2_read_secret "API Key（留空保留当前，输入 b 返回，0 退出）")"
+      v2_edit_key="$(codex_config_v2_read_secret "API Key（留空保留当前；回车确认；b 返回，q 退出）" "1")"
       codex_config_is_back_choice "$v2_edit_key" && return 1
       codex_config_is_exit_choice "$v2_edit_key" && codex_config_exit_config_mode
       [ -n "$v2_edit_key" ] || v2_edit_key="$v2_edit_existing_key"
@@ -1748,7 +1763,7 @@ codex_config_v2_edit_third_party_field() {
       ;;
   esac
 
-  codex_config_tty_confirm "确认保存修改？" "y" || {
+  codex_config_tty_confirm "保存修改？" "" || {
     [ -z "$v2_edit_auth" ] || rm -f "$v2_edit_auth"
     return 1
   }
@@ -1777,64 +1792,92 @@ codex_config_v2_edit_third_party_field() {
 }
 
 codex_config_v2_edit_menu() {
-  # Optional preselected profile id as $1 (hub passes selected station)
+  # Optional preselected profile id as $1 (hub passes selected station).
+  # Field-level loop: edit items one by one, then 返回 / 启动.
   v2_edit_preset_id="${1:-}"
   codex_config_v2_dirty_guard "编辑配置" || return 1
   if [ -n "$v2_edit_preset_id" ]; then
     CODEX_CONFIG_V2_PROFILE_ID="$v2_edit_preset_id"
   else
-    codex_config_v2_choose_profile "选择要编辑的中转站" || return 1
+    codex_config_v2_choose_profile "选择要编辑的配置" || return 1
   fi
-  v2_edit_work="$(codex_config_v2_work_root)"
-  v2_edit_json="$v2_edit_work/edit-profile.json"
-  codex_config_v2_run "$v2_edit_json" profile show "$CODEX_CONFIG_V2_PROFILE_ID" || return 1
-  v2_edit_mode="$(codex_config_v2_json_value "$v2_edit_json" profile.mode)"
-  v2_edit_name="$(codex_config_v2_json_value "$v2_edit_json" profile.name)"
-  v2_edit_model="$(codex_config_v2_json_value "$v2_edit_json" profile.model 2>/dev/null || true)"
-  v2_edit_effort="$(codex_config_v2_json_value "$v2_edit_json" profile.reasoning_effort 2>/dev/null || true)"
-  v2_edit_base="$(codex_config_v2_json_value "$v2_edit_json" profile.base_url 2>/dev/null || true)"
-  v2_edit_items="$v2_edit_work/edit-field.select"
-  case "$v2_edit_mode" in
-    official)
-      {
-        printf '%s\n' "name|改名称"
-        printf '%s\n' "model|改模型策略（模型 + 推理）"
-        printf '%s\n' "all|全部重设（名称 + 模型策略）"
-      } > "$v2_edit_items"
-      v2_edit_title="编辑 $v2_edit_name · 当前 ${v2_edit_model:-默认}${v2_edit_effort:+ / $v2_edit_effort}"
-      codex_config_select_or_exit "$v2_edit_title" "$v2_edit_items" "model" || return 1
-      codex_config_v2_edit_official_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" "$CODEX_CONFIG_SELECT_ID"
-      return $?
-      ;;
-    third_party)
-      {
-        printf '%s\n' "name|改名称"
-        printf '%s\n' "api|改 API Base URL"
-        printf '%s\n' "key|改 Key"
-        printf '%s\n' "model|改模型策略（模型 + 推理）"
-        printf '%s\n' "all|全部重设（名称/API/Key/模型）"
-      } > "$v2_edit_items"
-      v2_edit_title="编辑 $v2_edit_name · ${v2_edit_base:-无API} · ${v2_edit_model:-默认}${v2_edit_effort:+ / $v2_edit_effort}"
-      codex_config_select_or_exit "$v2_edit_title" "$v2_edit_items" "model" || return 1
-      codex_config_v2_edit_third_party_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" "$CODEX_CONFIG_SELECT_ID"
-      return $?
-      ;;
-    *)
-      codex_warn "未知配置类型：$v2_edit_mode"
-      return 1
-      ;;
-  esac
+  while :; do
+    v2_edit_work="$(codex_config_v2_work_root)"
+    v2_edit_json="$v2_edit_work/edit-profile.json"
+    codex_config_v2_run "$v2_edit_json" profile show "$CODEX_CONFIG_V2_PROFILE_ID" || return 1
+    v2_edit_mode="$(codex_config_v2_json_value "$v2_edit_json" profile.mode)"
+    v2_edit_name="$(codex_config_v2_json_value "$v2_edit_json" profile.name)"
+    v2_edit_model="$(codex_config_v2_json_value "$v2_edit_json" profile.model 2>/dev/null || true)"
+    v2_edit_effort="$(codex_config_v2_json_value "$v2_edit_json" profile.reasoning_effort 2>/dev/null || true)"
+    v2_edit_base="$(codex_config_v2_json_value "$v2_edit_json" profile.base_url 2>/dev/null || true)"
+    v2_edit_items="$v2_edit_work/edit-field.select"
+    case "$v2_edit_mode" in
+      official)
+        {
+          printf '%s\n' "name|名称 · $v2_edit_name"
+          printf '%s\n' "model|模型策略 · ${v2_edit_model:-默认}${v2_edit_effort:+ / $v2_edit_effort}"
+          printf '%s\n' "all|全部重设（名称 + 模型策略）"
+          printf '%s\n' "launch|保存并启动 Codex"
+          printf '%s\n' "back|← 返回配置列表"
+        } > "$v2_edit_items"
+        v2_edit_title="编辑 $v2_edit_name"
+        ;;
+      third_party)
+        {
+          printf '%s\n' "name|名称 · $v2_edit_name"
+          printf '%s\n' "api|API · ${v2_edit_base:-未设置}"
+          printf '%s\n' "key|Key · （已隐藏）"
+          printf '%s\n' "model|模型策略 · ${v2_edit_model:-默认}${v2_edit_effort:+ / $v2_edit_effort}"
+          printf '%s\n' "all|全部重设"
+          printf '%s\n' "launch|保存并启动 Codex"
+          printf '%s\n' "back|← 返回配置列表"
+        } > "$v2_edit_items"
+        v2_edit_title="编辑 $v2_edit_name"
+        ;;
+      *)
+        codex_warn "未知配置类型：$v2_edit_mode"
+        return 1
+        ;;
+    esac
+    if ! codex_config_select_or_exit "$v2_edit_title" "$v2_edit_items" "model"; then
+      # b/cancel from edit list = return to home list
+      return 0
+    fi
+    case "$CODEX_CONFIG_SELECT_ID" in
+      back) return 0 ;;
+      launch)
+        # Field edits already save on confirm; activate this profile then launch.
+        if ! codex_config_v2_use_menu "$CODEX_CONFIG_V2_PROFILE_ID"; then
+          return 1
+        fi
+        codex_config_leave_for_launch
+        return $?
+        ;;
+      name|model|api|key|all)
+        case "$v2_edit_mode" in
+          official)
+            codex_config_v2_edit_official_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" "$CODEX_CONFIG_SELECT_ID" || true
+            ;;
+          third_party)
+            codex_config_v2_edit_third_party_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" "$CODEX_CONFIG_SELECT_ID" || true
+            ;;
+        esac
+        ;;
+      *)
+        codex_warn "未知编辑项。"
+        ;;
+    esac
+  done
 }
 
 codex_config_v2_use_menu() {
-  # Optional preselected profile id as $1
+  # Optional preselected profile id as $1, optional display name as $2.
   if [ -n "${1:-}" ]; then
     CODEX_CONFIG_V2_PROFILE_ID="$1"
-    v2_use_work="$(codex_config_v2_work_root)"
-    if codex_config_v2_run "$v2_use_work/use-show.json" profile show "$CODEX_CONFIG_V2_PROFILE_ID"; then
-      CODEX_CONFIG_V2_PROFILE_NAME="$(codex_config_v2_json_value "$v2_use_work/use-show.json" profile.name)"
+    if [ -n "${2:-}" ]; then
+      CODEX_CONFIG_V2_PROFILE_NAME="$2"
     else
-      return 1
+      CODEX_CONFIG_V2_PROFILE_NAME="${CODEX_CONFIG_V2_PROFILE_NAME:-$1}"
     fi
   else
     codex_config_v2_choose_profile "选择要切换的中转站" || return 1
@@ -1844,28 +1887,33 @@ codex_config_v2_use_menu() {
   codex_config_v2_dirty_guard "切换配置" || return 1
   v2_use_work="$(codex_config_v2_work_root)"
   codex_config_v2_run "$v2_use_work/activate.json" profile activate "$v2_use_id" || return 1
+  # Prefer name returned by activate when available.
+  v2_use_activated_name="$(codex_config_v2_json_value "$v2_use_work/activate.json" profile.name 2>/dev/null || true)"
+  [ -z "$v2_use_activated_name" ] || v2_use_name="$v2_use_activated_name"
   codex_config_v2_post_materialize
   codex_info "已切换配置：$v2_use_name"
 }
 
 codex_config_v2_delete_menu() {
-  # Optional preselected profile id as $1
+  # Optional preselected profile id as $1, optional name as $2.
   if [ -n "${1:-}" ]; then
     CODEX_CONFIG_V2_PROFILE_ID="$1"
-    v2_delete_work="$(codex_config_v2_work_root)"
-    if codex_config_v2_run "$v2_delete_work/delete-show.json" profile show "$CODEX_CONFIG_V2_PROFILE_ID"; then
-      CODEX_CONFIG_V2_PROFILE_NAME="$(codex_config_v2_json_value "$v2_delete_work/delete-show.json" profile.name)"
+    if [ -n "${2:-}" ]; then
+      CODEX_CONFIG_V2_PROFILE_NAME="$2"
     else
-      return 1
+      CODEX_CONFIG_V2_PROFILE_NAME="${CODEX_CONFIG_V2_PROFILE_NAME:-$1}"
     fi
   else
     codex_config_v2_choose_profile "选择要删除的中转站" || return 1
   fi
   v2_delete_id="$CODEX_CONFIG_V2_PROFILE_ID"
   v2_delete_name="$CODEX_CONFIG_V2_PROFILE_NAME"
-  codex_config_tty_confirm "确认删除配置 $v2_delete_name？当前配置不能直接删除" "n" || return 1
+  # Allow deleting the active station; engine clears active_profile_id.
+  # After success, hub returns to config home so the user can pick/create next.
+  codex_config_tty_confirm "删除配置 $v2_delete_name？" "" || return 1
   v2_delete_work="$(codex_config_v2_work_root)"
-  codex_config_v2_run "$v2_delete_work/delete.json" profile delete "$v2_delete_id" || return 1
+  codex_config_v2_run "$v2_delete_work/delete.json" \
+    profile delete "$v2_delete_id" --allow-active || return 1
   codex_info "已删除配置：$v2_delete_name"
 }
 
@@ -2064,53 +2112,57 @@ codex_config_profile_new() {
 }
 
 codex_config_v2_hub_station_action() {
-  # Single-page station action for a selected profile id.
+  # After picking a config on the home page:
+  #   使用并启动 / 编辑 / 删除
+  # $1=id  $2=display name (optional)  $3=is_active 1/0 (optional)
   v2_hub_id="$1"
+  v2_hub_name="${2:-$1}"
+  v2_hub_active_flag="${3:-}"
   v2_hub_work="$(codex_config_v2_work_root)"
-  v2_hub_show="$v2_hub_work/hub-station.json"
-  codex_config_v2_run "$v2_hub_show" profile show "$v2_hub_id" || return 1
-  v2_hub_name="$(codex_config_v2_json_value "$v2_hub_show" profile.name)"
-  v2_hub_active="$(codex_config_v2_json_value "$v2_hub_show" active 2>/dev/null || printf 'false')"
-  v2_hub_model="$(codex_config_v2_json_value "$v2_hub_show" profile.model 2>/dev/null || true)"
-  v2_hub_effort="$(codex_config_v2_json_value "$v2_hub_show" profile.reasoning_effort 2>/dev/null || true)"
-  v2_hub_base="$(codex_config_v2_json_value "$v2_hub_show" profile.base_url 2>/dev/null || true)"
-  v2_hub_mode="$(codex_config_v2_json_value "$v2_hub_show" profile.mode 2>/dev/null || true)"
-  v2_hub_items="$v2_hub_work/hub-station-action.select"
-  {
-    if [ "$v2_hub_active" != "true" ]; then
-      printf '%s\n' "use|切换为当前"
-    fi
-    printf '%s\n' "view|查看详情"
-    printf '%s\n' "edit|编辑字段"
-    if [ "$v2_hub_mode" = "third_party" ]; then
-      printf '%s\n' "refresh|刷新模型目录"
-    fi
-    if [ "$v2_hub_active" != "true" ]; then
-      printf '%s\n' "delete|删除"
-    fi
-  } > "$v2_hub_items"
-  v2_hub_title="中转站 $v2_hub_name · ${v2_hub_model:-默认}${v2_hub_effort:+ / $v2_hub_effort}${v2_hub_base:+ · $v2_hub_base}"
-  codex_config_select_or_exit "$v2_hub_title" "$v2_hub_items" "edit" || return 1
-  case "$CODEX_CONFIG_SELECT_ID" in
-    use) codex_config_v2_use_menu "$v2_hub_id" ;;
-    view) codex_config_v2_view_menu "$v2_hub_id" ;;
-    edit) codex_config_v2_edit_menu "$v2_hub_id" ;;
-    refresh)
-      # Temporarily ensure active for refresh helper which uses active profile.
-      if [ "$v2_hub_active" = "true" ]; then
-        codex_config_refresh_models
+  # Resolve active flag without engine when caller already knows.
+  if [ -z "$v2_hub_active_flag" ]; then
+    v2_hub_list="$v2_hub_work/menu-list.json"
+    if [ -s "$v2_hub_list" ]; then
+      v2_hub_active_id="$(codex_config_v2_json_value "$v2_hub_list" active_profile_id 2>/dev/null || true)"
+      if [ -n "$v2_hub_active_id" ] && [ "$v2_hub_active_id" = "$v2_hub_id" ]; then
+        v2_hub_active_flag=1
       else
-        codex_warn "请先切换为当前站再刷新模型目录。"
+        v2_hub_active_flag=0
       fi
+    else
+      v2_hub_active_flag=0
+    fi
+  fi
+  v2_hub_items="$v2_hub_work/hub-station-action.select"
+  # Always offer 删除配置 (including active station). Active delete is blocked
+  # later with a clear message so the option never "disappears".
+  {
+    printf '%s\n' "use_launch|使用并启动"
+    printf '%s\n' "edit|编辑配置"
+    printf '%s\n' "delete|删除配置"
+  } > "$v2_hub_items"
+  v2_hub_title="$v2_hub_name"
+  codex_config_select_or_exit "$v2_hub_title" "$v2_hub_items" "use_launch" || return 1
+  case "$CODEX_CONFIG_SELECT_ID" in
+    use_launch)
+      codex_config_v2_use_menu "$v2_hub_id" "$v2_hub_name" || return 1
+      codex_config_leave_for_launch
+      return $?
       ;;
-    delete) codex_config_v2_delete_menu "$v2_hub_id" ;;
+    edit)
+      codex_config_v2_edit_menu "$v2_hub_id"
+      return $?
+      ;;
+    delete)
+      codex_config_v2_delete_menu "$v2_hub_id" "$v2_hub_name"
+      return $?
+      ;;
     *) return 1 ;;
   esac
 }
 
 codex_config_menu() {
   if [ "${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-0}" != "0" ] && [ "${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-0}" != "" ]; then
-    # Depth>0 means a recursive call from inside an active menu tree.
     if [ "${CODEX_FOR_TUI_CONFIG_MENU_DEPTH}" -ge 1 ] 2>/dev/null; then
       codex_warn "配置模式已在运行，忽略连环嵌套进入。"
       return 1
@@ -2118,6 +2170,9 @@ codex_config_menu() {
   fi
   CODEX_FOR_TUI_CONFIG_MENU_DEPTH=$(( ${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-0} + 1 ))
   export CODEX_FOR_TUI_CONFIG_MENU_DEPTH
+  # Default: leave config mode without auto-launch unless user picks 使用/启动.
+  unset CODEX_FOR_TUI_LAUNCH_AFTER_CONFIG 2>/dev/null || true
+
   if codex_config_v2_prepare; then
     :
   else
@@ -2132,67 +2187,46 @@ codex_config_menu() {
     export CODEX_FOR_TUI_CONFIG_MENU_DEPTH
     return "$v2_menu_prepare_rc"
   fi
+
   while :; do
     v2_menu_work="$(codex_config_v2_work_root)"
-    v2_menu_status="$v2_menu_work/menu-status.json"
-    codex_config_v2_run "$v2_menu_status" status || return 1
-    v2_menu_active="$(codex_config_v2_json_value "$v2_menu_status" active_profile_id 2>/dev/null || true)"
-    v2_menu_label="无"
-    v2_menu_station_detail=""
-    if [ -n "$v2_menu_active" ]; then
-      if codex_config_v2_run "$v2_menu_work/menu-active.json" profile show "$v2_menu_active"; then
-        v2_menu_label="$(codex_config_v2_json_value "$v2_menu_work/menu-active.json" profile.name)"
-        v2_menu_model="$(codex_config_v2_json_value "$v2_menu_work/menu-active.json" profile.model 2>/dev/null || true)"
-        v2_menu_effort="$(codex_config_v2_json_value "$v2_menu_work/menu-active.json" profile.reasoning_effort 2>/dev/null || true)"
-        v2_menu_base="$(codex_config_v2_json_value "$v2_menu_work/menu-active.json" profile.base_url 2>/dev/null || true)"
-        v2_menu_station_detail="${v2_menu_model:-默认}${v2_menu_effort:+ / $v2_menu_effort}"
-        [ -z "$v2_menu_base" ] || v2_menu_station_detail="$v2_menu_station_detail  $v2_menu_base"
-        [ "$(codex_config_v2_json_value "$v2_menu_status" runtime_dirty)" != "true" ] ||
-          v2_menu_label="$v2_menu_label（运行配置有未保存变化）"
-      fi
-    fi
-    v2_menu_compact_mode="$(codex_config_v2_json_value "$v2_menu_status" compact_policy.mode 2>/dev/null || true)"
-    v2_menu_compact_value="$(codex_config_v2_json_value "$v2_menu_status" compact_policy.value 2>/dev/null || true)"
-    if [ -z "$v2_menu_compact_mode" ] && [ -n "$v2_menu_active" ] && [ -f "$v2_menu_work/menu-active.json" ]; then
-      v2_menu_compact_mode="$(codex_config_v2_json_value "$v2_menu_work/menu-active.json" compact_policy.mode 2>/dev/null || true)"
-      v2_menu_compact_value="$(codex_config_v2_json_value "$v2_menu_work/menu-active.json" compact_policy.value 2>/dev/null || true)"
-    fi
-    [ -n "$v2_menu_compact_mode" ] || v2_menu_compact_mode="follow-model"
-    v2_menu_compact_label="$(codex_config_v2_format_compact_label "$v2_menu_compact_mode" "$v2_menu_compact_value")"
-
-    # Build single hub list: stations first, then actions.
+    # One engine call per home paint: profile list already includes active id + names.
+    # Skip separate status/show unless dirty-guard later needs status.
     v2_menu_list_json="$v2_menu_work/menu-list.json"
     v2_menu_list_raw="$v2_menu_work/menu-list.lines"
     v2_menu_items="$v2_menu_work/menu-hub.select"
-    codex_config_v2_run "$v2_menu_list_json" profile list || return 1
+    codex_config_v2_run "$v2_menu_list_json" profile list || {
+      CODEX_FOR_TUI_CONFIG_MENU_DEPTH=$(( ${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-1} - 1 ))
+      export CODEX_FOR_TUI_CONFIG_MENU_DEPTH
+      return 1
+    }
     codex_config_v2_profile_lines "$v2_menu_list_json" > "$v2_menu_list_raw"
+    v2_menu_active="$(codex_config_v2_json_value "$v2_menu_list_json" active_profile_id 2>/dev/null || true)"
+    v2_menu_label="无"
+    if [ -s "$v2_menu_list_raw" ] && [ -n "$v2_menu_active" ]; then
+      v2_menu_label="$(awk -F '|' -v id="$v2_menu_active" '$1 == id { print $2; exit }' "$v2_menu_list_raw")"
+      [ -n "$v2_menu_label" ] || v2_menu_label="无"
+    fi
+    # No per-paint status/show engine calls — home is list-only for speed.
+    # Dirty handling remains on exit / switch via dirty_guard.
     : > "$v2_menu_items"
     if [ -s "$v2_menu_list_raw" ]; then
       awk -F '|' '{
-        active = ($6 == "1" ? " *" : "")
-        effort = ($5 != "" ? "/" $5 : "")
-        model = ($4 != "" ? $4 effort : "默认模型")
-        url = ($7 != "" ? $7 : "")
-        if (url != "") {
-          printf "station:%s|%s%s  %s  %s\n", $1, $2, active, model, url
-        } else {
-          printf "station:%s|%s%s  [%s]  %s\n", $1, $2, active, $3, model
-        }
+        active = ($6 == "1" ? " ★" : "")
+        printf "station:%s|%s%s\n", $1, $2, active
       }' "$v2_menu_list_raw" >> "$v2_menu_items"
     fi
     {
-      printf '%s\n' "action:new|＋ 新建中转站"
-      printf '%s\n' "action:compact|通用 · 压缩策略（$v2_menu_compact_label）"
-      printf '%s\n' "action:permission|通用 · 修复全权限"
-      printf '%s\n' "action:done|完成并退出"
+      printf '%s\n' "action:new|新建配置"
+      printf '%s\n' "action:official|OpenAI 官方登录"
+      printf '%s\n' "action:done|退出配置模式"
     } >> "$v2_menu_items"
 
-    v2_menu_title="Codex 配置模式  ·  当前 $v2_menu_label${v2_menu_station_detail:+ ($v2_menu_station_detail)}"
+    v2_menu_title="Codex 配置 · 当前 $v2_menu_label"
     v2_menu_default="action:done"
     [ -z "$v2_menu_active" ] || v2_menu_default="station:$v2_menu_active"
 
     if ! codex_config_select_or_exit "$v2_menu_title" "$v2_menu_items" "$v2_menu_default"; then
-      # back from hub = exit config mode cleanly
       codex_config_v2_dirty_guard "退出配置模式" || continue
       codex_info "已退出配置模式。"
       CODEX_FOR_TUI_CONFIG_MENU_DEPTH=$(( ${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-1} - 1 ))
@@ -2203,11 +2237,25 @@ codex_config_menu() {
     case "$CODEX_CONFIG_SELECT_ID" in
       station:*)
         v2_menu_station_id="${CODEX_CONFIG_SELECT_ID#station:}"
-        codex_config_v2_hub_station_action "$v2_menu_station_id" || true
+        v2_menu_station_name="$CODEX_CONFIG_SELECT_LABEL"
+        # Strip trailing ★ marker from label for display/name passthrough.
+        v2_menu_station_name="$(printf '%s\n' "$v2_menu_station_name" | sed 's/ ★$//')"
+        v2_menu_station_active=0
+        [ "$v2_menu_station_id" = "$v2_menu_active" ] && v2_menu_station_active=1
+        v2_menu_action_rc=0
+        codex_config_v2_hub_station_action "$v2_menu_station_id" "$v2_menu_station_name" "$v2_menu_station_active" || v2_menu_action_rc=$?
+        if [ "$v2_menu_action_rc" -eq 10 ]; then
+          CODEX_FOR_TUI_CONFIG_MENU_DEPTH=$(( ${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-1} - 1 ))
+          export CODEX_FOR_TUI_CONFIG_MENU_DEPTH
+          return 0
+        fi
         ;;
-      action:new) codex_config_v2_create_menu || true ;;
-      action:compact) codex_config_v2_compact_menu || true ;;
-      action:permission) codex_config_menu_repair_full_permission || true ;;
+      action:new)
+        codex_config_v2_create_third_party || true
+        ;;
+      action:official)
+        codex_config_v2_create_official || true
+        ;;
       action:done)
         codex_config_v2_dirty_guard "退出配置模式" || continue
         codex_info "已退出配置模式。"

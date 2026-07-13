@@ -114,6 +114,8 @@ script_urls() {
 config_engine_assets() {
   cat <<'EOF'
 libexec/codex-config-engine.py
+libexec/codex-config-select.py
+libexec/codex-config-secret-read.py
 libexec/codex-session-defaults.py
 data/openai-models.json
 data/openai-models-source.json

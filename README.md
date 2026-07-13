@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.5.22-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.5.22)
+[![Release](https://img.shields.io/badge/release-v2.5.23-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.5.23)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.144.1-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,9 +9,9 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.5.22 配置模式单页枢纽
+## 重要：2.5.23 配置模式可用性热修
 
-2.5.22 把配置模式改成**单页中转站列表 + 方向键回车**：选中站再切换/查看/编辑/删除；通用压缩与权限挂在同一页。站级 vs 通用数据模型与 2.5.21 一致。发布说明见 `docs/codex-for-tui-2.5.22-release-notes.md`。
+2.5.23 在 2.5.22 列表枢纽上打磨交互：选中行白底黑字、API Key 密文显示 `•`、回车确认/q 取消、可删除当前配置、首页「新建配置」无加号。发布说明见 `docs/codex-for-tui-2.5.23-release-notes.md`。
 
 ## 重要：2.5.20 启动性能热修（大会话 dual-sync）
 
@@ -87,12 +87,13 @@ codex-ops resume-hint
 
 内置 WebView 继续作为 Agent Browser，保留后台打开、DOM 读取、点击、输入、JS、截图、多标签、Cookie/WebStorage 持久化和 userscript；遇到验证码/风控/外部 scheme 时会进入明确的用户协作状态，而不是让 Agent 猜。
 
-已经安装 2.0.x～2.5.13 的用户，直接从 Releases 下载并覆盖安装 2.5.22 APK，然后打开 App。首次启动会自动完成二进制、launcher、脚本、配置档 V2、模型目录、旧 Codex rollout/SQLite 工作区迁移和运行世代升级；之后进入固定启动台。输入 `codex`、`claude` 或 `grok` 会创建独立工作窗口；历史对话按真实 UUID 恢复，关闭窗口不会删除对话。无需再执行任何 Codex 更新或修复命令。
+已经安装 2.0.x～2.5.13 的用户，直接从 Releases 下载并覆盖安装 2.5.23 APK，然后打开 App。首次启动会自动完成二进制、launcher、脚本、配置档 V2、模型目录、旧 Codex rollout/SQLite 工作区迁移和运行世代升级；之后进入固定启动台。输入 `codex`、`claude` 或 `grok` 会创建独立工作窗口；历史对话按真实 UUID 恢复，关闭窗口不会删除对话。无需再执行任何 Codex 更新或修复命令。
 
 升级只使用 APK 内置载荷完成核心迁移。完成后普通启动仍不会远程更新脚本、自动请求第三方 `/models` 或覆盖用户手写配置。`codex 更新` 只用于用户没有更新 APK、明确只想热更新脚本的场景。
 
 ## 2.0 新功能
 
+- 2.5.23：配置模式可用性热修；白底选中、Key 显示 •、可删当前站、回车确认。
 - 2.5.22：配置模式单页枢纽；↑↓/回车列表选择；站内增删改查选；compact 仍全站共用。
 - 2.5.20：大会话 dual-sync 启动热修；session_meta 首行读写/同长原地补丁；warm path 跳过重复 seed/import 与多余 status。
 - 2.5.19：配置模式统一格式（站级模型/API/Key + 通用压缩/上下文）；sanitize service_tier；legacy 指纹去重；provider 同步 fast path。
@@ -198,7 +199,7 @@ codex-ops resume-hint
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.5.22` |
+| Android App | `2.5.23` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug/Test 包名 | `com.gzy3894.codexfortui.test` |
 | Codex CLI | `0.144.1` 中文版 |

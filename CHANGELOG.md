@@ -1,3 +1,15 @@
+## Codex for TUI 2.5.23
+
+Codex for TUI 2.5.23 是配置模式可用性热修（2.5.22 列表枢纽上的交互打磨）。
+
+- 选中行改为白底黑字，避免浅色终端反色黑条。
+- API Key 密文输入显示 `•`，并提示回车确认。
+- 确认语义统一为回车确认 / q 取消。
+- 始终显示删除配置；允许删除当前站（`--allow-active`），删完回主页。
+- 首页「新建配置」去掉加号。
+- `versionCode=89`、`versionName=2.5.23`、runtime epoch `apk-2.5.23`。
+- 发布说明见 `docs/codex-for-tui-2.5.23-release-notes.md`。
+
 ## Codex for TUI 2.5.22
 
 Codex for TUI 2.5.22 是配置模式交互重构：单页中转站列表枢纽 + 方向键/回车选择，去掉编号连环嵌套。

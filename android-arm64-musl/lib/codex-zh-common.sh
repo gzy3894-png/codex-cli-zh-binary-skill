@@ -12,7 +12,7 @@ CODEX_ZH_COMMON_LOADED=1
 : "${CODEX_ZH_INSTALL_NAME:=codex}"
 : "${CODEX_ZH_PROVIDER_ID:=custom}"
 : "${CODEX_ZH_PROVIDER_NAME:=OpenAI}"
-: "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.5.22}"
+: "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.5.23}"
 
 CODEX_ZH_ARCHIVE="codex-${CODEX_ZH_VERSION}-zh-${CODEX_ZH_TARGET}.tar.gz"
 CODEX_ZH_ARCHIVE_SHA256="${CODEX_ZH_ARCHIVE_SHA256:-1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61}"
@@ -149,6 +149,8 @@ codex_script_install_root() {
 codex_config_engine_asset_list() {
   cat <<'EOF'
 libexec/codex-config-engine.py
+libexec/codex-config-select.py
+libexec/codex-config-secret-read.py
 libexec/codex-session-defaults.py
 libexec/codex-workspace-migrate.py
 libexec/codex-runtime-session-import.py

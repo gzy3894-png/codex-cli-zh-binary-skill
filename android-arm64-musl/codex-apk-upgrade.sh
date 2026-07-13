@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
-RELEASE="2.5.22"
-VERSION_CODE="88"
+RELEASE="2.5.23"
+VERSION_CODE="89"
 EXPECTED_CODEX_VERSION="0.144.1"
 EXPECTED_TARGET="aarch64-unknown-linux-musl"
 EXPECTED_ARCHIVE_SHA256="1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61"
@@ -326,6 +326,8 @@ for required in \
   lib/codex-zh-config.sh \
   lib/codex-zh-local.sh \
   libexec/codex-config-engine.py \
+  libexec/codex-config-select.py \
+  libexec/codex-config-secret-read.py \
   libexec/codex-session-defaults.py \
   libexec/codex-workspace-migrate.py \
   libexec/codex-runtime-session-import.py \
@@ -502,6 +504,8 @@ sh -n "$SCRIPT_ROOT/lib/codex-zh-config.sh"
 sh -n "$SCRIPT_ROOT/lib/codex-zh-local.sh"
 PYTHONNOUSERSITE=1 PYTHONPYCACHEPREFIX="$WORK_ROOT/pycache" python3 -m py_compile \
   "$SCRIPT_ROOT/libexec/codex-config-engine.py" \
+  "$SCRIPT_ROOT/libexec/codex-config-select.py" \
+  "$SCRIPT_ROOT/libexec/codex-config-secret-read.py" \
   "$SCRIPT_ROOT/libexec/codex-session-defaults.py" \
   "$SCRIPT_ROOT/libexec/codex-workspace-migrate.py" \
   "$SCRIPT_ROOT/libexec/codex-runtime-session-import.py"
