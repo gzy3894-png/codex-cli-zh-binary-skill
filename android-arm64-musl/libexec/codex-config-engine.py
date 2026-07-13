@@ -1404,6 +1404,10 @@ def materialize_runtime(
         safe_copy(paths.official_marker, runtime_marker, 0o600)
     else:
         runtime_marker.unlink(missing_ok=True)
+    # Shared sessions keep original model_provider stamps. Native /resume filters
+    # by the active provider id, so restamp each runtime SQLite after config is
+    # written so every station lists the shared inventory without --all.
+    restamp_all_runtime_thread_providers(paths)
     return runtime_home, sqlite_home
 
 
@@ -2396,10 +2400,127 @@ def seed_all_runtime_states(paths: Paths) -> dict[str, list[str]]:
     return result
 
 
+def _read_runtime_model_provider(runtime_home: Path) -> str | None:
+    """Return model_provider id from a runtime config.toml, if present."""
+    config_path = runtime_home / "config.toml"
+    if not config_path.is_file():
+        return None
+    try:
+        doc = read_toml(config_path)
+    except Exception:
+        return None
+    value = doc.get("model_provider")
+    if isinstance(value, str):
+        provider = value.strip()
+        if provider:
+            return provider
+    return None
+
+
+def restamp_runtime_thread_providers(
+    runtime_home: Path,
+    provider: str | None = None,
+) -> dict[str, Any]:
+    """Stamp SQLite threads.model_provider to this runtime's provider.
+
+    Codex TUI /resume filters by the active model_provider_id. Shared sessions
+    are inventory-unified across relays, but historical rows keep the provider
+    id from the station that first created them. Without restamping, switching
+    to another relay shows an empty picker even though the sessions tree is
+    shared. This only rewrites the per-runtime SQLite index; rollout jsonl is
+    left intact for audit.
+    """
+    import sqlite3
+
+    target = provider or _read_runtime_model_provider(runtime_home)
+    summary: dict[str, Any] = {
+        "runtime_home": str(runtime_home),
+        "provider": target,
+        "databases": 0,
+        "updated_rows": 0,
+        "skipped": False,
+    }
+    if not target:
+        summary["skipped"] = True
+        summary["reason"] = "no-model-provider"
+        return summary
+    builds = runtime_home / "sqlite-builds"
+    if not builds.is_dir():
+        summary["skipped"] = True
+        summary["reason"] = "no-sqlite-builds"
+        return summary
+    for db in sorted(builds.glob("*/state_5.sqlite")):
+        if not db.is_file() or db.is_symlink():
+            continue
+        try:
+            con = sqlite3.connect(str(db), timeout=10)
+            try:
+                cols = {
+                    str(row[1])
+                    for row in con.execute("PRAGMA table_info(threads)")
+                }
+                if "model_provider" not in cols:
+                    continue
+                before = int(
+                    con.execute(
+                        "SELECT COUNT(*) FROM threads "
+                        "WHERE model_provider IS NULL OR model_provider != ?",
+                        (target,),
+                    ).fetchone()[0]
+                )
+                if before:
+                    con.execute(
+                        "UPDATE threads SET model_provider = ? "
+                        "WHERE model_provider IS NULL OR model_provider != ?",
+                        (target, target),
+                    )
+                    con.commit()
+                summary["databases"] += 1
+                summary["updated_rows"] += before
+            finally:
+                con.close()
+        except sqlite3.Error:
+            continue
+        except OSError:
+            continue
+    return summary
+
+
+def restamp_all_runtime_thread_providers(paths: Paths) -> dict[str, Any]:
+    """Restamp provider ids for every config-runtimes/* SQLite index."""
+    root = paths.home / "config-runtimes"
+    result: dict[str, Any] = {}
+    if not root.is_dir():
+        return result
+    try:
+        children = sorted(root.iterdir())
+    except OSError:
+        return result
+    for child in children:
+        if not child.is_dir() or child.is_symlink():
+            continue
+        if not child.name.startswith("p-"):
+            continue
+        result[child.name] = restamp_runtime_thread_providers(child)
+    return result
+
+
 def cmd_seed_shared_sessions(paths: Paths, _args: argparse.Namespace) -> None:
     """CLI entry: repair shared sessions/history links for all runtimes."""
     linked = seed_all_runtime_states(paths)
-    emit(True, repaired=sorted(linked.keys()), linked=linked)
+    restamped = restamp_all_runtime_thread_providers(paths)
+    emit(
+        True,
+        repaired=sorted(linked.keys()),
+        linked=linked,
+        provider_restamped=restamped,
+    )
+
+
+def cmd_restamp_thread_providers(paths: Paths, _args: argparse.Namespace) -> None:
+    """CLI entry: restamp threads.model_provider for all runtime SQLite DBs."""
+    restamped = restamp_all_runtime_thread_providers(paths)
+    emit(True, provider_restamped=restamped)
 
 
 def catalog_model_ids(path: Path) -> list[str]:
@@ -2975,6 +3096,9 @@ def build_parser() -> argparse.ArgumentParser:
     apk_refresh.set_defaults(handler=cmd_apk_refresh_active)
     sub.add_parser("seed-shared-sessions").set_defaults(
         handler=cmd_seed_shared_sessions
+    )
+    sub.add_parser("restamp-thread-providers").set_defaults(
+        handler=cmd_restamp_thread_providers
     )
     return parser
 

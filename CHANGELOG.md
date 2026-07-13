@@ -1,3 +1,13 @@
+## Codex for TUI 2.5.17
+
+Codex for TUI 2.5.17 是 2.5.16 后的原生 `/resume` provider 过滤热修。
+
+- 根因：共享 sessions 后，TUI `/resume` 仍按当前站 `model_provider` 过滤 SQLite `threads`；历史行保留旧站 provider id 时列表为空。
+- materialize / `seed-shared-sessions` 自动把各 runtime `state_5.sqlite` 的 `threads.model_provider` 重标为该站当前 provider；新增 `restamp-thread-providers` CLI。
+- 不改写 rollout jsonl，仅更新 per-runtime 索引。
+- `versionCode=83`、`versionName=2.5.17`、runtime epoch `apk-2.5.17`。
+- 发布说明见 `docs/codex-for-tui-2.5.17-release-notes.md`。
+
 ## Codex for TUI 2.5.16
 
 Codex for TUI 2.5.16 是 2.5.15 后的跨中转统一会话列表热修。
