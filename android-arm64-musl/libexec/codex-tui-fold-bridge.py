@@ -21,6 +21,8 @@ Commands:
   tail-once <rollout.jsonl>    # read from offset file, emit new actions
   discover-active              # list newest rollout-*.jsonl under CODEX_HOME/sessions
   watch [rollout.jsonl]        # poll tail-once (optional path; default newest)
+  ensure-watch                 # start background watch only if policy enabled=1
+  stop-watch                   # stop background watch if running
   status                       # show policy + state
   self-test                    # synthetic events smoke
 """
@@ -318,6 +320,7 @@ def cmd_self_test() -> int:
 
 
 def cmd_status(pol: Dict[str, str]) -> int:
+    watch = read_watch_meta()
     out = {
         "policy_path": str(policy_path()),
         "policy": pol,
@@ -326,8 +329,255 @@ def cmd_status(pol: Dict[str, str]) -> int:
         "prefix": str(find_prefix()) if find_prefix() else None,
         "codex_session": which_codex_session(),
         "state_dir": str(state_dir()),
+        "watch": watch,
     }
     print(json.dumps(out, ensure_ascii=False, indent=2))
+    return 0
+
+
+def watch_pid_path() -> Path:
+    return state_dir() / "watch.pid"
+
+
+def watch_meta_path() -> Path:
+    return state_dir() / "watch.json"
+
+
+def watch_log_path() -> Path:
+    return state_dir() / "watch.log"
+
+
+def pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # exists but not owned by us — treat as alive to avoid double-start storms
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def read_watch_meta() -> Dict[str, Any]:
+    meta: Dict[str, Any] = {
+        "running": False,
+        "pid": None,
+        "pid_file": str(watch_pid_path()),
+        "log_file": str(watch_log_path()),
+    }
+    pid_path = watch_pid_path()
+    if not pid_path.exists():
+        return meta
+    try:
+        raw = pid_path.read_text(encoding="utf-8").strip()
+        pid = int(raw.split()[0])
+    except (OSError, ValueError, IndexError):
+        return meta
+    meta["pid"] = pid
+    meta["running"] = pid_alive(pid)
+    if watch_meta_path().exists():
+        try:
+            extra = json.loads(watch_meta_path().read_text(encoding="utf-8"))
+            if isinstance(extra, dict):
+                meta.update({k: v for k, v in extra.items() if k not in {"running", "pid"}})
+                meta["pid"] = pid
+                meta["running"] = pid_alive(pid)
+        except (OSError, json.JSONDecodeError):
+            pass
+    return meta
+
+
+def write_watch_meta(meta: Dict[str, Any]) -> None:
+    path = watch_meta_path()
+    path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def stop_watch_daemon() -> Dict[str, Any]:
+    """Best-effort stop. Never raises."""
+    meta = read_watch_meta()
+    pid = meta.get("pid")
+    stopped = False
+    if isinstance(pid, int) and pid_alive(pid):
+        try:
+            os.kill(pid, 15)
+            for _ in range(20):
+                if not pid_alive(pid):
+                    break
+                time.sleep(0.05)
+            if pid_alive(pid):
+                os.kill(pid, 9)
+        except OSError:
+            pass
+        stopped = not pid_alive(pid)
+    try:
+        watch_pid_path().unlink(missing_ok=True)  # type: ignore[call-arg]
+    except TypeError:
+        # py3.7 compat
+        try:
+            if watch_pid_path().exists():
+                watch_pid_path().unlink()
+        except OSError:
+            pass
+    except OSError:
+        pass
+    out = {
+        "stopped": stopped or not meta.get("running"),
+        "was_running": bool(meta.get("running")),
+        "pid": pid,
+    }
+    write_watch_meta({"last_stop": out, "enabled_at_stop": enabled(read_policy())})
+    return out
+
+
+def cmd_stop_watch() -> int:
+    out = stop_watch_daemon()
+    print(json.dumps({"ok": True, "action": "stop-watch", **out}, ensure_ascii=False))
+    return 0
+
+
+def cmd_ensure_watch(pol: Dict[str, str], interval_ms: int) -> int:
+    """Start background watch only when policy enabled=1. Stop when disabled.
+
+    Never blocks the agent launcher: failures return ok=false but exit 0.
+    Default release policy is enabled=0 → no daemon (≡ 2.5.23).
+    """
+    if interval_ms < 200:
+        interval_ms = 200
+    if not enabled(pol):
+        stop_info = stop_watch_daemon()
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "action": "ensure-watch",
+                    "started": False,
+                    "running": False,
+                    "reason": "disabled",
+                    "mode": pol.get("mode"),
+                    "stop": stop_info,
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
+
+    current = read_watch_meta()
+    if current.get("running"):
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "action": "ensure-watch",
+                    "started": False,
+                    "running": True,
+                    "reason": "already-running",
+                    "pid": current.get("pid"),
+                    "mode": pol.get("mode"),
+                    "enabled": True,
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
+
+    # resolve this script path for re-exec
+    self_py = Path(__file__).resolve()
+    log_path = watch_log_path()
+    try:
+        log_f = open(log_path, "ab", buffering=0)
+    except OSError as exc:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "action": "ensure-watch",
+                    "started": False,
+                    "reason": f"log-open-failed:{exc}",
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
+
+    import subprocess
+
+    env = os.environ.copy()
+    # Prefer the same python; never inherit interactive stdin.
+    cmd = [
+        sys.executable or "python3",
+        str(self_py),
+        "watch",
+        f"--interval-ms={interval_ms}",
+        "--max-iters=0",
+    ]
+    try:
+        # start_new_session detaches from launcher TTY / job control
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=log_f,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            env=env,
+            close_fds=True,
+        )
+    except OSError as exc:
+        try:
+            log_f.close()
+        except OSError:
+            pass
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "action": "ensure-watch",
+                    "started": False,
+                    "reason": f"spawn-failed:{exc}",
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
+    finally:
+        try:
+            log_f.close()
+        except OSError:
+            pass
+
+    pid = proc.pid
+    watch_pid_path().write_text(str(pid) + "\n", encoding="utf-8")
+    meta = {
+        "pid": pid,
+        "interval_ms": interval_ms,
+        "mode": pol.get("mode"),
+        "enabled": True,
+        "cmd": cmd,
+        "started_ts": time.time(),
+    }
+    write_watch_meta(meta)
+    # brief liveness check
+    time.sleep(0.15)
+    alive = pid_alive(pid)
+    print(
+        json.dumps(
+            {
+                "ok": alive,
+                "action": "ensure-watch",
+                "started": True,
+                "running": alive,
+                "pid": pid,
+                "mode": pol.get("mode"),
+                "enabled": True,
+                "log": str(log_path),
+                "reason": "spawned" if alive else "spawned-but-exited",
+            },
+            ensure_ascii=False,
+        )
+    )
     return 0
 
 
@@ -482,6 +732,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=0,
         help="0 = forever; smoke uses small N",
     )
+    p_ensure = sub.add_parser("ensure-watch")
+    p_ensure.add_argument("--interval-ms", type=int, default=1500)
+    sub.add_parser("stop-watch")
     sub.add_parser("status")
     sub.add_parser("self-test")
     args = parser.parse_args(argv)
@@ -499,6 +752,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             interval_ms=args.interval_ms,
             max_iters=args.max_iters,
         )
+    if args.cmd == "ensure-watch":
+        return cmd_ensure_watch(pol, interval_ms=args.interval_ms)
+    if args.cmd == "stop-watch":
+        return cmd_stop_watch()
     if args.cmd == "status":
         return cmd_status(pol)
     if args.cmd == "self-test":

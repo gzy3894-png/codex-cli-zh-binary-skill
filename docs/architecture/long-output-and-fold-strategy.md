@@ -307,6 +307,8 @@ EOF
 
 **N3.4（库内包装）✅ 2026-07-13**：`discover-active` / `watch`、CLI asset `codex-tui-fold-bridge`、libexec 进 common/local/bootstrap/apk-upgrade 清单、MkSession managedScripts、`tests/codex-for-tui-fold-bridge-smoke.sh` + static `test_fold_bridge_runtime_emitter`。默认仍 `enabled=0`。
 
-**仍缺（装包/产品强制）**：随 worker **自动**常驻 watch（需 D5–D7 flag on 验收）、installed-device 专项、与 T-DELIVER 共用 emitter；media-preview **文本复制**源码已修（`MediaPreviewPane.kt`）待 GHA 发版。
+**N3.5（ensure-watch）✅ 2026-07-13**：`ensure-watch`/`stop-watch` + launcher `codex_for_tui_ensure_fold_bridge_watch`；仅 flag on 启 daemon。
+
+**仍缺（装包验收）**：D7 flag on 真机验收、installed-device 专项、与 T-DELIVER 共用 emitter；media-preview **文本复制**源码已修（`MediaPreviewPane.kt`）待 GHA 发版。
 
 受控冒烟（2026-07-13）：合成 `task_started/complete` → status `run_id=fold-bridge-smoke-*` `state=done`；policy 已恢复 off。

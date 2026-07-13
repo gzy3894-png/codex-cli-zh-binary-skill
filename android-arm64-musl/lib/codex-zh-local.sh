@@ -196,7 +196,7 @@ codex_for_tui_force_configure() {
 }
 
 codex_for_tui_binary_build_key() {
-  codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.24}"
+  codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.25}"
 }
 
 
@@ -444,12 +444,41 @@ codex_for_tui_sync_runtime() {
   rmdir "$sync_work" 2>/dev/null || true
 }
 
+codex_for_tui_ensure_fold_bridge_watch() {
+  # Best-effort: only starts background watch when policy enabled=1.
+  # Default enabled=0 → no-op (release behavior ≡ pre-fold-bridge).
+  # Never blocks interactive start; never prints to stdout (TUI).
+  [ "${CODEX_TUI_FOLD_BRIDGE_AUTO_WATCH:-1}" = "1" ] || return 0
+  codex_for_tui_is_interactive_start "$@" || return 0
+  bridge=""
+  if command -v codex-tui-fold-bridge >/dev/null 2>&1; then
+    bridge="$(command -v codex-tui-fold-bridge)"
+  else
+    for cand in       "${CODEX_ZH_SCRIPT_INSTALL_ROOT:-}/libexec/codex-tui-fold-bridge.py"       "${CODEX_ZH_ACTIVE_SCRIPT_DIR:-}/libexec/codex-tui-fold-bridge.py"       "$HOME/.local/share/codex-zh/scripts/libexec/codex-tui-fold-bridge.py"       "/usr/local/share/codex-zh/scripts/libexec/codex-tui-fold-bridge.py"
+    do
+      [ -n "$cand" ] || continue
+      [ -s "$cand" ] || continue
+      bridge="$cand"
+      break
+    done
+  fi
+  [ -n "$bridge" ] || return 0
+  if [ -x "$bridge" ] && head -c 2 "$bridge" 2>/dev/null | grep -q '#!'; then
+    # shell wrapper or executable
+    "$bridge" ensure-watch >/dev/null 2>&1 || true
+  elif command -v python3 >/dev/null 2>&1; then
+    PYTHONNOUSERSITE=1 python3 "$bridge" ensure-watch >/dev/null 2>&1 || true
+  fi
+  return 0
+}
+
 codex_for_tui_run_real() {
   run_rc=0
   # Prefer dedicated workspace so user config under CODEX_HOME is not treated as
   # project-local config when cwd is $HOME (avoids yellow model_provider warnings).
   workspace="${CODEX_FOR_TUI_WORKSPACE:-$HOME/workspace}"
   mkdir -p "$workspace" 2>/dev/null || true
+  codex_for_tui_ensure_fold_bridge_watch "$@"
   if [ -d "$workspace" ]; then
     (cd "$workspace" && "$real_bin" "$@") || run_rc=$?
   else

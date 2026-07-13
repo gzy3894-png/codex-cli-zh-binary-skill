@@ -103,6 +103,44 @@ policy_txt="$(cat "$POLICY_EXAMPLE")"
 assert_contains "$policy_txt" 'enabled=0' "policy.example.enabled"
 assert_contains "$policy_txt" 'mode=dry-run' "policy.example.mode"
 
+# ensure-watch with default disabled must NOT start a daemon
+ensure_off="$(PYTHONNOUSERSITE=1 python3 "$BRIDGE_PY" ensure-watch)" || fail "ensure-watch disabled failed"
+assert_contains "$ensure_off" '"started": false' "ensure-watch.disabled.started"
+assert_contains "$ensure_off" '"reason": "disabled"' "ensure-watch.disabled.reason"
+assert_not_contains "$ensure_off" '"running": true' "ensure-watch.disabled.running"
+
+# enable temporarily, ensure-watch should spawn; then stop
+# Note: smoke exports CODEX_TUI_FOLD_BRIDGE=0 which overrides policy file — unset for this block.
+mkdir -p "$PREFIX/local/ops"
+cat > "$PREFIX/local/ops/session-fold-bridge.policy" <<'EOF'
+enabled=1
+mode=dry-run
+title_prefix=turn
+EOF
+ensure_on="$(
+  env -u CODEX_TUI_FOLD_BRIDGE -u CODEX_TUI_FOLD_BRIDGE_MODE     PREFIX="$PREFIX" CODEX_HOME="$CODEX_HOME" PYTHONNOUSERSITE=1     python3 "$BRIDGE_PY" ensure-watch --interval-ms 500
+)" || fail "ensure-watch enabled failed"
+assert_contains "$ensure_on" '"started": true' "ensure-watch.enabled.started"
+# second call should be already-running
+ensure_again="$(
+  env -u CODEX_TUI_FOLD_BRIDGE -u CODEX_TUI_FOLD_BRIDGE_MODE     PREFIX="$PREFIX" CODEX_HOME="$CODEX_HOME" PYTHONNOUSERSITE=1     python3 "$BRIDGE_PY" ensure-watch --interval-ms 500
+)" || fail "ensure-watch again failed"
+assert_contains "$ensure_again" 'already-running' "ensure-watch.again"
+stop_out="$(
+  env -u CODEX_TUI_FOLD_BRIDGE -u CODEX_TUI_FOLD_BRIDGE_MODE     PREFIX="$PREFIX" CODEX_HOME="$CODEX_HOME" PYTHONNOUSERSITE=1     python3 "$BRIDGE_PY" stop-watch
+)" || fail "stop-watch failed"
+assert_contains "$stop_out" '"ok": true' "stop-watch.ok"
+# restore disabled policy for rest of smoke
+cat > "$PREFIX/local/ops/session-fold-bridge.policy" <<'EOF'
+enabled=0
+mode=dry-run
+title_prefix=turn
+EOF
+# ensure stop actually leaves no running pid
+status_after="$(PYTHONNOUSERSITE=1 python3 "$BRIDGE_PY" status)" || fail "status after stop failed"
+assert_contains "$status_after" '"running": false' "status.after_stop.running"
+
+
 # Wrapper resolves py via CODEX_TUI_FOLD_BRIDGE_PY
 wrap_out="$(
   CODEX_TUI_FOLD_BRIDGE_PY="$BRIDGE_PY" \
