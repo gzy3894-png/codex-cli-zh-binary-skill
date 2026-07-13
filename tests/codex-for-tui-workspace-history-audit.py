@@ -254,15 +254,79 @@ def assert_preserved(
         if now["cwd"] != expected_cwd(record, source, target):
             raise AuditError(f"legacy rollout cwd mismatch: {session_id}")
         for source_value in record.get("source_paths") or []:
-            source_path = (home / str(source_value)).resolve()
+            source_path = (home / str(source_value))
+            if not source_path.exists():
+                # 2.5.16+ may replace private runtime sessions trees with a
+                # shared symlink; a missing private runtime copy is OK when the
+                # UUID is already present in the control sessions inventory.
+                if str(source_value).startswith("config-runtimes/"):
+                    continue
+                raise AuditError(f"legacy source missing: {session_id}: {source_value}")
             try:
-                source_path.relative_to(home.resolve())
-            except ValueError as exc:
-                raise AuditError("legacy source escaped CODEX_HOME") from exc
+                resolved = source_path.resolve()
+            except OSError as exc:
+                raise AuditError(f"legacy source unreadable: {session_id}") from exc
+            if not path_is_within(resolved, home):
+                raise AuditError("legacy source escaped CODEX_HOME")
+            # Shared runtime sessions symlink intentionally resolves into the
+            # control sessions tree (cwd-migrated body). Only assert byte-stable
+            # private copies (config-profiles / real private trees).
+            if _source_is_shared_sessions_view(home, source_path, resolved, now):
+                continue
             source_now = rollout_record(home, source_path)
             if source_now["full_sha256"] != record["full_sha256"]:
                 raise AuditError(f"legacy source copy changed: {session_id}")
     return len(canonical), len(legacy)
+
+
+def _source_is_shared_sessions_view(
+    home: Path,
+    source_path: Path,
+    resolved: Path,
+    canonical_now: dict[str, Any],
+) -> bool:
+    """True when a baseline legacy source now views the shared control sessions file.
+
+    After 2.5.16 session unity, config-runtimes/*/sessions is a symlink to
+    control sessions. Reading that path yields the migrated canonical body, not
+    the pre-import private copy — so full_sha256 must not be compared to the
+    baseline private snapshot.
+    """
+    source_text = str(source_path)
+    if "config-runtimes/" not in source_text and "config-profiles/" not in source_text:
+        return False
+    # Walk parents: if any sessions component is a symlink into control sessions.
+    current = source_path
+    control_sessions = home / "sessions"
+    for _ in range(12):
+        if current.name == "sessions":
+            try:
+                if current.is_symlink() and (
+                    current.resolve() == control_sessions.resolve()
+                    or current.resolve().samefile(control_sessions)
+                ):
+                    return True
+            except OSError:
+                return False
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    # Also treat resolve identity with the live canonical path as a shared view
+    # (covers proot dual roots where string paths differ but inodes match).
+    try:
+        canonical_path = home / str(canonical_now["path"])
+        if resolved == canonical_path.resolve() or resolved.samefile(canonical_path):
+            # Only skip when this is not a still-private profile/runtime file.
+            # Private trees keep a real sessions directory; shared views do not.
+            sessions_dir = source_path
+            while sessions_dir.name != "sessions" and sessions_dir != sessions_dir.parent:
+                sessions_dir = sessions_dir.parent
+            if sessions_dir.name == "sessions" and sessions_dir.is_symlink():
+                return True
+    except (OSError, KeyError, TypeError):
+        pass
+    return False
 
 
 def sqlite_candidates(home: Path) -> list[Path]:
