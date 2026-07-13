@@ -196,9 +196,31 @@ codex_for_tui_force_configure() {
 }
 
 codex_for_tui_binary_build_key() {
-  codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.19}"
+  codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.20}"
 }
 
+
+codex_for_tui_runtime_sessions_linked() {
+  # True when runtime sessions/history already point at control home. Warm path
+  # can then skip seed-shared-sessions (another full Python engine start).
+  control_home="${1:-}"
+  runtime_home="${2:-}"
+  [ -n "$control_home" ] && [ -n "$runtime_home" ] || return 1
+  [ "$control_home" != "$runtime_home" ] || return 1
+  name=""
+  for name in sessions history.jsonl archived_sessions; do
+    src="$control_home/$name"
+    dst="$runtime_home/$name"
+    [ -e "$src" ] || [ -L "$src" ] || continue
+    [ -L "$dst" ] || return 1
+    # Resolve both ends; broken links force a repair seed.
+    src_res="$(readlink -f "$src" 2>/dev/null || true)"
+    dst_res="$(readlink -f "$dst" 2>/dev/null || true)"
+    [ -n "$src_res" ] && [ -n "$dst_res" ] || return 1
+    [ "$src_res" = "$dst_res" ] || return 1
+  done
+  return 0
+}
 
 codex_for_tui_seed_shared_sessions() {
   # Ensure every config-runtimes/* sessions tree is a symlink to control home
@@ -222,8 +244,18 @@ codex_for_tui_import_runtime_sessions() {
   runtime_home="${2:-${CODEX_FOR_TUI_RUNTIME_HOME:-}}"
   [ -n "$control_home" ] && [ -n "$runtime_home" ] || return 0
   [ "$control_home" != "$runtime_home" ] || return 0
+  # Warm path: profile launch already seeded active runtime + dual-sync.
+  # When sessions/history already share control home, skip another engine start
+  # and the legacy importer (no private trees left to absorb).
+  if codex_for_tui_runtime_sessions_linked "$control_home" "$runtime_home"; then
+    return 0
+  fi
   # Repair shared session links across all runtimes before/while importing.
   codex_for_tui_seed_shared_sessions "$control_home"
+  # Re-check after seed; shared-link runtimes need no deep import.
+  if codex_for_tui_runtime_sessions_linked "$control_home" "$runtime_home"; then
+    return 0
+  fi
   engine_root="$(codex_config_engine_find_root 2>/dev/null || true)"
   importer=""
   for candidate in \
@@ -289,15 +321,25 @@ codex_for_tui_prepare_runtime() {
     runtime_work="$control_home/install-state/config-v2-launch/$$"
     runtime_status="$runtime_work/status.json"
     mkdir -p "$runtime_work"
-    if ! PYTHONNOUSERSITE=1 python3 \
-      "$engine_root/libexec/codex-config-engine.py" \
-      --codex-home "$control_home" status > "$runtime_status"
-    then
-      runtime_error="$(codex_config_v2_json_value "$runtime_status" error 2>/dev/null || true)"
-      printf '%s\n' "错误: ${runtime_error:-无法读取配置状态}；未启动 Codex。" >&2
-      return 1
+    # Warm V2 path: index.json already encodes schema_version=2. Skip a full
+    # engine `status` process (~0.4–0.7s) and go straight to profile launch.
+    # Fall back to status only when the index is missing/unreadable.
+    runtime_schema=""
+    v2_index="$control_home/config-profiles-v2/index.json"
+    if [ -s "$v2_index" ]; then
+      runtime_schema="$(codex_config_v2_json_value "$v2_index" schema_version 2>/dev/null || true)"
     fi
-    runtime_schema="$(codex_config_v2_json_value "$runtime_status" schema_version 2>/dev/null || true)"
+    if [ "$runtime_schema" != "2" ]; then
+      if ! PYTHONNOUSERSITE=1 python3 \
+        "$engine_root/libexec/codex-config-engine.py" \
+        --codex-home "$control_home" status > "$runtime_status"
+      then
+        runtime_error="$(codex_config_v2_json_value "$runtime_status" error 2>/dev/null || true)"
+        printf '%s\n' "错误: ${runtime_error:-无法读取配置状态}；未启动 Codex。" >&2
+        return 1
+      fi
+      runtime_schema="$(codex_config_v2_json_value "$runtime_status" schema_version 2>/dev/null || true)"
+    fi
     case "$runtime_schema" in
       2)
         runtime_launch="$runtime_work/launch.json"

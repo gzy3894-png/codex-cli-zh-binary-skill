@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.5.19-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.5.19)
+[![Release](https://img.shields.io/badge/release-v2.5.20-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.5.20)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.144.1-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -9,9 +9,13 @@ Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基�
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
 
-## 重要：2.5.19 配置模式 / 启动性能 / 本机清理热修
+## 重要：2.5.20 启动性能热修（大会话 dual-sync）
 
-2.5.19 在 2.5.18 之上统一配置格式：中转站只切换模型策略、API 与 Key；上下文长度、压缩策略、权限等为全站通用项。顺带修复 krill 无效 `service_tier=high`、APK 升级反复导入 `-legacy` 站、以及每次启动全量 dual-sync 导致的慢启动（fast path ~0.5s）。发布说明见 `docs/codex-for-tui-2.5.19-release-notes.md`。
+2.5.20 修的是用户体感「Codex 启动将近半分钟」：会话库变大后，provider dual-sync 在 marker 失效时会整文件扫描 rollout（本机约 93 个文件 / 173MB，最大约 94MB）只为改首行 `session_meta`。本版改为首行读写 + 同长 provider 原地补丁；warm path 跳过已链接 runtime 的重复 seed/import，并在 V2 热启动跳过多余 `status` 引擎进程。2.5.19 的配置模式统一格式与 krill `service_tier` 修复继续保留。发布说明见 `docs/codex-for-tui-2.5.20-release-notes.md`。
+
+## 重要：2.5.19 配置模式 / 启动 fast path / 本机清理热修
+
+2.5.19 在 2.5.18 之上统一配置格式：中转站只切换模型策略、API 与 Key；上下文长度、压缩策略、权限等为全站通用项。顺带修复 krill 无效 `service_tier=high`、APK 升级反复导入 `-legacy` 站、以及 provider 同步 fast path。发布说明见 `docs/codex-for-tui-2.5.19-release-notes.md`。
 
 ## 重要：2.5.18 原生 /resume provider 双写热修
 
@@ -79,12 +83,13 @@ codex-ops resume-hint
 
 内置 WebView 继续作为 Agent Browser，保留后台打开、DOM 读取、点击、输入、JS、截图、多标签、Cookie/WebStorage 持久化和 userscript；遇到验证码/风控/外部 scheme 时会进入明确的用户协作状态，而不是让 Agent 猜。
 
-已经安装 2.0.x～2.5.13 的用户，直接从 Releases 下载并覆盖安装 2.5.19 APK，然后打开 App。首次启动会自动完成二进制、launcher、脚本、配置档 V2、模型目录、旧 Codex rollout/SQLite 工作区迁移和运行世代升级；之后进入固定启动台。输入 `codex`、`claude` 或 `grok` 会创建独立工作窗口；历史对话按真实 UUID 恢复，关闭窗口不会删除对话。无需再执行任何 Codex 更新或修复命令。
+已经安装 2.0.x～2.5.13 的用户，直接从 Releases 下载并覆盖安装 2.5.20 APK，然后打开 App。首次启动会自动完成二进制、launcher、脚本、配置档 V2、模型目录、旧 Codex rollout/SQLite 工作区迁移和运行世代升级；之后进入固定启动台。输入 `codex`、`claude` 或 `grok` 会创建独立工作窗口；历史对话按真实 UUID 恢复，关闭窗口不会删除对话。无需再执行任何 Codex 更新或修复命令。
 
 升级只使用 APK 内置载荷完成核心迁移。完成后普通启动仍不会远程更新脚本、自动请求第三方 `/models` 或覆盖用户手写配置。`codex 更新` 只用于用户没有更新 APK、明确只想热更新脚本的场景。
 
 ## 2.0 新功能
 
+- 2.5.20：大会话 dual-sync 启动热修；session_meta 首行读写/同长原地补丁；warm path 跳过重复 seed/import 与多余 status。
 - 2.5.19：配置模式统一格式（站级模型/API/Key + 通用压缩/上下文）；sanitize service_tier；legacy 指纹去重；provider 同步 fast path。
 - 2.5.18：原生 `/resume` provider 双写热修；改写共享 session_meta + restamp 各 runtime SQLite，抗 backfill。
 - 2.5.17：原生 `/resume` provider 过滤热修；仅 restamp SQLite（会被 backfill 冲掉，已被 2.5.18 取代）。
@@ -188,7 +193,7 @@ codex-ops resume-hint
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.5.19` |
+| Android App | `2.5.20` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug/Test 包名 | `com.gzy3894.codexfortui.test` |
 | Codex CLI | `0.144.1` 中文版 |

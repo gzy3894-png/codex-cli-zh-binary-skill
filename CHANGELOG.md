@@ -1,3 +1,13 @@
+## Codex for TUI 2.5.20
+
+Codex for TUI 2.5.20 是 2.5.19 后的启动性能热修（大会话 dual-sync）。
+
+- session_meta 首行读写：marker 失效时不再整文件扫描 93+ rollout（本机约 173MB）。
+- 同长 managed provider 原地补丁首行；长度变化时流式重写，避免整文件进 RAM。
+- warm path：已共享链接的 runtime 跳过重复 seed/import；V2 热启动跳过多余 `status` 引擎进程。
+- `versionCode=86`、`versionName=2.5.20`、runtime epoch `apk-2.5.20`。
+- 发布说明见 `docs/codex-for-tui-2.5.20-release-notes.md`。
+
 ## Codex for TUI 2.5.19
 
 Codex for TUI 2.5.19 是 2.5.18 后的配置模式 / 启动性能 / 本机配置清理热修。

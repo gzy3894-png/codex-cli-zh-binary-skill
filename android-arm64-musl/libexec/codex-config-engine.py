@@ -2595,7 +2595,113 @@ def _rewrite_rollout_session_meta_provider(path: Path, target: str) -> bool:
     Codex startup backfill rebuilds SQLite threads from rollout session_meta. Only
     restamping SQLite is not durable: the next launch reloads the old provider
     from jsonl and empties /resume again. Codex++ provider-sync rewrites both.
+
+    Performance: native rollouts put session_meta on the first jsonl line. Reading
+    multi-hundred-MB bodies on every marker miss was the dominant cold-start cost
+    (tens of seconds on phone storage). Only the first line is inspected; no-ops
+    return without touching the rest. Same-length provider ids are patched in
+    place; otherwise the rest is streamed (never slurp whole file into RAM).
     """
+    if not target:
+        return False
+    try:
+        with path.open("rb") as handle:
+            first = handle.readline(16 * 1024 * 1024)
+            if not first:
+                return False
+            rest_offset = handle.tell()
+    except OSError:
+        return False
+
+    had_newline = first.endswith(b"\n")
+    raw = first[:-1] if had_newline else first
+    try:
+        record = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        # Extremely rare non-leading session_meta: fall back to legacy full scan
+        # only for small files so huge bodies never pay the old cost.
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return False
+        if size > 4 * 1024 * 1024:
+            return False
+        return _rewrite_rollout_session_meta_provider_full(path, target)
+
+    if not isinstance(record, dict) or record.get("type") != "session_meta":
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return False
+        if size > 4 * 1024 * 1024:
+            return False
+        return _rewrite_rollout_session_meta_provider_full(path, target)
+
+    payload = record.get("payload")
+    if not isinstance(payload, dict):
+        return False
+    current = payload.get("model_provider")
+    if current == target:
+        return False
+    payload["model_provider"] = target
+    record["payload"] = payload
+    new_raw = json.dumps(record, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    new_first = new_raw + (b"\n" if had_newline else b"")
+
+    try:
+        stat = path.stat()
+    except OSError:
+        stat = None
+
+    # Managed provider ids are fixed-width (codex_tui_ + 12 hex). Same-length
+    # patches avoid rewriting the multi-MB body entirely.
+    if len(new_first) == len(first):
+        try:
+            with path.open("r+b") as handle:
+                handle.seek(0)
+                handle.write(new_first)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if stat is not None:
+                try:
+                    os.utime(path, (stat.st_atime, stat.st_mtime))
+                except OSError:
+                    pass
+            try:
+                path.chmod(0o600)
+            except OSError:
+                pass
+            return True
+        except OSError:
+            # Fall through to streaming rewrite.
+            pass
+
+    ensure_private_dir(path.parent)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.tmp-", dir=path.parent)
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as out_handle, path.open("rb") as in_handle:
+            out_handle.write(new_first)
+            in_handle.seek(rest_offset)
+            shutil.copyfileobj(in_handle, out_handle, length=1024 * 1024)
+            out_handle.flush()
+            os.fsync(out_handle.fileno())
+        tmp.chmod(0o600)
+        os.replace(tmp, path)
+        fsync_dir(path.parent)
+        if stat is not None:
+            try:
+                os.utime(path, (stat.st_atime, stat.st_mtime))
+            except OSError:
+                pass
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        return False
+    return True
+
+
+def _rewrite_rollout_session_meta_provider_full(path: Path, target: str) -> bool:
+    """Legacy full-file rewrite for tiny atypical rollouts only."""
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
@@ -2604,7 +2710,6 @@ def _rewrite_rollout_session_meta_provider(path: Path, target: str) -> bool:
         return False
     changed = False
     out_parts: list[str] = []
-    # splitlines(keepends) preserves endings; empty trailing is fine.
     for line in text.splitlines(keepends=True):
         raw = line[:-1] if line.endswith("\n") else line
         ending = "\n" if line.endswith("\n") else ""
@@ -2630,7 +2735,9 @@ def _rewrite_rollout_session_meta_provider(path: Path, target: str) -> bool:
             continue
         payload["model_provider"] = target
         record["payload"] = payload
-        out_parts.append(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + ending)
+        out_parts.append(
+            json.dumps(record, ensure_ascii=False, separators=(",", ":")) + ending
+        )
         changed = True
     if not changed:
         return False
