@@ -94,25 +94,30 @@ test_menu_switch_view_delete_and_invalid_choice() (
     --model gpt-5.5 \
     --reasoning-effort xhigh
 
-  printf '99\n4\n99\n2\n2\n99\n2\n9\n' |
+  # Hub (2 stations): 1 alpha* 2 omega 3 new 4 compact 5 permission 6 done
+  # Station action (inactive): 1 use 2 view 3 edit 4 delete
+  # invalid → view omega → use omega → done
+  printf '99\n2\n2\n2\n1\n6\n' |
     codex_config_menu > "$tmp/switch.out" 2> "$tmp/switch.err"
   codex_config_engine profile show omega > "$tmp/omega-active.json"
   codex_config_engine profile show alpha > "$tmp/alpha-inactive.json"
   json_assert "$tmp/omega-active.json" "v['active'] is True and v['profile']['model'] == 'gpt-5.5'"
   json_assert "$tmp/alpha-inactive.json" "v['active'] is False"
-  assert_contains "$tmp/switch.err" "请输入 0 到 9，或输入 b 返回。"
-  assert_contains "$tmp/switch.err" "中转站编号超出范围。"
+  assert_contains "$tmp/switch.err" "编号超出范围。"
   assert_contains "$tmp/switch.err" "名称: omega"
   assert_contains "$tmp/switch.out" "已切换配置：omega"
+  assert_contains "$tmp/switch.err" "Codex 配置模式"
 
-  printf '5\n1\nn\n9\n' |
+  # omega active: hub 1 alpha 2 omega* 3 new 4 compact 5 permission 6 done
+  # alpha action: 1 use 2 view 3 edit 4 delete
+  printf '1\n4\nn\n6\n' |
     codex_config_menu > "$tmp/delete-cancel.out" 2> "$tmp/delete-cancel.err"
   codex_config_engine profile list > "$tmp/after-cancel.json"
   json_assert "$tmp/after-cancel.json" "len(v['profiles']) == 2 and v['profiles'][0]['name'] == 'alpha' and v['profiles'][1]['name'] == 'omega'"
   assert_contains "$tmp/delete-cancel.err" "确认删除配置 alpha"
   assert_not_contains "$tmp/delete-cancel.out" "已删除配置：alpha"
 
-  printf '5\n1\ny\n9\n' |
+  printf '1\n4\ny\n5\n' |
     codex_config_menu > "$tmp/delete-confirm.out" 2> "$tmp/delete-confirm.err"
   codex_config_engine profile list > "$tmp/after-delete.json"
   json_assert "$tmp/after-delete.json" "len(v['profiles']) == 1 and v['profiles'][0]['name'] == 'omega'"
@@ -142,20 +147,20 @@ test_back_navigation_and_non_destructive_exit() (
     --activate
 
   before="$(runtime_hash "$CODEX_HOME")"
-  printf '1\nb\n1\n2\nb\n2\nb\n3\nb\n4\nb\n5\nb\n7\nb\nb\n' |
+  # Hub (1 station): 1 alpha* 2 new 3 compact 4 permission 5 done
+  # open new→back, compact→back, station→back, then done
+  printf '2\nb\n3\nb\n1\nb\n5\n' |
     codex_config_menu > "$tmp/back.out" 2> "$tmp/back.err"
   after_back="$(runtime_hash "$CODEX_HOME")"
   [ "$before" = "$after_back" ] ||
     fail "layered back navigation changed runtime configuration"
-  assert_contains "$tmp/back.err" "新建配置："
-  assert_contains "$tmp/back.err" "配置名称"
-  assert_contains "$tmp/back.err" "请选择要切换的配置编号"
-  assert_contains "$tmp/back.err" "请选择要编辑的中转站编号"
-  assert_contains "$tmp/back.err" "请选择要查看的配置编号"
-  assert_contains "$tmp/back.err" "请选择要删除的配置编号"
-  assert_contains "$tmp/back.err" "请选择压缩策略"
+  assert_contains "$tmp/back.err" "新建中转站"
+  assert_contains "$tmp/back.err" "压缩策略"
+  assert_contains "$tmp/back.err" "中转站 alpha"
+  assert_contains "$tmp/back.err" "Codex 配置模式"
+  assert_contains "$tmp/back.out" "已退出配置模式。"
 
-  printf '0\n' |
+  printf 'b\n' |
     codex_config_menu > "$tmp/exit.out" 2> "$tmp/exit.err"
   after_exit="$(runtime_hash "$CODEX_HOME")"
   [ "$before" = "$after_exit" ] ||
@@ -178,14 +183,15 @@ test_official_create_and_same_id_edit() (
   . "$SCRIPT_DIR/lib/codex-zh-config.sh"
 
   codex_config_v2_prepare
+  # name → invalid model → first model → reasoning ultra(6) → confirm
   printf 'official\n99\n1\n6\n\n' |
     codex_config_v2_create_official > "$tmp/create.out" 2> "$tmp/create.err"
   codex_config_engine profile show official > "$tmp/before-edit.json"
   profile_id="$(codex_config_v2_json_value "$tmp/before-edit.json" profile.id)"
   json_assert "$tmp/before-edit.json" "v['profile']['model'] == 'gpt-5.6-sol' and v['profile']['reasoning_effort'] == 'ultra'"
-  assert_contains "$tmp/create.err" "模型编号超出范围"
+  assert_contains "$tmp/create.err" "编号超出范围。"
 
-  # Field-level edit: pick station → 2=模型策略 → keep model → reasoning 5=max → confirm
+  # pick station → field model → keep model → reasoning max(5) → confirm
   printf '1\n2\n\n5\n\n' |
     codex_config_v2_edit_menu > "$tmp/edit.out" 2> "$tmp/edit.err"
   codex_config_engine profile show official > "$tmp/after-edit.json"
@@ -291,7 +297,8 @@ test_runtime_dirty_save_as_new_from_menu() (
     --activate
   sed -i 's/model = "gpt-5.4"/model = "gpt-5.5"/' "$CODEX_HOME/config.toml"
 
-  printf '9\n2\nruntime-copy\n' |
+  # Hub: 1 station 2 new 3 compact 4 permission 5 done → dirty → 2 save-as
+  printf '5\n2\nruntime-copy\n' |
     codex_config_menu > "$tmp/save-as.out" 2> "$tmp/save-as.err"
   codex_config_engine status > "$tmp/status.json"
   codex_config_engine profile list > "$tmp/list.json"
@@ -302,7 +309,7 @@ test_runtime_dirty_save_as_new_from_menu() (
   json_assert "$tmp/original.json" "v['active'] is False and v['profile']['model'] == 'gpt-5.4'"
   json_assert "$tmp/runtime-copy.json" "v['active'] is True and v['profile']['model'] == 'gpt-5.5'"
   assert_contains "$tmp/save-as.err" "运行配置有未保存变化"
-  assert_contains "$tmp/save-as.err" "2. 另存为新配置档"
+  assert_contains "$tmp/save-as.err" "另存为新配置档"
   assert_contains "$tmp/save-as.err" "新配置名称"
 )
 
@@ -330,7 +337,8 @@ test_runtime_dirty_continue_without_saving_from_menu() (
   sed -i 's/model = "gpt-5.4"/model = "gpt-5.5"/' "$CODEX_HOME/config.toml"
   before="$(runtime_hash "$CODEX_HOME")"
 
-  printf '9\n3\n' |
+  # Hub done → dirty continue
+  printf '5\n3\n' |
     codex_config_menu > "$tmp/continue.out" 2> "$tmp/continue.err"
   after="$(runtime_hash "$CODEX_HOME")"
   [ "$before" = "$after" ] ||
@@ -340,7 +348,7 @@ test_runtime_dirty_continue_without_saving_from_menu() (
   json_assert "$tmp/status.json" "v['runtime_dirty'] is True and 'model' in v['runtime_dirty_reasons']"
   json_assert "$tmp/original.json" "v['active'] is True and v['profile']['model'] == 'gpt-5.4'"
   assert_contains "$CODEX_HOME/config.toml" 'model = "gpt-5.5"'
-  assert_contains "$tmp/continue.err" "3. 暂不保存，继续"
+  assert_contains "$tmp/continue.err" "暂不保存，继续"
 )
 
 test_explicit_config_bootstraps_missing_engine_assets() (

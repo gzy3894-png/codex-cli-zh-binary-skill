@@ -1,3 +1,14 @@
+## Codex for TUI 2.5.22
+
+Codex for TUI 2.5.22 是配置模式交互重构：单页中转站列表枢纽 + 方向键/回车选择，去掉编号连环嵌套。
+
+- 主界面一页完成列表与操作（新建 / 压缩 / 权限 / 完成）。
+- 选中中转站后对该站切换、查看、编辑字段、删除。
+- `codex_config_select`：TTY 用 ↑↓ 回车；`CODEX_ZH_FORCE_STDIN=1` 时编号回退。
+- 数据模型沿用站级 vs 通用；`compact_policy` 仍只写全局。
+- `versionCode=88`、`versionName=2.5.22`、runtime epoch `apk-2.5.22`。
+- 发布说明见 `docs/codex-for-tui-2.5.22-release-notes.md`。
+
 ## Codex for TUI 2.5.21
 
 Codex for TUI 2.5.21 是 2.5.20 后的配置模式结构优化。

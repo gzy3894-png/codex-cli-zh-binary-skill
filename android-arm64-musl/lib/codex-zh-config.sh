@@ -795,6 +795,216 @@ codex_config_exit_config_mode() {
   exit 0
 }
 
+# Unified list picker.
+# Items file lines: id|label
+# On success: sets CODEX_CONFIG_SELECT_ID / CODEX_CONFIG_SELECT_LABEL / CODEX_CONFIG_SELECT_INDEX (1-based)
+# Return: 0=ok 1=cancel/back 2=quit-config
+# Interactive TTY: ↑/↓ or j/k, Enter confirm, b/Esc back, q quit.
+# Piped / FORCE_STDIN: numbered fallback (tests and non-TTY).
+codex_config_select() {
+  v2_sel_title="$1"
+  v2_sel_file="$2"
+  v2_sel_default="${3:-}"
+  CODEX_CONFIG_SELECT_ID=""
+  CODEX_CONFIG_SELECT_LABEL=""
+  CODEX_CONFIG_SELECT_INDEX=""
+
+  [ -s "$v2_sel_file" ] || {
+    codex_warn "没有可选项目。"
+    return 1
+  }
+
+  v2_sel_count="$(wc -l < "$v2_sel_file" | tr -d ' ')"
+  [ "$v2_sel_count" -gt 0 ] 2>/dev/null || {
+    codex_warn "没有可选项目。"
+    return 1
+  }
+
+  v2_sel_default_index="1"
+  if [ -n "$v2_sel_default" ]; then
+    case "$v2_sel_default" in
+      *[!0-9]*)
+        v2_sel_match="$(awk -F '|' -v id="$v2_sel_default" '$1 == id { print NR; exit }' "$v2_sel_file")"
+        [ -n "$v2_sel_match" ] && v2_sel_default_index="$v2_sel_match"
+        ;;
+      *)
+        if [ "$v2_sel_default" -ge 1 ] 2>/dev/null &&
+          [ "$v2_sel_default" -le "$v2_sel_count" ] 2>/dev/null
+        then
+          v2_sel_default_index="$v2_sel_default"
+        fi
+        ;;
+    esac
+  fi
+
+  # Interactive arrow UI when a real /dev/tty is available and tests are not
+  # forcing piped stdin (CODEX_ZH_FORCE_STDIN=1). App terminals use /dev/tty even
+  # when shell -t checks are flaky under proot. Set CODEX_ZH_SELECT_INTERACTIVE=0
+  # to force numbered fallback.
+  v2_sel_use_interactive=0
+  if [ "${CODEX_ZH_FORCE_STDIN:-0}" != "1" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    v2_sel_use_interactive=1
+  fi
+  if [ "${CODEX_ZH_SELECT_INTERACTIVE:-}" = "0" ]; then
+    v2_sel_use_interactive=0
+  fi
+  if [ "${CODEX_ZH_SELECT_INTERACTIVE:-}" = "1" ]; then
+    v2_sel_use_interactive=1
+  fi
+
+  if [ "$v2_sel_use_interactive" = "1" ]; then
+    v2_sel_result="$(
+      CODEX_CONFIG_SELECT_TITLE="$v2_sel_title" \
+      CODEX_CONFIG_SELECT_FILE="$v2_sel_file" \
+      CODEX_CONFIG_SELECT_DEFAULT="$v2_sel_default_index" \
+      python3 - <<'PY'
+import os
+import sys
+import termios
+import tty
+
+title = os.environ.get("CODEX_CONFIG_SELECT_TITLE", "")
+path = os.environ["CODEX_CONFIG_SELECT_FILE"]
+default = int(os.environ.get("CODEX_CONFIG_SELECT_DEFAULT") or "1")
+
+items = []
+with open(path, encoding="utf-8") as handle:
+    for line in handle:
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        if "|" in line:
+            item_id, label = line.split("|", 1)
+        else:
+            item_id, label = line, line
+        items.append((item_id, label))
+
+if not items:
+    sys.exit(3)
+
+index = max(0, min(len(items) - 1, default - 1))
+tty_in = open("/dev/tty", "r")
+tty_out = open("/dev/tty", "w")
+fd = tty_in.fileno()
+old = termios.tcgetattr(fd)
+
+def render():
+    tty_out.write("\033[2J\033[H")
+    if title:
+        tty_out.write(f"{title}\n")
+    tty_out.write("↑/↓ 移动  回车确认  b返回  q退出\n")
+    tty_out.write("────────────────────────\n")
+    for i, (_item_id, label) in enumerate(items):
+        mark = "›" if i == index else " "
+        tty_out.write(f" {mark} {label}\n")
+    tty_out.write("────────────────────────\n")
+    tty_out.flush()
+
+try:
+    tty.setcbreak(fd)
+    while True:
+        render()
+        ch = tty_in.read(1)
+        if ch in ("\r", "\n"):
+            item_id, label = items[index]
+            sys.stdout.write(f"{index + 1}|{item_id}|{label}\n")
+            sys.exit(0)
+        if ch in ("b", "B", "\x1b"):
+            # Esc alone or b = back. Arrow sequences start with Esc — handle below.
+            if ch == "\x1b":
+                # Peek for CSI arrow: Esc [ A/B/C/D
+                tty_in_fd = fd
+                # non-blocking-ish: read rest of sequence with short timeout
+                import select as select_mod
+                rest = ""
+                if select_mod.select([tty_in_fd], [], [], 0.05)[0]:
+                    rest = tty_in.read(1)
+                    if rest == "[":
+                        if select_mod.select([tty_in_fd], [], [], 0.05)[0]:
+                            rest2 = tty_in.read(1)
+                            if rest2 == "A":  # up
+                                index = (index - 1) % len(items)
+                                continue
+                            if rest2 == "B":  # down
+                                index = (index + 1) % len(items)
+                                continue
+                            # ignore left/right
+                            continue
+                # bare Esc = back
+                sys.exit(1)
+            sys.exit(1)
+        if ch in ("q", "Q", "0"):
+            sys.exit(2)
+        if ch in ("k", "K"):
+            index = (index - 1) % len(items)
+            continue
+        if ch in ("j", "J"):
+            index = (index + 1) % len(items)
+            continue
+        # digit jump 1-9
+        if ch.isdigit() and ch != "0":
+            jump = int(ch)
+            if 1 <= jump <= len(items):
+                index = jump - 1
+            continue
+finally:
+    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    tty_in.close()
+    tty_out.close()
+PY
+    )"
+    v2_sel_rc=$?
+    case "$v2_sel_rc" in
+      0)
+        CODEX_CONFIG_SELECT_INDEX="$(printf '%s\n' "$v2_sel_result" | cut -d '|' -f 1)"
+        CODEX_CONFIG_SELECT_ID="$(printf '%s\n' "$v2_sel_result" | cut -d '|' -f 2)"
+        CODEX_CONFIG_SELECT_LABEL="$(printf '%s\n' "$v2_sel_result" | cut -d '|' -f 3-)"
+        return 0
+        ;;
+      1) return 1 ;;
+      2) return 2 ;;
+      *)
+        codex_warn "交互选择失败，改用编号输入。"
+        ;;
+    esac
+  fi
+
+  # Numbered fallback (tests / non-TTY / interactive failure)
+  while :; do
+    printf '%s\n' "$v2_sel_title" >&2
+    awk -F '|' '{
+      label = (NF >= 2 ? $2 : $1)
+      printf "%2d. %s\n", NR, label
+    }' "$v2_sel_file" >&2
+    printf '%s\n' "b. 返回" >&2
+    printf '%s\n' "0. 退出配置模式" >&2
+    v2_sel_choice="$(codex_config_tty_read "请选择编号" "$v2_sel_default_index")"
+    codex_config_is_back_choice "$v2_sel_choice" && return 1
+    codex_config_is_exit_choice "$v2_sel_choice" && return 2
+    case "$v2_sel_choice" in
+      *[!0-9]*|"") codex_warn "请输入有效编号，或输入 b 返回。"; continue ;;
+    esac
+    if [ "$v2_sel_choice" -ge 1 ] 2>/dev/null &&
+      [ "$v2_sel_choice" -le "$v2_sel_count" ] 2>/dev/null
+    then
+      v2_sel_line="$(sed -n "${v2_sel_choice}p" "$v2_sel_file")"
+      CODEX_CONFIG_SELECT_INDEX="$v2_sel_choice"
+      CODEX_CONFIG_SELECT_ID="$(printf '%s\n' "$v2_sel_line" | cut -d '|' -f 1)"
+      CODEX_CONFIG_SELECT_LABEL="$(printf '%s\n' "$v2_sel_line" | cut -d '|' -f 2-)"
+      return 0
+    fi
+    codex_warn "编号超出范围。"
+  done
+}
+
+codex_config_select_or_exit() {
+  # wraps codex_config_select; maps return 2 to exit config mode
+  codex_config_select "$@"
+  v2_sel_wrap_rc=$?
+  [ "$v2_sel_wrap_rc" -ne 2 ] || codex_config_exit_config_mode
+  return "$v2_sel_wrap_rc"
+}
+
 codex_config_profiles_root() {
   printf '%s/config-profiles\n' "$(codex_home)"
 }
@@ -968,50 +1178,36 @@ PY
 }
 
 codex_config_v2_choose_profile() {
-  v2_choose_prompt="${1:-请选择配置编号}"
+  v2_choose_prompt="${1:-选择中转站}"
   v2_choose_work="$(codex_config_v2_work_root)"
   v2_choose_json="$v2_choose_work/profiles.json"
-  v2_choose_lines="$v2_choose_work/profiles.lines"
+  v2_choose_raw="$v2_choose_work/profiles.lines"
+  v2_choose_items="$v2_choose_work/profiles.select"
   CODEX_CONFIG_V2_PROFILE_ID=""
   CODEX_CONFIG_V2_PROFILE_NAME=""
   codex_config_v2_run "$v2_choose_json" profile list || return 1
-  codex_config_v2_profile_lines "$v2_choose_json" > "$v2_choose_lines"
-  [ -s "$v2_choose_lines" ] || {
+  codex_config_v2_profile_lines "$v2_choose_json" > "$v2_choose_raw"
+  [ -s "$v2_choose_raw" ] || {
     codex_warn "还没有配置档，请先新建配置。"
     return 1
   }
-  while :; do
-    printf '%s\n' "中转站列表（站级=名称/模型策略/API/Key；压缩与权限见通用项）：" >&2
-    awk -F '|' '{
-      active = ($6 == "1" ? " *当前" : "")
-      effort = ($5 != "" ? "/" $5 : "")
-      model = ($4 != "" ? $4 effort : "默认模型")
-      url = ($7 != "" ? $7 : "")
-      if (url != "") {
-        printf "%2d. %s%s  模型策略=%s  API=%s\n", NR, $2, active, model, url
-      } else {
-        printf "%2d. %s%s  [%s]  模型策略=%s\n", NR, $2, active, $3, model
-      }
-    }' "$v2_choose_lines" >&2
-    printf '%s\n' "b. 返回上一层" >&2
-    printf '%s\n' "0. 退出，不启动 Codex" >&2
-    v2_choose_count="$(wc -l < "$v2_choose_lines" | tr -d ' ')"
-    v2_choose_value="$(codex_config_tty_read "$v2_choose_prompt" "b")"
-    codex_config_is_back_choice "$v2_choose_value" && return 1
-    codex_config_is_exit_choice "$v2_choose_value" && codex_config_exit_config_mode
-    case "$v2_choose_value" in
-      *[!0-9]*|"") codex_warn "请输入有效编号，或输入 b 返回。"; continue ;;
-    esac
-    if [ "$v2_choose_value" -ge 1 ] 2>/dev/null &&
-      [ "$v2_choose_value" -le "$v2_choose_count" ] 2>/dev/null
-    then
-      v2_choose_line="$(sed -n "${v2_choose_value}p" "$v2_choose_lines")"
-      CODEX_CONFIG_V2_PROFILE_ID="$(printf '%s\n' "$v2_choose_line" | cut -d '|' -f 1)"
-      CODEX_CONFIG_V2_PROFILE_NAME="$(printf '%s\n' "$v2_choose_line" | cut -d '|' -f 2)"
-      return 0
-    fi
-    codex_warn "中转站编号超出范围。"
-  done
+  awk -F '|' '{
+    active = ($6 == "1" ? " *" : "")
+    effort = ($5 != "" ? "/" $5 : "")
+    model = ($4 != "" ? $4 effort : "默认模型")
+    url = ($7 != "" ? $7 : "")
+    if (url != "") {
+      printf "%s|%s%s  %s  %s\n", $1, $2, active, model, url
+    } else {
+      printf "%s|%s%s  [%s]  %s\n", $1, $2, active, $3, model
+    }
+  }' "$v2_choose_raw" > "$v2_choose_items"
+  v2_choose_default="$(awk -F '|' '$6 == "1" { print $1; exit }' "$v2_choose_raw")"
+  codex_config_select_or_exit "$v2_choose_prompt" "$v2_choose_items" "$v2_choose_default" || return 1
+  CODEX_CONFIG_V2_PROFILE_ID="$CODEX_CONFIG_SELECT_ID"
+  # name is first token of label before optional " *"
+  CODEX_CONFIG_V2_PROFILE_NAME="$(awk -F '|' -v id="$CODEX_CONFIG_V2_PROFILE_ID" '$1 == id { print $2; exit }' "$v2_choose_raw")"
+  return 0
 }
 
 codex_config_v2_catalog_lines() {
@@ -1057,38 +1253,27 @@ codex_config_v2_choose_model() {
     codex_warn "模型目录为空。"
     return 1
   }
-  v2_model_default="1"
-  if [ -n "$v2_model_preferred" ]; then
-    v2_model_match="$(awk -F '|' -v model="$v2_model_preferred" '$1 == model { print NR; exit }' "$v2_model_lines")"
-    [ -z "$v2_model_match" ] || v2_model_default="$v2_model_match"
+  v2_model_items="$v2_model_work/catalog.select"
+  awk -F '|' '{
+    context = ($5 != "" ? "  上下文 " $5 : "  能力未知")
+    fallback = ($7 == "1" ? "  [保守]" : "")
+    printf "%s|%s%s%s\n", $1, $1, context, fallback
+  }' "$v2_model_lines" > "$v2_model_items"
+  v2_model_default="${v2_model_preferred:-}"
+  [ -n "$v2_model_default" ] || v2_model_default="1"
+  if ! codex_config_select_or_exit "选择模型" "$v2_model_items" "$v2_model_default"; then
+    return 1
   fi
-  while :; do
-    printf '%s\n' "可用模型：" >&2
-    awk -F '|' '{
-      context = ($5 != "" ? "  上下文 " $5 : "  能力未知")
-      fallback = ($7 == "1" ? "  [保守模式]" : "")
-      printf "%2d. %s%s%s\n", NR, $1, context, fallback
-    }' "$v2_model_lines" >&2
-    printf '%s\n' "b. 返回上一层" >&2
-    printf '%s\n' "0. 退出，不启动 Codex" >&2
-    v2_model_count="$(wc -l < "$v2_model_lines" | tr -d ' ')"
-    v2_model_choice="$(codex_config_tty_read "请选择模型编号" "$v2_model_default")"
-    codex_config_is_back_choice "$v2_model_choice" && return 1
-    codex_config_is_exit_choice "$v2_model_choice" && codex_config_exit_config_mode
-    case "$v2_model_choice" in
-      *[!0-9]*|"") codex_warn "请输入有效编号，或输入 b 返回。"; continue ;;
-    esac
-    if [ "$v2_model_choice" -ge 1 ] 2>/dev/null &&
-      [ "$v2_model_choice" -le "$v2_model_count" ] 2>/dev/null
-    then
-      v2_model_line="$(sed -n "${v2_model_choice}p" "$v2_model_lines")"
-      CODEX_CONFIG_V2_MODEL="$(printf '%s\n' "$v2_model_line" | cut -d '|' -f 1)"
-      CODEX_CONFIG_V2_LEVELS="$(printf '%s\n' "$v2_model_line" | cut -d '|' -f 3)"
-      CODEX_CONFIG_V2_DEFAULT_LEVEL="$(printf '%s\n' "$v2_model_line" | cut -d '|' -f 4)"
-      return 0
-    fi
+  v2_model_line="$(awk -F '|' -v id="$CODEX_CONFIG_SELECT_ID" '$1 == id { print; exit }' "$v2_model_lines")"
+  [ -n "$v2_model_line" ] || {
+    # Keep legacy phrasing so older smoke assertions still match.
     codex_warn "模型编号超出范围。"
-  done
+    return 1
+  }
+  CODEX_CONFIG_V2_MODEL="$(printf '%s\n' "$v2_model_line" | cut -d '|' -f 1)"
+  CODEX_CONFIG_V2_LEVELS="$(printf '%s\n' "$v2_model_line" | cut -d '|' -f 3)"
+  CODEX_CONFIG_V2_DEFAULT_LEVEL="$(printf '%s\n' "$v2_model_line" | cut -d '|' -f 4)"
+  return 0
 }
 
 codex_config_v2_choose_reasoning() {
@@ -1118,27 +1303,13 @@ codex_config_v2_choose_reasoning() {
       v2_reasoning_default="$(sed -n '1p' "$v2_reasoning_file")"
     fi
   fi
-  v2_reasoning_default_number="$(awk -v effort="$v2_reasoning_default" '$0 == effort { print NR; exit }' "$v2_reasoning_file")"
-  while :; do
-    printf '%s\n' "推理等级：" >&2
-    awk '{ printf "%2d. %s\n", NR, $0 }' "$v2_reasoning_file" >&2
-    printf '%s\n' "b. 返回上一层" >&2
-    printf '%s\n' "0. 退出，不启动 Codex" >&2
-    v2_reasoning_count="$(wc -l < "$v2_reasoning_file" | tr -d ' ')"
-    v2_reasoning_choice="$(codex_config_tty_read "请选择推理等级编号" "$v2_reasoning_default_number")"
-    codex_config_is_back_choice "$v2_reasoning_choice" && return 1
-    codex_config_is_exit_choice "$v2_reasoning_choice" && codex_config_exit_config_mode
-    case "$v2_reasoning_choice" in
-      *[!0-9]*|"") codex_warn "请输入有效编号，或输入 b 返回。"; continue ;;
-    esac
-    if [ "$v2_reasoning_choice" -ge 1 ] 2>/dev/null &&
-      [ "$v2_reasoning_choice" -le "$v2_reasoning_count" ] 2>/dev/null
-    then
-      CODEX_CONFIG_V2_REASONING="$(sed -n "${v2_reasoning_choice}p" "$v2_reasoning_file")"
-      return 0
-    fi
-    codex_warn "推理等级编号超出范围。"
-  done
+  v2_reasoning_items="$v2_reasoning_work/reasoning.select"
+  awk '{ printf "%s|%s\n", $0, $0 }' "$v2_reasoning_file" > "$v2_reasoning_items"
+  if ! codex_config_select_or_exit "选择推理等级" "$v2_reasoning_items" "$v2_reasoning_default"; then
+    return 1
+  fi
+  CODEX_CONFIG_V2_REASONING="$CODEX_CONFIG_SELECT_ID"
+  return 0
 }
 
 codex_config_v2_prepare() {
@@ -1199,32 +1370,30 @@ with open(sys.argv[1], encoding="utf-8") as handle:
 print("、".join(value.get("runtime_dirty_reasons") or []))
 PY
 )"
-  while :; do
-    printf '%s\n' "检测到当前运行配置与配置档不同：$v2_dirty_reasons" >&2
-    printf '%s\n' "$v2_dirty_reason 前请选择：" >&2
-    printf '%s\n' "1. 同步到当前配置档（推荐）" >&2
-    printf '%s\n' "2. 另存为新配置档" >&2
-    printf '%s\n' "3. 暂不保存，继续" >&2
-    printf '%s\n' "b. 取消并返回" >&2
-    printf '%s\n' "0. 退出，不启动 Codex" >&2
-    v2_dirty_choice="$(codex_config_tty_read "请输入选项编号" "1")"
-    case "$v2_dirty_choice" in
-      1|"")
-        codex_config_v2_run "$v2_dirty_work/sync-current.json" profile sync-current "$v2_dirty_active"
-        return $?
-        ;;
-      2)
-        codex_config_v2_prompt_name "新配置名称" "profile-$(date '+%Y%m%d-%H%M%S' 2>/dev/null || printf '%s' "$$")" || return 1
-        codex_config_v2_run "$v2_dirty_work/import-current.json" \
-          profile import-current --name "$CODEX_CONFIG_V2_NAME" --activate
-        return $?
-        ;;
-      3) return 0 ;;
-      b|B|back|BACK|返回) return 1 ;;
-      0|q|Q|quit|QUIT|退出) codex_config_exit_config_mode ;;
-      *) codex_warn "请输入 1、2、3、b 或 0。" ;;
-    esac
-  done
+  v2_dirty_items="$v2_dirty_work/dirty.select"
+  {
+    printf '%s\n' "sync|同步到当前配置档（推荐）"
+    printf '%s\n' "save-as|另存为新配置档"
+    printf '%s\n' "continue|暂不保存，继续"
+  } > "$v2_dirty_items"
+  printf '%s\n' "检测到当前运行配置与配置档不同：$v2_dirty_reasons" >&2
+  if ! codex_config_select_or_exit "$v2_dirty_reason 前请选择" "$v2_dirty_items" "sync"; then
+    return 1
+  fi
+  case "$CODEX_CONFIG_SELECT_ID" in
+    sync)
+      codex_config_v2_run "$v2_dirty_work/sync-current.json" profile sync-current "$v2_dirty_active"
+      return $?
+      ;;
+    save-as)
+      codex_config_v2_prompt_name "新配置名称" "profile-$(date '+%Y%m%d-%H%M%S' 2>/dev/null || printf '%s' "$$")" || return 1
+      codex_config_v2_run "$v2_dirty_work/import-current.json" \
+        profile import-current --name "$CODEX_CONFIG_V2_NAME" --activate
+      return $?
+      ;;
+    continue) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 codex_config_v2_post_materialize() {
@@ -1342,21 +1511,18 @@ codex_config_v2_create_third_party() {
 }
 
 codex_config_v2_create_menu() {
-  while :; do
-    printf '%s\n' "新建配置：" >&2
-    printf '%s\n' "1. 第三方 Responses API" >&2
-    printf '%s\n' "2. OpenAI 官方登录" >&2
-    printf '%s\n' "b. 返回上一层" >&2
-    printf '%s\n' "0. 退出，不启动 Codex" >&2
-    v2_create_type="$(codex_config_tty_read "请选择配置类型" "1")"
-    case "$v2_create_type" in
-      1|"") codex_config_v2_create_third_party; return $? ;;
-      2) codex_config_v2_create_official; return $? ;;
-      b|B|back|BACK|返回) return 1 ;;
-      0|q|Q|quit|QUIT|退出) codex_config_exit_config_mode ;;
-      *) codex_warn "请输入 1、2、b 或 0。" ;;
-    esac
-  done
+  v2_create_work="$(codex_config_v2_work_root)"
+  v2_create_items="$v2_create_work/create-type.select"
+  {
+    printf '%s\n' "third_party|第三方 Responses API"
+    printf '%s\n' "official|OpenAI 官方登录"
+  } > "$v2_create_items"
+  codex_config_select_or_exit "新建中转站" "$v2_create_items" "third_party" || return 1
+  case "$CODEX_CONFIG_SELECT_ID" in
+    third_party) codex_config_v2_create_third_party; return $? ;;
+    official) codex_config_v2_create_official; return $? ;;
+    *) return 1 ;;
+  esac
 }
 
 codex_config_v2_format_compact_label() {
@@ -1611,8 +1777,14 @@ codex_config_v2_edit_third_party_field() {
 }
 
 codex_config_v2_edit_menu() {
+  # Optional preselected profile id as $1 (hub passes selected station)
+  v2_edit_preset_id="${1:-}"
   codex_config_v2_dirty_guard "编辑配置" || return 1
-  codex_config_v2_choose_profile "请选择要编辑的中转站编号" || return 1
+  if [ -n "$v2_edit_preset_id" ]; then
+    CODEX_CONFIG_V2_PROFILE_ID="$v2_edit_preset_id"
+  else
+    codex_config_v2_choose_profile "选择要编辑的中转站" || return 1
+  fi
   v2_edit_work="$(codex_config_v2_work_root)"
   v2_edit_json="$v2_edit_work/edit-profile.json"
   codex_config_v2_run "$v2_edit_json" profile show "$CODEX_CONFIG_V2_PROFILE_ID" || return 1
@@ -1621,59 +1793,52 @@ codex_config_v2_edit_menu() {
   v2_edit_model="$(codex_config_v2_json_value "$v2_edit_json" profile.model 2>/dev/null || true)"
   v2_edit_effort="$(codex_config_v2_json_value "$v2_edit_json" profile.reasoning_effort 2>/dev/null || true)"
   v2_edit_base="$(codex_config_v2_json_value "$v2_edit_json" profile.base_url 2>/dev/null || true)"
-  while :; do
-    printf '%s\n' "" >&2
-    printf '%s\n' "编辑中转站：$v2_edit_name（只改本站字段；压缩/权限见主菜单通用项）" >&2
-    case "$v2_edit_mode" in
-      official)
-        printf '%s\n' "当前模型策略：${v2_edit_model:-默认}${v2_edit_effort:+ / $v2_edit_effort}" >&2
-        printf '%s\n' "1. 改名称" >&2
-        printf '%s\n' "2. 改模型策略（模型 + 推理）" >&2
-        printf '%s\n' "3. 全部重设（名称 + 模型策略）" >&2
-        printf '%s\n' "b. 返回上一层" >&2
-        printf '%s\n' "0. 退出，不启动 Codex" >&2
-        v2_edit_choice="$(codex_config_tty_read "请选择要改的字段" "b")"
-        case "$v2_edit_choice" in
-          1) codex_config_v2_edit_official_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" name; return $? ;;
-          2) codex_config_v2_edit_official_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" model; return $? ;;
-          3) codex_config_v2_edit_official_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" all; return $? ;;
-          b|B|back|BACK|返回) return 1 ;;
-          0|q|Q|quit|QUIT|退出) codex_config_exit_config_mode ;;
-          *) codex_warn "请输入 1、2、3、b 或 0。" ;;
-        esac
-        ;;
-      third_party)
-        printf '%s\n' "当前 API：${v2_edit_base:-未设置}" >&2
-        printf '%s\n' "当前模型策略：${v2_edit_model:-默认}${v2_edit_effort:+ / $v2_edit_effort}" >&2
-        printf '%s\n' "1. 改名称" >&2
-        printf '%s\n' "2. 改 API（Base URL，必要时重选模型）" >&2
-        printf '%s\n' "3. 改 Key" >&2
-        printf '%s\n' "4. 改模型策略（模型 + 推理）" >&2
-        printf '%s\n' "5. 全部重设（名称/API/Key/模型）" >&2
-        printf '%s\n' "b. 返回上一层" >&2
-        printf '%s\n' "0. 退出，不启动 Codex" >&2
-        v2_edit_choice="$(codex_config_tty_read "请选择要改的字段" "b")"
-        case "$v2_edit_choice" in
-          1) codex_config_v2_edit_third_party_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" name; return $? ;;
-          2) codex_config_v2_edit_third_party_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" api; return $? ;;
-          3) codex_config_v2_edit_third_party_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" key; return $? ;;
-          4) codex_config_v2_edit_third_party_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" model; return $? ;;
-          5) codex_config_v2_edit_third_party_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" all; return $? ;;
-          b|B|back|BACK|返回) return 1 ;;
-          0|q|Q|quit|QUIT|退出) codex_config_exit_config_mode ;;
-          *) codex_warn "请输入 1–5、b 或 0。" ;;
-        esac
-        ;;
-      *)
-        codex_warn "未知配置类型：$v2_edit_mode"
-        return 1
-        ;;
-    esac
-  done
+  v2_edit_items="$v2_edit_work/edit-field.select"
+  case "$v2_edit_mode" in
+    official)
+      {
+        printf '%s\n' "name|改名称"
+        printf '%s\n' "model|改模型策略（模型 + 推理）"
+        printf '%s\n' "all|全部重设（名称 + 模型策略）"
+      } > "$v2_edit_items"
+      v2_edit_title="编辑 $v2_edit_name · 当前 ${v2_edit_model:-默认}${v2_edit_effort:+ / $v2_edit_effort}"
+      codex_config_select_or_exit "$v2_edit_title" "$v2_edit_items" "model" || return 1
+      codex_config_v2_edit_official_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" "$CODEX_CONFIG_SELECT_ID"
+      return $?
+      ;;
+    third_party)
+      {
+        printf '%s\n' "name|改名称"
+        printf '%s\n' "api|改 API Base URL"
+        printf '%s\n' "key|改 Key"
+        printf '%s\n' "model|改模型策略（模型 + 推理）"
+        printf '%s\n' "all|全部重设（名称/API/Key/模型）"
+      } > "$v2_edit_items"
+      v2_edit_title="编辑 $v2_edit_name · ${v2_edit_base:-无API} · ${v2_edit_model:-默认}${v2_edit_effort:+ / $v2_edit_effort}"
+      codex_config_select_or_exit "$v2_edit_title" "$v2_edit_items" "model" || return 1
+      codex_config_v2_edit_third_party_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" "$CODEX_CONFIG_SELECT_ID"
+      return $?
+      ;;
+    *)
+      codex_warn "未知配置类型：$v2_edit_mode"
+      return 1
+      ;;
+  esac
 }
 
 codex_config_v2_use_menu() {
-  codex_config_v2_choose_profile "请选择要切换的配置编号" || return 1
+  # Optional preselected profile id as $1
+  if [ -n "${1:-}" ]; then
+    CODEX_CONFIG_V2_PROFILE_ID="$1"
+    v2_use_work="$(codex_config_v2_work_root)"
+    if codex_config_v2_run "$v2_use_work/use-show.json" profile show "$CODEX_CONFIG_V2_PROFILE_ID"; then
+      CODEX_CONFIG_V2_PROFILE_NAME="$(codex_config_v2_json_value "$v2_use_work/use-show.json" profile.name)"
+    else
+      return 1
+    fi
+  else
+    codex_config_v2_choose_profile "选择要切换的中转站" || return 1
+  fi
   v2_use_id="$CODEX_CONFIG_V2_PROFILE_ID"
   v2_use_name="$CODEX_CONFIG_V2_PROFILE_NAME"
   codex_config_v2_dirty_guard "切换配置" || return 1
@@ -1684,7 +1849,18 @@ codex_config_v2_use_menu() {
 }
 
 codex_config_v2_delete_menu() {
-  codex_config_v2_choose_profile "请选择要删除的配置编号" || return 1
+  # Optional preselected profile id as $1
+  if [ -n "${1:-}" ]; then
+    CODEX_CONFIG_V2_PROFILE_ID="$1"
+    v2_delete_work="$(codex_config_v2_work_root)"
+    if codex_config_v2_run "$v2_delete_work/delete-show.json" profile show "$CODEX_CONFIG_V2_PROFILE_ID"; then
+      CODEX_CONFIG_V2_PROFILE_NAME="$(codex_config_v2_json_value "$v2_delete_work/delete-show.json" profile.name)"
+    else
+      return 1
+    fi
+  else
+    codex_config_v2_choose_profile "选择要删除的中转站" || return 1
+  fi
   v2_delete_id="$CODEX_CONFIG_V2_PROFILE_ID"
   v2_delete_name="$CODEX_CONFIG_V2_PROFILE_NAME"
   codex_config_tty_confirm "确认删除配置 $v2_delete_name？当前配置不能直接删除" "n" || return 1
@@ -1694,8 +1870,12 @@ codex_config_v2_delete_menu() {
 }
 
 codex_config_v2_view_menu() {
-  codex_config_v2_choose_profile "请选择要查看的配置编号" || return 1
-  codex_config_v2_show_profile "$CODEX_CONFIG_V2_PROFILE_ID"
+  if [ -n "${1:-}" ]; then
+    codex_config_v2_show_profile "$1"
+  else
+    codex_config_v2_choose_profile "选择要查看的中转站" || return 1
+    codex_config_v2_show_profile "$CODEX_CONFIG_V2_PROFILE_ID"
+  fi
 }
 
 codex_config_v2_compact_menu() {
@@ -1705,40 +1885,36 @@ codex_config_v2_compact_menu() {
   v2_compact_mode="$(codex_config_v2_json_value "$v2_compact_show" compact_policy.mode)"
   v2_compact_value="$(codex_config_v2_json_value "$v2_compact_show" compact_policy.value 2>/dev/null || true)"
   v2_compact_label="$(codex_config_v2_format_compact_label "$v2_compact_mode" "$v2_compact_value")"
-  printf '%s\n' "" >&2
-  printf '%s\n' "通用：上下文与压缩策略（全站共用，不随中转站切换）" >&2
-  printf '%s\n' "当前：$v2_compact_label" >&2
-  while :; do
-    printf '%s\n' "1. 跟随模型目录，由 Codex 按真实窗口计算（推荐）" >&2
-    printf '%s\n' "2. 使用固定 token 阈值" >&2
-    printf '%s\n' "b. 返回上一层" >&2
-    printf '%s\n' "0. 退出，不启动 Codex" >&2
-    v2_compact_choice="$(codex_config_tty_read "请选择压缩策略" "1")"
-    case "$v2_compact_choice" in
-      1|"")
-        codex_config_v2_run "$v2_compact_work/compact-follow.json" compact-policy follow-model || return $?
-        codex_info "已设为跟随模型（全站共用）。"
+  v2_compact_items="$v2_compact_work/compact.select"
+  {
+    printf '%s\n' "follow-model|跟随模型目录（推荐，全站共用）"
+    printf '%s\n' "fixed|使用固定 token 阈值"
+  } > "$v2_compact_items"
+  v2_compact_default="$v2_compact_mode"
+  [ "$v2_compact_default" = "fixed" ] || v2_compact_default="follow-model"
+  codex_config_select_or_exit "压缩策略 · 当前 $v2_compact_label" "$v2_compact_items" "$v2_compact_default" || return 1
+  case "$CODEX_CONFIG_SELECT_ID" in
+    follow-model)
+      codex_config_v2_run "$v2_compact_work/compact-follow.json" compact-policy follow-model || return $?
+      codex_info "已设为跟随模型（全站共用）。"
+      return 0
+      ;;
+    fixed)
+      while :; do
+        v2_compact_fixed="$(codex_config_tty_read "固定 token 阈值（b 返回，0 退出）" "${v2_compact_value:-250000}")"
+        codex_config_is_back_choice "$v2_compact_fixed" && return 1
+        codex_config_is_exit_choice "$v2_compact_fixed" && codex_config_exit_config_mode
+        case "$v2_compact_fixed" in
+          *[!0-9]*|"") codex_warn "请输入正整数。"; continue ;;
+        esac
+        [ "$v2_compact_fixed" -gt 0 ] 2>/dev/null || { codex_warn "请输入正整数。"; continue; }
+        codex_config_v2_run "$v2_compact_work/compact-fixed.json" compact-policy fixed "$v2_compact_fixed" || return $?
+        codex_info "已设为固定 $v2_compact_fixed token（全站共用）。"
         return 0
-        ;;
-      2)
-        while :; do
-          v2_compact_fixed="$(codex_config_tty_read "固定 token 阈值（b 返回，0 退出）" "${v2_compact_value:-250000}")"
-          codex_config_is_back_choice "$v2_compact_fixed" && return 1
-          codex_config_is_exit_choice "$v2_compact_fixed" && codex_config_exit_config_mode
-          case "$v2_compact_fixed" in
-            *[!0-9]*|"") codex_warn "请输入正整数。"; continue ;;
-          esac
-          [ "$v2_compact_fixed" -gt 0 ] 2>/dev/null || { codex_warn "请输入正整数。"; continue; }
-          codex_config_v2_run "$v2_compact_work/compact-fixed.json" compact-policy fixed "$v2_compact_fixed" || return $?
-          codex_info "已设为固定 $v2_compact_fixed token（全站共用）。"
-          return 0
-        done
-        ;;
-      b|B|back|BACK|返回) return 1 ;;
-      0|q|Q|quit|QUIT|退出) codex_config_exit_config_mode ;;
-      *) codex_warn "请输入 1、2、b 或 0。" ;;
-    esac
-  done
+      done
+      ;;
+    *) return 1 ;;
+  esac
 }
 
 codex_config_refresh_models() {
@@ -1887,6 +2063,51 @@ codex_config_profile_new() {
   unset CODEX_CONFIG_REQUESTED_NAME
 }
 
+codex_config_v2_hub_station_action() {
+  # Single-page station action for a selected profile id.
+  v2_hub_id="$1"
+  v2_hub_work="$(codex_config_v2_work_root)"
+  v2_hub_show="$v2_hub_work/hub-station.json"
+  codex_config_v2_run "$v2_hub_show" profile show "$v2_hub_id" || return 1
+  v2_hub_name="$(codex_config_v2_json_value "$v2_hub_show" profile.name)"
+  v2_hub_active="$(codex_config_v2_json_value "$v2_hub_show" active 2>/dev/null || printf 'false')"
+  v2_hub_model="$(codex_config_v2_json_value "$v2_hub_show" profile.model 2>/dev/null || true)"
+  v2_hub_effort="$(codex_config_v2_json_value "$v2_hub_show" profile.reasoning_effort 2>/dev/null || true)"
+  v2_hub_base="$(codex_config_v2_json_value "$v2_hub_show" profile.base_url 2>/dev/null || true)"
+  v2_hub_mode="$(codex_config_v2_json_value "$v2_hub_show" profile.mode 2>/dev/null || true)"
+  v2_hub_items="$v2_hub_work/hub-station-action.select"
+  {
+    if [ "$v2_hub_active" != "true" ]; then
+      printf '%s\n' "use|切换为当前"
+    fi
+    printf '%s\n' "view|查看详情"
+    printf '%s\n' "edit|编辑字段"
+    if [ "$v2_hub_mode" = "third_party" ]; then
+      printf '%s\n' "refresh|刷新模型目录"
+    fi
+    if [ "$v2_hub_active" != "true" ]; then
+      printf '%s\n' "delete|删除"
+    fi
+  } > "$v2_hub_items"
+  v2_hub_title="中转站 $v2_hub_name · ${v2_hub_model:-默认}${v2_hub_effort:+ / $v2_hub_effort}${v2_hub_base:+ · $v2_hub_base}"
+  codex_config_select_or_exit "$v2_hub_title" "$v2_hub_items" "edit" || return 1
+  case "$CODEX_CONFIG_SELECT_ID" in
+    use) codex_config_v2_use_menu "$v2_hub_id" ;;
+    view) codex_config_v2_view_menu "$v2_hub_id" ;;
+    edit) codex_config_v2_edit_menu "$v2_hub_id" ;;
+    refresh)
+      # Temporarily ensure active for refresh helper which uses active profile.
+      if [ "$v2_hub_active" = "true" ]; then
+        codex_config_refresh_models
+      else
+        codex_warn "请先切换为当前站再刷新模型目录。"
+      fi
+      ;;
+    delete) codex_config_v2_delete_menu "$v2_hub_id" ;;
+    *) return 1 ;;
+  esac
+}
+
 codex_config_menu() {
   if [ "${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-0}" != "0" ] && [ "${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-0}" != "" ]; then
     # Depth>0 means a recursive call from inside an active menu tree.
@@ -1938,55 +2159,63 @@ codex_config_menu() {
     fi
     [ -n "$v2_menu_compact_mode" ] || v2_menu_compact_mode="follow-model"
     v2_menu_compact_label="$(codex_config_v2_format_compact_label "$v2_menu_compact_mode" "$v2_menu_compact_value")"
-    printf '%s\n' "" >&2
-    printf '%s\n' "Codex 配置模式" >&2
-    printf '%s\n' "当前中转站：$v2_menu_label${v2_menu_station_detail:+  ($v2_menu_station_detail)}" >&2
-    printf '%s\n' "通用策略：压缩=$v2_menu_compact_label；权限/TUI/features 全站共用" >&2
-    printf '%s\n' "结构：站级=名称/模型策略/API/Key；通用=上下文·压缩·权限（第 7–8 项）" >&2
-    printf '%s\n' "—— 中转站 ——" >&2
-    printf '%s\n' "1. 新建中转站" >&2
-    printf '%s\n' "2. 选择中转站" >&2
-    printf '%s\n' "3. 编辑中转站字段（名称/API/Key/模型策略）" >&2
-    printf '%s\n' "4. 查看中转站" >&2
-    printf '%s\n' "5. 删除中转站" >&2
-    printf '%s\n' "6. 刷新当前模型目录" >&2
-    printf '%s\n' "—— 通用（全站共用）——" >&2
-    printf '%s\n' "7. 通用：上下文与压缩策略" >&2
-    printf '%s\n' "8. 通用：修复全权限授权" >&2
-    printf '%s\n' "—— 退出 ——" >&2
-    printf '%s\n' "9. 保存并退出配置模式" >&2
-    printf '%s\n' "0. 退出，不启动 Codex" >&2
-    v2_menu_choice="$(codex_config_tty_read "请输入选项编号" "9")"
-    case "$v2_menu_choice" in
-      1) codex_config_v2_create_menu || true ;;
-      2) codex_config_v2_use_menu || true ;;
-      3) codex_config_v2_edit_menu || true ;;
-      4) codex_config_v2_view_menu || true ;;
-      5) codex_config_v2_delete_menu || true ;;
-      6) codex_config_refresh_models || true ;;
-      7) codex_config_v2_compact_menu || true ;;
-      8) codex_config_menu_repair_full_permission || true ;;
-      9|"")
+
+    # Build single hub list: stations first, then actions.
+    v2_menu_list_json="$v2_menu_work/menu-list.json"
+    v2_menu_list_raw="$v2_menu_work/menu-list.lines"
+    v2_menu_items="$v2_menu_work/menu-hub.select"
+    codex_config_v2_run "$v2_menu_list_json" profile list || return 1
+    codex_config_v2_profile_lines "$v2_menu_list_json" > "$v2_menu_list_raw"
+    : > "$v2_menu_items"
+    if [ -s "$v2_menu_list_raw" ]; then
+      awk -F '|' '{
+        active = ($6 == "1" ? " *" : "")
+        effort = ($5 != "" ? "/" $5 : "")
+        model = ($4 != "" ? $4 effort : "默认模型")
+        url = ($7 != "" ? $7 : "")
+        if (url != "") {
+          printf "station:%s|%s%s  %s  %s\n", $1, $2, active, model, url
+        } else {
+          printf "station:%s|%s%s  [%s]  %s\n", $1, $2, active, $3, model
+        }
+      }' "$v2_menu_list_raw" >> "$v2_menu_items"
+    fi
+    {
+      printf '%s\n' "action:new|＋ 新建中转站"
+      printf '%s\n' "action:compact|通用 · 压缩策略（$v2_menu_compact_label）"
+      printf '%s\n' "action:permission|通用 · 修复全权限"
+      printf '%s\n' "action:done|完成并退出"
+    } >> "$v2_menu_items"
+
+    v2_menu_title="Codex 配置模式  ·  当前 $v2_menu_label${v2_menu_station_detail:+ ($v2_menu_station_detail)}"
+    v2_menu_default="action:done"
+    [ -z "$v2_menu_active" ] || v2_menu_default="station:$v2_menu_active"
+
+    if ! codex_config_select_or_exit "$v2_menu_title" "$v2_menu_items" "$v2_menu_default"; then
+      # back from hub = exit config mode cleanly
+      codex_config_v2_dirty_guard "退出配置模式" || continue
+      codex_info "已退出配置模式。"
+      CODEX_FOR_TUI_CONFIG_MENU_DEPTH=$(( ${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-1} - 1 ))
+      export CODEX_FOR_TUI_CONFIG_MENU_DEPTH
+      return 0
+    fi
+
+    case "$CODEX_CONFIG_SELECT_ID" in
+      station:*)
+        v2_menu_station_id="${CODEX_CONFIG_SELECT_ID#station:}"
+        codex_config_v2_hub_station_action "$v2_menu_station_id" || true
+        ;;
+      action:new) codex_config_v2_create_menu || true ;;
+      action:compact) codex_config_v2_compact_menu || true ;;
+      action:permission) codex_config_menu_repair_full_permission || true ;;
+      action:done)
         codex_config_v2_dirty_guard "退出配置模式" || continue
         codex_info "已退出配置模式。"
         CODEX_FOR_TUI_CONFIG_MENU_DEPTH=$(( ${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-1} - 1 ))
         export CODEX_FOR_TUI_CONFIG_MENU_DEPTH
         return 0
         ;;
-      0|q|Q|quit|QUIT|退出)
-        codex_config_v2_dirty_guard "退出配置模式" || continue
-        CODEX_FOR_TUI_CONFIG_MENU_DEPTH=$(( ${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-1} - 1 ))
-        export CODEX_FOR_TUI_CONFIG_MENU_DEPTH
-        codex_config_exit_config_mode
-        ;;
-      b|B|back|BACK|返回)
-        codex_config_v2_dirty_guard "退出配置模式" || continue
-        codex_info "已退出配置模式。"
-        CODEX_FOR_TUI_CONFIG_MENU_DEPTH=$(( ${CODEX_FOR_TUI_CONFIG_MENU_DEPTH:-1} - 1 ))
-        export CODEX_FOR_TUI_CONFIG_MENU_DEPTH
-        return 0
-        ;;
-      *) codex_warn "请输入 0 到 9，或输入 b 返回。" ;;
+      *) codex_warn "未知选项。" ;;
     esac
   done
 }
