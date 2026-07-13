@@ -18,6 +18,7 @@ import re
 import shutil
 import sys
 import tempfile
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -193,6 +194,65 @@ def atomic_copy(source: Path, destination: Path) -> None:
             tmp.unlink(missing_ok=True)
 
 
+def _resolve_key(path: Path) -> str:
+    try:
+        return str(path.resolve(strict=False))
+    except OSError:
+        return str(path)
+
+
+def ensure_shared_sessions_link(control_home: Path, runtime_home: Path) -> Path:
+    """Ensure runtime sessions is a symlink to control sessions (shared list).
+
+    If a private real dir exists, deep-merge unique rollouts into control first,
+    then replace with the shared symlink. Wrong/broken symlinks are rewritten.
+    """
+    control_sessions = control_home / "sessions"
+    ensure_private_dir(control_sessions)
+    dest_root = runtime_home / "sessions"
+    control_key = _resolve_key(control_sessions)
+
+    if dest_root.is_symlink():
+        if _resolve_key(dest_root) == control_key:
+            return dest_root
+        try:
+            dest_root.unlink()
+        except OSError as exc:
+            raise ImportError_(
+                "unable to rewrite runtime sessions symlink",
+                destination=str(dest_root),
+                error=str(exc),
+            ) from exc
+    elif dest_root.exists() and dest_root.is_dir():
+        # Deep-merge private tree into control before deleting.
+        for path in sorted(dest_root.rglob("*.jsonl")):
+            if not path.is_file() or path.is_symlink():
+                continue
+            try:
+                rel = path.relative_to(dest_root)
+            except ValueError:
+                continue
+            target = control_sessions / rel
+            if target.exists() or target.is_symlink():
+                continue
+            try:
+                atomic_copy(path, target)
+            except OSError:
+                continue
+        shutil.rmtree(dest_root, ignore_errors=True)
+    elif dest_root.exists():
+        dest_root.unlink(missing_ok=True)
+
+    if not dest_root.exists() and not dest_root.is_symlink():
+        try:
+            dest_root.symlink_to(control_sessions, target_is_directory=True)
+        except OSError as exc:
+            # Fallback: keep a real dir under runtime (import still copies).
+            ensure_private_dir(dest_root)
+            return dest_root
+    return dest_root
+
+
 def import_sessions(
     control_home: Path,
     runtime_home: Path,
@@ -205,8 +265,11 @@ def import_sessions(
     if not runtime_home.is_dir():
         raise ImportError_("runtime home missing", runtime_home=str(runtime_home))
 
-    dest_root = runtime_home / "sessions"
-    ensure_private_dir(dest_root)
+    # Shared store: always import into control sessions via the runtime symlink.
+    dest_root = ensure_shared_sessions_link(control_home, runtime_home)
+    shared = dest_root.is_symlink() and _resolve_key(dest_root) == _resolve_key(
+        control_home / "sessions"
+    )
 
     if journal_dir is None:
         journal_dir = control_home / "install-state" / "runtime-session-import"
@@ -215,8 +278,12 @@ def import_sessions(
     # Destination inventory by UUID and path.
     dest_by_uuid: dict[str, Path] = {}
     dest_hash_by_uuid: dict[str, str] = {}
-    if dest_root.is_dir():
-        for path in dest_root.rglob("*.jsonl"):
+    if dest_root.is_dir() or dest_root.is_symlink():
+        try:
+            iterable = dest_root.rglob("*.jsonl")
+        except OSError:
+            iterable = []
+        for path in iterable:
             if not path.is_file() or path.is_symlink():
                 continue
             session_id = extract_session_id(path)
@@ -233,7 +300,11 @@ def import_sessions(
 
     for root in source_roots(control_home, runtime_home):
         sources_used.append(str(root))
-        for path in sorted(root.rglob("*.jsonl")):
+        try:
+            paths = sorted(root.rglob("*.jsonl"))
+        except OSError:
+            continue
+        for path in paths:
             if not path.is_file() or path.is_symlink():
                 continue
             scanned += 1
@@ -295,6 +366,7 @@ def import_sessions(
         "control_home": str(control_home),
         "runtime_home": str(runtime_home),
         "destination": str(dest_root),
+        "shared_sessions": shared,
         "scanned": scanned,
         "copied": copied,
         "skipped_same": skipped_same,

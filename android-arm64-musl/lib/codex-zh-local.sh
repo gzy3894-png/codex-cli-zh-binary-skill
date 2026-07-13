@@ -196,15 +196,34 @@ codex_for_tui_force_configure() {
 }
 
 codex_for_tui_binary_build_key() {
-  codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.15}"
+  codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.16}"
 }
 
+
+codex_for_tui_seed_shared_sessions() {
+  # Ensure every config-runtimes/* sessions tree is a symlink to control home
+  # so native /resume (without --all) sees the same conversation list on every
+  # relay/profile. profile launch already seeds; this repairs idle runtimes.
+  # Note: do not embed a shell heredoc here — sourcing this file from sh would
+  # otherwise swallow the rest of the library after the function body.
+  control_home="${1:-${CODEX_FOR_TUI_CONTROL_HOME:-}}"
+  [ -n "$control_home" ] || return 0
+  engine_root="$(codex_config_engine_find_root 2>/dev/null || true)"
+  [ -n "$engine_root" ] || return 0
+  [ -s "$engine_root/libexec/codex-config-engine.py" ] || return 0
+  PYTHONNOUSERSITE=1 python3 \
+    "$engine_root/libexec/codex-config-engine.py" \
+    --codex-home "$control_home" \
+    seed-shared-sessions >/dev/null 2>&1 || true
+}
 
 codex_for_tui_import_runtime_sessions() {
   control_home="${1:-${CODEX_FOR_TUI_CONTROL_HOME:-}}"
   runtime_home="${2:-${CODEX_FOR_TUI_RUNTIME_HOME:-}}"
   [ -n "$control_home" ] && [ -n "$runtime_home" ] || return 0
   [ "$control_home" != "$runtime_home" ] || return 0
+  # Repair shared session links across all runtimes before/while importing.
+  codex_for_tui_seed_shared_sessions "$control_home"
   engine_root="$(codex_config_engine_find_root 2>/dev/null || true)"
   importer=""
   for candidate in \

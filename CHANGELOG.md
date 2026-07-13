@@ -1,3 +1,14 @@
+## Codex for TUI 2.5.16
+
+Codex for TUI 2.5.16 是 2.5.15 后的跨中转统一会话列表热修。
+
+- 所有 config-runtimes 的 `sessions`/`history.jsonl`/`archived_sessions`/`shell_snapshots` 深合并进 control home，并强制为共享符号链接；错误/空 legacy 链接会重写。
+- `materialize_runtime` / 启动 import 会修复全部 idle runtime，避免只修当前站、切换中转后又只剩 0/1 条。
+- runtime session importer 先确保共享链接，再把其它树中的 rollout 导入共享 sessions。
+- 修正 legacy 配置导入把 runtime sessions 指到 legacy 目录（常为空）的问题。
+- `versionCode=82`、`versionName=2.5.16`、runtime epoch `apk-2.5.16`。
+- 发布说明见 `docs/codex-for-tui-2.5.16-release-notes.md`。
+
 ## Codex for TUI 2.5.15
 
 Codex for TUI 2.5.15 是 2.5.14 后的 P0 启动路由、原生 resume 与配置嵌套前滚热修。

@@ -118,7 +118,11 @@ do
 done
 
 if command -v pm >/dev/null 2>&1; then
-  pm_line="$(pm list packages --show-versioncode "$package" 2>/dev/null | sed -n '1p' || true)"
+  # pm may also list "<package>.test"; take the exact package name only.
+  pm_line="$(
+    pm list packages --show-versioncode "$package" 2>/dev/null |
+      awk -v p="$package" 'index($0, "package:" p " ") == 1 { print; exit }'
+  )"
   [ -n "$pm_line" ] || fail "pm cannot find package: $package"
   printf 'pm=%s\n' "$pm_line"
   if [ -n "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" ]; then
@@ -130,7 +134,7 @@ if [ -s "$app_codex_home/config.toml" ]; then
   if safe_grep "可用模型" "$app_codex_home/config.toml"; then
     fail "config.toml model field appears polluted by menu text"
   fi
-  if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "81" ]; then
+  if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "82" ]; then
     safe_grep '"/root/workspace"' "$app_codex_home/config.toml" &&
       safe_grep 'trust_level = "trusted"' "$app_codex_home/config.toml" ||
       fail "/root/workspace trust was not inherited into control config"
@@ -145,9 +149,9 @@ else
 fi
 
 build_key_file="$app_codex_home/install-state/binary-build-key-v1"
-if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "81" ]; then
+if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "82" ]; then
   [ -s "$build_key_file" ] || fail "binary build key cache missing: $build_key_file"
-  safe_grep "runtime_epoch=apk-2.5.15" "$build_key_file" ||
+  safe_grep "runtime_epoch=apk-2.5.16" "$build_key_file" ||
     fail "binary build key cache has wrong runtime epoch"
 fi
 
@@ -160,7 +164,7 @@ if [ -d "$codex_transcript_root" ]; then
   wait_seconds="${CODEX_TUI_INSTALLED_WAIT_SECONDS:-20}"
   expected_min_registry="${CODEX_TUI_EXPECTED_CODEX_REGISTRY_MIN:-}"
   expected_uuid="${CODEX_TUI_EXPECTED_CODEX_UUID:-}"
-  if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "81" ]; then
+  if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "82" ]; then
     [ -n "$expected_min_registry" ] || expected_min_registry=91
     [ -n "$expected_uuid" ] ||
       expected_uuid="019f212d-4b6e-7e93-b3f4-188eefa2657d"
@@ -222,9 +226,20 @@ fi
 
 workspace_release="${CODEX_TUI_WORKSPACE_MIGRATION_RELEASE:-}"
 if [ -z "$workspace_release" ] &&
-  [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "81" ]
+  [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "82" ]
 then
-  workspace_release="2.5.15"
+  # Workspace import ran once in 2.5.12. Later APK upgrades only emit
+  # already_migrated markers, so history integrity still audits the 2.5.12 report.
+  workspace_release="2.5.12"
+fi
+if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "82" ]; then
+  current_workspace_report="$app_codex_home/install-state/apk-upgrades/2.5.16/workspace-migration.json"
+  [ -s "$current_workspace_report" ] ||
+    fail "2.5.16 workspace migration report missing: $current_workspace_report"
+  safe_grep '"already_migrated": true' "$current_workspace_report" ||
+    safe_grep '"ok": true' "$current_workspace_report" ||
+    fail "2.5.16 workspace migration report is not successful"
+  printf 'workspace_report_2_5_16=ok\n'
 fi
 if [ -n "$workspace_release" ]; then
   need_cmd python3
@@ -235,12 +250,9 @@ if [ -n "$workspace_release" ]; then
   expected_migrated="${CODEX_TUI_EXPECTED_MIGRATED_ROLLOUT_COUNT:-}"
   expected_baseline="${CODEX_TUI_EXPECTED_BASELINE_TRANSCRIPT_COUNT:-}"
   expected_minimum="${CODEX_TUI_EXPECTED_MIN_TRANSCRIPT_COUNT:-}"
-  if [ "$workspace_release" = "2.5.12" ] || [ "$workspace_release" = "2.5.15" ]; then
+  if [ "$workspace_release" = "2.5.12" ]; then
     [ -n "$baseline" ] ||
       baseline="/root/codex-release-runs/2.5.12/transcript-baseline.log"
-    if [ ! -s "$baseline" ] && [ "$workspace_release" = "2.5.15" ]; then
-      baseline="/root/codex-release-runs/2.5.15/transcript-baseline.log"
-    fi
     [ -n "$expected_imports" ] || expected_imports=11
     [ -n "$expected_migrated" ] || expected_migrated=83
     [ -n "$expected_baseline" ] || expected_baseline=80

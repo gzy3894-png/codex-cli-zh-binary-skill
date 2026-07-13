@@ -40,6 +40,36 @@ def load_json(path: Path) -> Any:
         raise AuditError(f"invalid JSON metadata: {path}") from exc
 
 
+def path_is_within(path: Path, root: Path) -> bool:
+    """True if path is root or a descendant. Uses inode identity for proot dual paths."""
+    try:
+        path = path.expanduser().resolve()
+        root = root.expanduser().resolve()
+    except OSError:
+        return False
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        pass
+    try:
+        if path == root or path.samefile(root):
+            return True
+    except OSError:
+        pass
+    current = path
+    while True:
+        parent = current.parent
+        if parent == current:
+            return False
+        try:
+            if parent.samefile(root):
+                return True
+        except OSError:
+            pass
+        current = parent
+
+
 def rollout_record(home: Path, path: Path) -> dict[str, Any]:
     before = path.stat()
     with path.open("rb") as handle:
@@ -291,14 +321,22 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     ):
         if report.get(key) != expected:
             raise AuditError(f"migration report mismatch: {key}")
-    backup = Path(str(report.get("backup", ""))).expanduser().resolve()
+    backup = Path(str(report.get("backup", ""))).expanduser()
+    if not backup.is_absolute():
+        backup = (home / backup).resolve()
+    else:
+        backup = backup.resolve()
     backup_root = (
         home / "install-state" / "backups" / "workspace-migration"
     ).resolve()
-    try:
-        backup.relative_to(backup_root)
-    except ValueError as exc:
-        raise AuditError("migration backup escaped backup root") from exc
+    if not path_is_within(backup, backup_root):
+        # Proot often exposes the same inode as both /root/... and
+        # /data/.../local/alpine/root/...; fall back to the home-relative path.
+        alt = backup_root / backup.name
+        if alt.is_dir() and path_is_within(alt, backup_root):
+            backup = alt
+        else:
+            raise AuditError("migration backup escaped backup root")
     manifest = load_json(backup / "manifest.json")
     for key, expected in (
         ("schema_version", 1),

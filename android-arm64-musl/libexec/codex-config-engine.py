@@ -1348,6 +1348,8 @@ def materialize_runtime(
     ensure_private_dir(runtime_home)
     ensure_private_dir(sqlite_home)
     seed_runtime_links(paths, runtime_home)
+    # Repair idle runtimes too so switching profiles always sees the shared list.
+    seed_all_runtime_states(paths)
 
     runtime_config = runtime_home / "config.toml"
     runtime_auth = runtime_home / "auth.json"
@@ -2228,6 +2230,56 @@ def copy_regular_tree(source: Path, destination: Path) -> None:
             safe_copy(item, target, stat.S_IMODE(mode))
 
 
+def _merge_tree_into(source_tree: Path, target_tree: Path) -> None:
+    """Deep-merge files from source_tree into target_tree without overwriting.
+
+    Used when a per-runtime private sessions/history tree must be absorbed into
+    the shared control home before the private tree is replaced by a symlink.
+    Existing target files win (same path keeps control copy).
+    """
+    if not source_tree.is_dir():
+        return
+    ensure_private_dir(target_tree)
+    for root, directories, files in os.walk(source_tree, followlinks=False):
+        root_path = Path(root)
+        try:
+            relative = root_path.relative_to(source_tree)
+        except ValueError:
+            continue
+        target_root = target_tree / relative
+        ensure_private_dir(target_root)
+        # Do not walk into symlinked subtrees (avoid escaping runtime home).
+        directories[:] = [
+            name for name in directories if not (root_path / name).is_symlink()
+        ]
+        for name in directories:
+            ensure_private_dir(target_root / name)
+        for name in files:
+            item = root_path / name
+            target = target_root / name
+            if item.is_symlink():
+                continue
+            try:
+                mode = item.lstat().st_mode
+            except OSError:
+                continue
+            if not stat.S_ISREG(mode):
+                continue
+            if target.exists() or target.is_symlink():
+                continue
+            try:
+                safe_copy(item, target, stat.S_IMODE(mode))
+            except (OSError, EngineError):
+                continue
+
+
+def _paths_resolve_equal(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve(strict=False) == right.resolve(strict=False)
+    except OSError:
+        return False
+
+
 def seed_runtime_state(source_home: Path, runtime_home: Path) -> list[str]:
     """Share conversation state across config profiles.
 
@@ -2235,8 +2287,13 @@ def seed_runtime_state(source_home: Path, runtime_home: Path) -> list[str]:
     config-runtimes/, but sessions + history + shell_snapshots must resolve
     to the control CODEX_HOME so switching model_providers.custom (or any
     profile) still sees the same conversation list.
+
+    Idempotent and repair-oriented:
+    - wrong/broken symlinks are rewritten to control home
+    - private real dirs are deep-merged into control then replaced by symlink
+    - never leaves a runtime with a private or empty-wrong sessions tree
     """
-    if runtime_home.resolve(strict=False) == source_home.resolve(strict=False):
+    if _paths_resolve_equal(runtime_home, source_home):
         raise EngineError("配置运行目录未隔离", 7)
     linked: list[str] = []
 
@@ -2255,26 +2312,21 @@ def seed_runtime_state(source_home: Path, runtime_home: Path) -> list[str]:
                 except OSError:
                     pass
         if destination.is_symlink():
+            if _paths_resolve_equal(destination, source):
+                linked.append(name)
+                return
+            # Wrong or broken link (e.g. legacy empty profile path) → rewrite.
             try:
-                if destination.resolve(strict=False) == source.resolve(strict=False):
-                    linked.append(name)
-                    return
+                destination.unlink()
             except OSError:
-                pass
-            destination.unlink()
+                return
         elif destination.exists():
             # Migrate any per-runtime private data into the shared control home
-            # once, then replace with a symlink.
-            if is_dir and destination.is_dir() and source.is_dir():
+            # (deep merge — year/month subdirs often already exist on control),
+            # then replace with a symlink.
+            if is_dir and destination.is_dir() and not destination.is_symlink():
                 try:
-                    for item in destination.iterdir():
-                        target = source / item.name
-                        if target.exists() or item.is_symlink():
-                            continue
-                        if item.is_dir():
-                            shutil.copytree(item, target, dirs_exist_ok=True)
-                        elif item.is_file():
-                            shutil.copy2(item, target)
+                    _merge_tree_into(destination, source)
                 except OSError:
                     pass
                 shutil.rmtree(destination, ignore_errors=True)
@@ -2310,6 +2362,44 @@ def seed_runtime_state(source_home: Path, runtime_home: Path) -> list[str]:
 
 def seed_root_runtime_state(paths: Paths, runtime_home: Path) -> list[str]:
     return seed_runtime_state(paths.home, runtime_home)
+
+
+def seed_all_runtime_states(paths: Paths) -> dict[str, list[str]]:
+    """Repair shared session links for every config-runtimes/* home.
+
+    Launch/materialize already seeds the active runtime; this catches idle
+    runtimes that still hold private dirs or wrong legacy symlinks so switching
+    profile never shows an empty / partial /resume list.
+    """
+    result: dict[str, list[str]] = {}
+    root = paths.home / "config-runtimes"
+    if not root.is_dir():
+        return result
+    try:
+        children = sorted(root.iterdir())
+    except OSError:
+        return result
+    for child in children:
+        if not child.is_dir() or child.is_symlink():
+            continue
+        # Skip nested garbage under a runtime (sqlite-builds etc. are not homes).
+        if not (child / "config.toml").is_file() and not any(child.glob("sqlite-builds")):
+            # Still seed if it looks like a runtime id directory.
+            if not child.name.startswith("p-"):
+                continue
+        try:
+            result[child.name] = seed_runtime_state(paths.home, child)
+        except EngineError:
+            continue
+        except OSError:
+            continue
+    return result
+
+
+def cmd_seed_shared_sessions(paths: Paths, _args: argparse.Namespace) -> None:
+    """CLI entry: repair shared sessions/history links for all runtimes."""
+    linked = seed_all_runtime_states(paths)
+    emit(True, repaired=sorted(linked.keys()), linked=linked)
 
 
 def catalog_model_ids(path: Path) -> list[str]:
@@ -2517,8 +2607,14 @@ def cmd_apk_upgrade(paths: Paths, args: argparse.Namespace) -> None:
                     name=name,
                     source_dir=legacy_dir,
                 )
+                # Always share control-home conversation state. Never point the
+                # new runtime sessions tree at the legacy profile directory
+                # (that path is often empty and breaks /resume to 0 rows).
+                # Do not deep-merge legacy sessions here: workspace migration
+                # imports them transactionally; merging early breaks late
+                # upgrade rollback isolation.
                 seed_runtime_state(
-                    legacy_dir,
+                    paths.home,
                     runtime_home_for_profile(paths, imported),
                 )
                 imported_legacy.append(imported)
@@ -2877,6 +2973,9 @@ def build_parser() -> argparse.ArgumentParser:
     apk_refresh = sub.add_parser("apk-refresh-active")
     apk_refresh.add_argument("--timeout", type=int, default=8)
     apk_refresh.set_defaults(handler=cmd_apk_refresh_active)
+    sub.add_parser("seed-shared-sessions").set_defaults(
+        handler=cmd_seed_shared_sessions
+    )
     return parser
 
 
