@@ -29,6 +29,7 @@ object MkSession {
         "codex-browser" to "codex-browser",
         "codex-panel" to "codex-panel",
         "codex-session" to "codex-session",
+        "codex-tui-fold-bridge" to "codex-tui-fold-bridge",
         "codex-rtk" to "codex-rtk",
         "codex-context" to "codex-context",
         "codex-agent" to "codex-agent",

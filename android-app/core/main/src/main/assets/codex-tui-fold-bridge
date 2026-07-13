@@ -1,0 +1,63 @@
+#!/usr/bin/env sh
+# CLI wrapper for codex-tui-fold-bridge.py (session-fold Runtime Emitter).
+# Default policy is disabled / dry-run — this wrapper never forces apply on.
+set -eu
+
+find_prefix() {
+  if [ -n "${PREFIX:-}" ]; then
+    printf '%s\n' "$PREFIX"
+    return 0
+  fi
+  if [ -n "${PKG:-}" ]; then
+    [ -d "/data/user/0/$PKG" ] && { printf '%s\n' "/data/user/0/$PKG"; return 0; }
+    [ -d "/data/data/$PKG" ] && { printf '%s\n' "/data/data/$PKG"; return 0; }
+  fi
+  return 1
+}
+
+resolve_py() {
+  # Prefer staged libexec next to install root, then share scripts, then PATH.
+  if [ -n "${CODEX_TUI_FOLD_BRIDGE_PY:-}" ] && [ -s "$CODEX_TUI_FOLD_BRIDGE_PY" ]; then
+    printf '%s\n' "$CODEX_TUI_FOLD_BRIDGE_PY"
+    return 0
+  fi
+  for cand in \
+    "${CODEX_ZH_SCRIPT_INSTALL_ROOT:-}/libexec/codex-tui-fold-bridge.py" \
+    "${CODEX_ZH_ACTIVE_SCRIPT_DIR:-}/libexec/codex-tui-fold-bridge.py" \
+    "$HOME/.local/share/codex-zh/scripts/libexec/codex-tui-fold-bridge.py" \
+    "/usr/local/share/codex-zh/scripts/libexec/codex-tui-fold-bridge.py"
+  do
+    [ -n "$cand" ] || continue
+    [ -s "$cand" ] && { printf '%s\n' "$cand"; return 0; }
+  done
+  # sibling of this wrapper when installed as .../bin/codex-tui-fold-bridge
+  self="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)" || self=""
+  if [ -n "$self" ]; then
+    for cand in \
+      "$self/../share/codex-zh/scripts/libexec/codex-tui-fold-bridge.py" \
+      "$self/../libexec/codex-tui-fold-bridge.py"
+    do
+      [ -s "$cand" ] && { printf '%s\n' "$cand"; return 0; }
+    done
+  fi
+  # last resort: same name under PREFIX local
+  if pref="$(find_prefix 2>/dev/null)"; then
+    cand="$pref/local/libexec/codex-tui-fold-bridge.py"
+    [ -s "$cand" ] && { printf '%s\n' "$cand"; return 0; }
+  fi
+  return 1
+}
+
+py="$(resolve_py)" || {
+  printf '%s\n' "codex-tui-fold-bridge: missing libexec/codex-tui-fold-bridge.py" >&2
+  exit 127
+}
+
+if command -v python3 >/dev/null 2>&1; then
+  exec env PYTHONNOUSERSITE=1 python3 "$py" "$@"
+fi
+if command -v python >/dev/null 2>&1; then
+  exec env PYTHONNOUSERSITE=1 python "$py" "$@"
+fi
+printf '%s\n' "codex-tui-fold-bridge: python3 not found" >&2
+exit 127

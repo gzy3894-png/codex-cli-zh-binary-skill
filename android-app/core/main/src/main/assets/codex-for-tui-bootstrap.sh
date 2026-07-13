@@ -117,6 +117,7 @@ libexec/codex-config-engine.py
 libexec/codex-config-select.py
 libexec/codex-config-secret-read.py
 libexec/codex-session-defaults.py
+libexec/codex-tui-fold-bridge.py
 data/openai-models.json
 data/openai-models-source.json
 vendor/python/tomlkit/__init__.py

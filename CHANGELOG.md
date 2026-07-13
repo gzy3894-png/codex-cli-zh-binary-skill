@@ -1,3 +1,14 @@
+## Codex for TUI 2.5.24
+
+Codex for TUI 2.5.24：session-fold Runtime Emitter（fold-bridge，默认 flag off）+ 文件托盘文本可复制。
+
+- `codex-tui-fold-bridge`：jsonl `task_*` → `codex-session`；`watch`/`discover-active`；装入 libexec/bootstrap/apk-upgrade/MkSession。
+- 托盘文本：`SelectionContainer` + 复制/分享；读全文绕过 12KB preview 切片。
+- 本地门禁：`tests/codex-for-tui-fold-bridge-smoke.sh`；static `test_fold_bridge_runtime_emitter`。
+- `versionCode=90`、`versionName=2.5.24`、runtime epoch `apk-2.5.24`。
+- 发布说明见 `docs/codex-for-tui-2.5.24-release-notes.md`。
+- 回滚：policy `enabled=0`；或卸包回 2.5.23。
+
 ## Codex for TUI 2.5.23
 
 Codex for TUI 2.5.23 是配置模式可用性热修（2.5.22 列表枢纽上的交互打磨）。

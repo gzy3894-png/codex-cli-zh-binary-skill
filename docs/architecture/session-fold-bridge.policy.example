@@ -1,0 +1,10 @@
+# session-fold-bridge.policy example
+# Install path (device): $PREFIX/local/ops/session-fold-bridge.policy
+# Release default: enabled=0 (no behavior change vs 2.5.23)
+
+enabled=0
+mode=dry-run
+# mode=apply   # only when testing; requires codex-session on PATH
+title_prefix=turn
+shell_guard=1
+min_interval_ms=0

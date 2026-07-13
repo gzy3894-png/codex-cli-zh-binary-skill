@@ -196,7 +196,7 @@ codex_for_tui_force_configure() {
 }
 
 codex_for_tui_binary_build_key() {
-  codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.23}"
+  codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.24}"
 }
 
 
@@ -771,7 +771,8 @@ EOF
     lib/codex-zh-update.sh \
     codex-local-resume.sh \
     codex-update.sh \
-    libexec/codex-session-defaults.py
+    libexec/codex-session-defaults.py \
+    libexec/codex-tui-fold-bridge.py
   do
     [ -s "$dest_root/$required" ] || codex_die "安装后缺少支持文件：$required"
   done
@@ -783,6 +784,8 @@ EOF
   [ -s "$dest_root/codex-for-tui-self-test.sh" ] && cp "$dest_root/codex-for-tui-self-test.sh" "$install_dir/codex-self-test" && chmod 755 "$install_dir/codex-self-test"
   [ -s "$dest_root/codex-for-tui-self-test.sh" ] && cp "$dest_root/codex-for-tui-self-test.sh" "$install_dir/codex-test" && chmod 755 "$install_dir/codex-test"
   [ -s "$dest_root/libexec/codex-session-defaults.py" ] && cp "$dest_root/libexec/codex-session-defaults.py" "$install_dir/codex-session-defaults" && chmod 755 "$install_dir/codex-session-defaults"
+  # Fold-bridge: install as executable entry; same py is fine (#!/usr/bin/env python3).
+  [ -s "$dest_root/libexec/codex-tui-fold-bridge.py" ] && cp "$dest_root/libexec/codex-tui-fold-bridge.py" "$install_dir/codex-tui-fold-bridge" && chmod 755 "$install_dir/codex-tui-fold-bridge"
   codex_install_app_bridge_wrappers
 }
 

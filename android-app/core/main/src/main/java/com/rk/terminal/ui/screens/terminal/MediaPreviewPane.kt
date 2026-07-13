@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -62,8 +63,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -606,10 +609,14 @@ private fun PreviewThumbTile(
                     .combinedClickable(
                         onClick = open,
                         onLongClick = {
-                            if (preview.kind != TerminalMediaPreviewKind.TEXT) {
-                                if (sharePreview(context, preview)) {
+                            // TEXT: long-press copies body (selection UI is in dialog).
+                            // IMAGE/VIDEO: long-press shares file.
+                            if (preview.kind == TerminalMediaPreviewKind.TEXT) {
+                                if (copyPreviewText(context, preview)) {
                                     onShare()
                                 }
+                            } else if (sharePreview(context, preview)) {
+                                onShare()
                             }
                         }
                     )
@@ -945,7 +952,8 @@ private fun MediaPreviewDialog(
             )
             is PreviewDialogState.Text -> TextPreviewDialogContent(
                 preview = state.preview,
-                onDismiss = onDismiss
+                onDismiss = onDismiss,
+                onShare = onShare
             )
         }
     }
@@ -1042,28 +1050,55 @@ private fun VideoPreviewDialogContent(
 @Composable
 private fun TextPreviewDialogContent(
     preview: TerminalMediaPreview,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onShare: (TerminalMediaPreview) -> Unit
 ) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    // Prefer full file body for dialog so copy/selection is not stuck on the 12KB preview slice.
+    val body = remember(preview.path, preview.textPreview) {
+        loadPreviewTextBody(preview)
+    }
+    val displayText = body.ifBlank { "空文本或无法预览编码，文件仍可发送。" }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        Column(
+        SelectionContainer(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = 56.dp, start = 16.dp, end = 16.dp, bottom = 16.dp)
-                .verticalScroll(rememberScrollState())
         ) {
-            Text(
-                text = preview.textPreview.orEmpty()
-                    .ifBlank { "空文本或无法预览编码，文件仍可发送。" },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    text = displayText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
         }
         PreviewDialogTopBar(
             title = preview.name,
+            onCopy = {
+                val text = loadPreviewTextBody(preview)
+                if (text.isBlank()) {
+                    toast("没有可复制的文本")
+                } else {
+                    clipboard.setText(AnnotatedString(text))
+                    toast("已复制 ${text.length} 字")
+                }
+            },
+            onShare = {
+                if (sharePreview(context, preview)) {
+                    onShare(preview)
+                }
+            },
             onDismiss = onDismiss
         )
     }
@@ -1073,7 +1108,8 @@ private fun TextPreviewDialogContent(
 private fun PreviewDialogTopBar(
     title: String,
     onDismiss: () -> Unit,
-    onShare: (() -> Unit)? = null
+    onShare: (() -> Unit)? = null,
+    onCopy: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier
@@ -1091,6 +1127,11 @@ private fun PreviewDialogTopBar(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+        if (onCopy != null) {
+            TextButton(onClick = onCopy) {
+                Text("复制", color = Color.White)
+            }
+        }
         if (onShare != null) {
             TextButton(onClick = onShare) {
                 Text("分享", color = Color.White)
@@ -1183,6 +1224,51 @@ private fun VideoPlayerSurface(
     )
 }
 
+/** Clipboard/share body for TEXT previews. Prefer on-disk file over truncated textPreview. */
+private fun loadPreviewTextBody(preview: TerminalMediaPreview, maxChars: Int = 2 * 1024 * 1024): String {
+    val file = File(preview.path)
+    if (file.isFile && file.canRead()) {
+        return runCatching {
+            // minSdk 24: avoid InputStream.readNBytes (API 33). Cap by bytes then chars.
+            val maxBytes = (maxChars.coerceAtLeast(1) * 4).coerceAtMost(8 * 1024 * 1024)
+            file.inputStream().use { input ->
+                val buf = ByteArray(maxBytes)
+                var n = 0
+                while (n < buf.size) {
+                    val r = input.read(buf, n, buf.size - n)
+                    if (r < 0) break
+                    n += r
+                }
+                String(buf, 0, n, Charsets.UTF_8)
+                    .filter { it.code != 0 }
+                    .let { if (it.length > maxChars) it.take(maxChars) else it }
+            }
+        }.getOrElse {
+            preview.textPreview.orEmpty()
+        }
+    }
+    return preview.textPreview.orEmpty()
+}
+
+private fun copyPreviewText(context: Context, preview: TerminalMediaPreview): Boolean {
+    val text = loadPreviewTextBody(preview)
+    if (text.isBlank()) {
+        toast("没有可复制的文本")
+        return false
+    }
+    return try {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        clipboard.setPrimaryClip(
+            android.content.ClipData.newPlainText(preview.name.ifBlank { "codex-preview" }, text)
+        )
+        toast("已复制 ${text.length} 字")
+        true
+    } catch (error: Exception) {
+        toast("复制失败：${error.message}")
+        false
+    }
+}
+
 private fun sharePreview(context: Context, preview: TerminalMediaPreview): Boolean {
     try {
         val source = File(preview.path)
@@ -1206,6 +1292,13 @@ private fun sharePreview(context: Context, preview: TerminalMediaPreview): Boole
             .setType(preview.mimeType())
             .putExtra(Intent.EXTRA_STREAM, uri)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        // Also put plain text for TEXT so share targets that only accept text still work.
+        if (preview.kind == TerminalMediaPreviewKind.TEXT) {
+            val body = loadPreviewTextBody(preview, maxChars = 256 * 1024)
+            if (body.isNotBlank()) {
+                intent.putExtra(Intent.EXTRA_TEXT, body)
+            }
+        }
         context.startActivity(Intent.createChooser(intent, "分享预览"))
         return true
     } catch (error: Exception) {
