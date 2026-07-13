@@ -1,3 +1,13 @@
+## Codex for TUI 2.5.21
+
+Codex for TUI 2.5.21 是 2.5.20 后的配置模式结构优化。
+
+- 站级 vs 通用落到菜单分区与字段级编辑：名称/API/Key/模型策略可单独改；压缩/权限全站共用。
+- 主菜单显示当前站模型策略+API 与全局压缩摘要。
+- `compact_policy` 只保留在 `index.json`；清理站级 `profile.json` 遗留双写。
+- `versionCode=87`、`versionName=2.5.21`、runtime epoch `apk-2.5.21`。
+- 发布说明见 `docs/codex-for-tui-2.5.21-release-notes.md`。
+
 ## Codex for TUI 2.5.20
 
 Codex for TUI 2.5.20 是 2.5.19 后的启动性能热修（大会话 dual-sync）。

@@ -981,16 +981,16 @@ codex_config_v2_choose_profile() {
     return 1
   }
   while :; do
-    printf '%s\n' "中转站（只含模型策略 / API / Key；通用策略见配置模式第 7 项）：" >&2
+    printf '%s\n' "中转站列表（站级=名称/模型策略/API/Key；压缩与权限见通用项）：" >&2
     awk -F '|' '{
       active = ($6 == "1" ? " *当前" : "")
       effort = ($5 != "" ? "/" $5 : "")
       model = ($4 != "" ? $4 effort : "默认模型")
       url = ($7 != "" ? $7 : "")
       if (url != "") {
-        printf "%2d. %s%s  %s  %s\n", NR, $2, active, model, url
+        printf "%2d. %s%s  模型策略=%s  API=%s\n", NR, $2, active, model, url
       } else {
-        printf "%2d. %s%s  [%s]  %s\n", NR, $2, active, $3, model
+        printf "%2d. %s%s  [%s]  模型策略=%s\n", NR, $2, active, $3, model
       }
     }' "$v2_choose_lines" >&2
     printf '%s\n' "b. 返回上一层" >&2
@@ -1359,6 +1359,23 @@ codex_config_v2_create_menu() {
   done
 }
 
+codex_config_v2_format_compact_label() {
+  v2_fmt_mode="${1:-follow-model}"
+  v2_fmt_value="${2:-}"
+  case "$v2_fmt_mode" in
+    fixed)
+      if [ -n "$v2_fmt_value" ]; then
+        printf '固定 %s token' "$v2_fmt_value"
+      else
+        printf '固定阈值'
+      fi
+      ;;
+    *)
+      printf '跟随模型（全站共用）'
+      ;;
+  esac
+}
+
 codex_config_v2_show_profile() {
   v2_show_ref="$1"
   v2_show_work="$(codex_config_v2_work_root)"
@@ -1371,31 +1388,61 @@ import sys
 with open(sys.argv[1], encoding="utf-8") as handle:
     value = json.load(handle)
 item = value["profile"]
+mode = item.get("mode", "")
+mode_label = "第三方" if mode == "third_party" else ("官方登录" if mode == "official" else mode)
+print("—— 中转站（仅本站）——")
 print(f"名称: {item.get('name', '')}")
 print(f"ID: {item.get('id', '')}")
-print(f"类型: {item.get('mode', '')}")
-print(f"模型: {item.get('model') or '默认'}")
-print(f"推理等级: {item.get('reasoning_effort') or '默认'}")
-if item.get("mode") == "third_party":
-    print(f"Provider: {item.get('provider_name', '')}")
-    print(f"Base URL: {item.get('base_url', '')}")
-print(f"认证: {'已保存' if item.get('has_auth') else '未保存'}（密钥不显示）")
+print(f"类型: {mode_label}")
+print(f"模型策略: {item.get('model') or '默认'}" +
+      (f" / {item.get('reasoning_effort')}" if item.get("reasoning_effort") else ""))
+if mode == "third_party":
+    print(f"API: {item.get('base_url') or '未设置'}")
+    print(f"Provider: {item.get('provider_name') or 'custom'}")
+print(f"Key: {'已保存' if item.get('has_auth') else '未保存'}（密钥不显示）")
 print(f"模型目录: {'已保存' if item.get('has_catalog') else '未保存'}")
 print(f"当前使用: {'是' if value.get('active') else '否'}")
+policy = value.get("compact_policy") or {}
+policy_mode = policy.get("mode") or "follow-model"
+if policy_mode == "fixed" and policy.get("value"):
+    compact_label = f"固定 {policy.get('value')} token"
+else:
+    compact_label = "跟随模型（全站共用）"
+print("—— 通用项（全站共用，见主菜单第 7 项）——")
+print(f"上下文/压缩: {compact_label}")
+print("说明: 权限、TUI、features 等写在共用 config，不随站切换。")
 PY
 }
 
-codex_config_v2_edit_official() {
+codex_config_v2_edit_official_field() {
+  # field: name|model|all
   v2_edit_id="$1"
   v2_edit_json="$2"
+  v2_edit_field="$3"
   v2_edit_name="$(codex_config_v2_json_value "$v2_edit_json" profile.name)"
   v2_edit_model="$(codex_config_v2_json_value "$v2_edit_json" profile.model 2>/dev/null || true)"
   v2_edit_effort="$(codex_config_v2_json_value "$v2_edit_json" profile.reasoning_effort 2>/dev/null || true)"
-  codex_config_v2_prompt_name "配置名称" "$v2_edit_name" || return 1
-  codex_config_engine_ensure
-  v2_edit_catalog="$CODEX_CONFIG_ENGINE_RESOLVED_ROOT/data/openai-models.json"
-  codex_config_v2_choose_model "$v2_edit_catalog" "$v2_edit_model" 1 || return 1
-  codex_config_v2_choose_reasoning "$CODEX_CONFIG_V2_LEVELS" "$v2_edit_effort" || return 1
+  CODEX_CONFIG_V2_NAME="$v2_edit_name"
+  CODEX_CONFIG_V2_MODEL="$v2_edit_model"
+  CODEX_CONFIG_V2_REASONING="$v2_edit_effort"
+  case "$v2_edit_field" in
+    name)
+      codex_config_v2_prompt_name "配置名称" "$v2_edit_name" || return 1
+      ;;
+    model|all)
+      if [ "$v2_edit_field" = "all" ]; then
+        codex_config_v2_prompt_name "配置名称" "$v2_edit_name" || return 1
+      fi
+      codex_config_engine_ensure
+      v2_edit_catalog="$CODEX_CONFIG_ENGINE_RESOLVED_ROOT/data/openai-models.json"
+      codex_config_v2_choose_model "$v2_edit_catalog" "$v2_edit_model" 1 || return 1
+      codex_config_v2_choose_reasoning "$CODEX_CONFIG_V2_LEVELS" "$v2_edit_effort" || return 1
+      ;;
+    *)
+      codex_warn "不支持的编辑项：$v2_edit_field"
+      return 1
+      ;;
+  esac
   codex_config_tty_confirm "确认保存修改？" "y" || return 1
   v2_edit_work="$(codex_config_v2_work_root)"
   codex_config_v2_run "$v2_edit_work/edit-official.json" \
@@ -1407,53 +1454,156 @@ codex_config_v2_edit_official() {
   codex_info "已保存配置：$CODEX_CONFIG_V2_NAME"
 }
 
-codex_config_v2_edit_third_party() {
+codex_config_v2_edit_third_party_field() {
+  # field: name|api|key|model|all
   v2_edit_id="$1"
   v2_edit_json="$2"
+  v2_edit_field="$3"
   v2_edit_name="$(codex_config_v2_json_value "$v2_edit_json" profile.name)"
   v2_edit_base="$(codex_config_v2_json_value "$v2_edit_json" profile.base_url)"
   v2_edit_model="$(codex_config_v2_json_value "$v2_edit_json" profile.model)"
   v2_edit_effort="$(codex_config_v2_json_value "$v2_edit_json" profile.reasoning_effort 2>/dev/null || true)"
-  codex_config_v2_prompt_name "配置名称" "$v2_edit_name" || return 1
-  while :; do
-    v2_edit_raw_base="$(codex_config_tty_read "API Base URL（b 返回，0 退出）" "$v2_edit_base")"
-    codex_config_is_back_choice "$v2_edit_raw_base" && return 1
-    codex_config_is_exit_choice "$v2_edit_raw_base" && codex_config_exit_config_mode
-    codex_config_valid_api_base "$v2_edit_raw_base" && break
-    codex_warn "API Base URL 无效，必须是不含账号、查询参数或片段的 http(s) URL。"
-  done
-  v2_edit_new_base="$(codex_config_normalize_api_base "$v2_edit_raw_base")"
+  v2_edit_provider="$(codex_config_v2_json_value "$v2_edit_json" profile.provider_name 2>/dev/null || true)"
+  [ -n "$v2_edit_provider" ] || v2_edit_provider="${CODEX_ZH_PROVIDER_NAME:-OpenAI}"
+  CODEX_CONFIG_V2_NAME="$v2_edit_name"
+  v2_edit_new_base="$v2_edit_base"
+  CODEX_CONFIG_V2_MODEL="$v2_edit_model"
+  CODEX_CONFIG_V2_REASONING="$v2_edit_effort"
+  v2_edit_auth_args=""
+  v2_edit_catalog_args=""
+  v2_edit_auth=""
+  v2_edit_work="$(codex_config_v2_work_root)"
   v2_edit_existing_auth="$(codex_config_v2_profiles_root)/profiles/$v2_edit_id/auth.json"
   v2_edit_existing_key="$(codex_config_read_auth_key "$v2_edit_existing_auth" || true)"
-  v2_edit_key="$(codex_config_v2_read_secret "API Key（留空保留当前，输入 b 返回，0 退出）")"
-  codex_config_is_back_choice "$v2_edit_key" && return 1
-  codex_config_is_exit_choice "$v2_edit_key" && codex_config_exit_config_mode
-  [ -n "$v2_edit_key" ] || v2_edit_key="$v2_edit_existing_key"
-  [ -n "$v2_edit_key" ] || {
-    codex_warn "该配置没有可保留的 API Key。"
+  v2_edit_key=""
+
+  case "$v2_edit_field" in
+    name)
+      codex_config_v2_prompt_name "配置名称" "$v2_edit_name" || return 1
+      ;;
+    api)
+      while :; do
+        v2_edit_raw_base="$(codex_config_tty_read "API Base URL（b 返回，0 退出）" "$v2_edit_base")"
+        codex_config_is_back_choice "$v2_edit_raw_base" && return 1
+        codex_config_is_exit_choice "$v2_edit_raw_base" && codex_config_exit_config_mode
+        codex_config_valid_api_base "$v2_edit_raw_base" && break
+        codex_warn "API Base URL 无效，必须是不含账号、查询参数或片段的 http(s) URL。"
+      done
+      v2_edit_new_base="$(codex_config_normalize_api_base "$v2_edit_raw_base")"
+      # URL 变更后刷新目录，模型/推理尽量保留当前值。
+      [ -n "$v2_edit_existing_key" ] || {
+        codex_warn "该配置没有可保留的 API Key，请先改 Key。"
+        return 1
+      }
+      codex_config_v2_build_catalog "$v2_edit_new_base" "$v2_edit_existing_key" || return 1
+      if ! codex_config_v2_run "$v2_edit_work/edit-model-check.json" \
+        catalog inspect \
+        --catalog-file "$CODEX_CONFIG_V2_CATALOG" \
+        --model "$v2_edit_model"
+      then
+        codex_warn "当前模型不在新 API 目录中，请重新选择模型。"
+        codex_config_v2_choose_model "$CODEX_CONFIG_V2_CATALOG" "$v2_edit_model" 0 || return 1
+        codex_config_v2_choose_reasoning "$CODEX_CONFIG_V2_LEVELS" "$v2_edit_effort" || return 1
+      else
+        v2_edit_levels="$(codex_config_v2_json_value "$v2_edit_work/edit-model-check.json" model.reasoning_levels)"
+        CODEX_CONFIG_V2_LEVELS="$v2_edit_levels"
+        if [ -n "$v2_edit_effort" ] &&
+          ! printf '%s\n' "$v2_edit_levels" | tr ',' '\n' | grep -F -x -- "$v2_edit_effort" >/dev/null 2>&1
+        then
+          codex_warn "当前推理等级不受新目录支持，请重新选择。"
+          codex_config_v2_choose_reasoning "$CODEX_CONFIG_V2_LEVELS" "" || return 1
+        fi
+      fi
+      v2_edit_catalog_args=1
+      ;;
+    key)
+      v2_edit_key="$(codex_config_v2_read_secret "API Key（输入新值；b 返回，0 退出）")"
+      codex_config_is_back_choice "$v2_edit_key" && return 1
+      codex_config_is_exit_choice "$v2_edit_key" && codex_config_exit_config_mode
+      [ -n "$v2_edit_key" ] || {
+        codex_warn "API Key 不能为空。"
+        return 1
+      }
+      # 新 key 后刷新目录校验当前模型。
+      codex_config_v2_build_catalog "$v2_edit_new_base" "$v2_edit_key" || return 1
+      if ! codex_config_v2_run "$v2_edit_work/edit-key-model-check.json" \
+        catalog inspect \
+        --catalog-file "$CODEX_CONFIG_V2_CATALOG" \
+        --model "$v2_edit_model"
+      then
+        codex_warn "当前模型不在该 Key 可见目录中，请重新选择模型。"
+        codex_config_v2_choose_model "$CODEX_CONFIG_V2_CATALOG" "$v2_edit_model" 0 || return 1
+        codex_config_v2_choose_reasoning "$CODEX_CONFIG_V2_LEVELS" "$v2_edit_effort" || return 1
+      fi
+      v2_edit_auth="$v2_edit_work/auth-input.json"
+      codex_config_v2_write_auth_input "$v2_edit_auth" "$v2_edit_key"
+      v2_edit_auth_args=1
+      v2_edit_catalog_args=1
+      ;;
+    model)
+      [ -n "$v2_edit_existing_key" ] || {
+        codex_warn "该配置没有 API Key，无法拉取模型目录。"
+        return 1
+      }
+      codex_config_v2_build_catalog "$v2_edit_new_base" "$v2_edit_existing_key" || return 1
+      codex_config_v2_choose_model "$CODEX_CONFIG_V2_CATALOG" "$v2_edit_model" 0 || return 1
+      codex_config_v2_choose_reasoning "$CODEX_CONFIG_V2_LEVELS" "$v2_edit_effort" || return 1
+      v2_edit_catalog_args=1
+      ;;
+    all)
+      codex_config_v2_prompt_name "配置名称" "$v2_edit_name" || return 1
+      while :; do
+        v2_edit_raw_base="$(codex_config_tty_read "API Base URL（b 返回，0 退出）" "$v2_edit_base")"
+        codex_config_is_back_choice "$v2_edit_raw_base" && return 1
+        codex_config_is_exit_choice "$v2_edit_raw_base" && codex_config_exit_config_mode
+        codex_config_valid_api_base "$v2_edit_raw_base" && break
+        codex_warn "API Base URL 无效，必须是不含账号、查询参数或片段的 http(s) URL。"
+      done
+      v2_edit_new_base="$(codex_config_normalize_api_base "$v2_edit_raw_base")"
+      v2_edit_key="$(codex_config_v2_read_secret "API Key（留空保留当前，输入 b 返回，0 退出）")"
+      codex_config_is_back_choice "$v2_edit_key" && return 1
+      codex_config_is_exit_choice "$v2_edit_key" && codex_config_exit_config_mode
+      [ -n "$v2_edit_key" ] || v2_edit_key="$v2_edit_existing_key"
+      [ -n "$v2_edit_key" ] || {
+        codex_warn "该配置没有可保留的 API Key。"
+        return 1
+      }
+      codex_config_v2_build_catalog "$v2_edit_new_base" "$v2_edit_key" || return 1
+      codex_config_v2_choose_model "$CODEX_CONFIG_V2_CATALOG" "$v2_edit_model" 0 || return 1
+      codex_config_v2_choose_reasoning "$CODEX_CONFIG_V2_LEVELS" "$v2_edit_effort" || return 1
+      v2_edit_auth="$v2_edit_work/auth-input.json"
+      codex_config_v2_write_auth_input "$v2_edit_auth" "$v2_edit_key"
+      v2_edit_auth_args=1
+      v2_edit_catalog_args=1
+      ;;
+    *)
+      codex_warn "不支持的编辑项：$v2_edit_field"
+      return 1
+      ;;
+  esac
+
+  codex_config_tty_confirm "确认保存修改？" "y" || {
+    [ -z "$v2_edit_auth" ] || rm -f "$v2_edit_auth"
     return 1
   }
-  codex_config_v2_build_catalog "$v2_edit_new_base" "$v2_edit_key" || return 1
-  codex_config_v2_choose_model "$CODEX_CONFIG_V2_CATALOG" "$v2_edit_model" 0 || return 1
-  codex_config_v2_choose_reasoning "$CODEX_CONFIG_V2_LEVELS" "$v2_edit_effort" || return 1
-  codex_config_tty_confirm "确认保存修改？" "y" || return 1
-  v2_edit_work="$(codex_config_v2_work_root)"
-  v2_edit_auth="$v2_edit_work/auth-input.json"
-  codex_config_v2_write_auth_input "$v2_edit_auth" "$v2_edit_key"
-  if codex_config_v2_run "$v2_edit_work/edit-third-party.json" \
-    profile update "$v2_edit_id" \
+
+  set -- profile update "$v2_edit_id" \
     --name "$CODEX_CONFIG_V2_NAME" \
-    --provider-name "${CODEX_ZH_PROVIDER_NAME:-OpenAI}" \
+    --provider-name "$v2_edit_provider" \
     --base-url "$v2_edit_new_base" \
     --model "$CODEX_CONFIG_V2_MODEL" \
-    --reasoning-effort "$CODEX_CONFIG_V2_REASONING" \
-    --auth-file "$v2_edit_auth" \
-    --catalog-file "$CODEX_CONFIG_V2_CATALOG"
-  then
-    rm -f "$v2_edit_auth"
+    --reasoning-effort "$CODEX_CONFIG_V2_REASONING"
+  if [ -n "$v2_edit_auth_args" ] && [ -n "$v2_edit_auth" ]; then
+    set -- "$@" --auth-file "$v2_edit_auth"
+  fi
+  if [ -n "$v2_edit_catalog_args" ] && [ -n "${CODEX_CONFIG_V2_CATALOG:-}" ]; then
+    set -- "$@" --catalog-file "$CODEX_CONFIG_V2_CATALOG"
+  fi
+  if codex_config_v2_run "$v2_edit_work/edit-third-party.json" "$@"; then
+    [ -z "$v2_edit_auth" ] || rm -f "$v2_edit_auth"
   else
     v2_edit_rc=$?
-    rm -f "$v2_edit_auth"
+    [ -z "$v2_edit_auth" ] || rm -f "$v2_edit_auth"
     return "$v2_edit_rc"
   fi
   codex_config_v2_post_materialize
@@ -1462,16 +1612,64 @@ codex_config_v2_edit_third_party() {
 
 codex_config_v2_edit_menu() {
   codex_config_v2_dirty_guard "编辑配置" || return 1
-  codex_config_v2_choose_profile "请选择要编辑的配置编号" || return 1
+  codex_config_v2_choose_profile "请选择要编辑的中转站编号" || return 1
   v2_edit_work="$(codex_config_v2_work_root)"
   v2_edit_json="$v2_edit_work/edit-profile.json"
   codex_config_v2_run "$v2_edit_json" profile show "$CODEX_CONFIG_V2_PROFILE_ID" || return 1
   v2_edit_mode="$(codex_config_v2_json_value "$v2_edit_json" profile.mode)"
-  case "$v2_edit_mode" in
-    official) codex_config_v2_edit_official "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" ;;
-    third_party) codex_config_v2_edit_third_party "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" ;;
-    *) codex_warn "未知配置类型：$v2_edit_mode"; return 1 ;;
-  esac
+  v2_edit_name="$(codex_config_v2_json_value "$v2_edit_json" profile.name)"
+  v2_edit_model="$(codex_config_v2_json_value "$v2_edit_json" profile.model 2>/dev/null || true)"
+  v2_edit_effort="$(codex_config_v2_json_value "$v2_edit_json" profile.reasoning_effort 2>/dev/null || true)"
+  v2_edit_base="$(codex_config_v2_json_value "$v2_edit_json" profile.base_url 2>/dev/null || true)"
+  while :; do
+    printf '%s\n' "" >&2
+    printf '%s\n' "编辑中转站：$v2_edit_name（只改本站字段；压缩/权限见主菜单通用项）" >&2
+    case "$v2_edit_mode" in
+      official)
+        printf '%s\n' "当前模型策略：${v2_edit_model:-默认}${v2_edit_effort:+ / $v2_edit_effort}" >&2
+        printf '%s\n' "1. 改名称" >&2
+        printf '%s\n' "2. 改模型策略（模型 + 推理）" >&2
+        printf '%s\n' "3. 全部重设（名称 + 模型策略）" >&2
+        printf '%s\n' "b. 返回上一层" >&2
+        printf '%s\n' "0. 退出，不启动 Codex" >&2
+        v2_edit_choice="$(codex_config_tty_read "请选择要改的字段" "b")"
+        case "$v2_edit_choice" in
+          1) codex_config_v2_edit_official_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" name; return $? ;;
+          2) codex_config_v2_edit_official_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" model; return $? ;;
+          3) codex_config_v2_edit_official_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" all; return $? ;;
+          b|B|back|BACK|返回) return 1 ;;
+          0|q|Q|quit|QUIT|退出) codex_config_exit_config_mode ;;
+          *) codex_warn "请输入 1、2、3、b 或 0。" ;;
+        esac
+        ;;
+      third_party)
+        printf '%s\n' "当前 API：${v2_edit_base:-未设置}" >&2
+        printf '%s\n' "当前模型策略：${v2_edit_model:-默认}${v2_edit_effort:+ / $v2_edit_effort}" >&2
+        printf '%s\n' "1. 改名称" >&2
+        printf '%s\n' "2. 改 API（Base URL，必要时重选模型）" >&2
+        printf '%s\n' "3. 改 Key" >&2
+        printf '%s\n' "4. 改模型策略（模型 + 推理）" >&2
+        printf '%s\n' "5. 全部重设（名称/API/Key/模型）" >&2
+        printf '%s\n' "b. 返回上一层" >&2
+        printf '%s\n' "0. 退出，不启动 Codex" >&2
+        v2_edit_choice="$(codex_config_tty_read "请选择要改的字段" "b")"
+        case "$v2_edit_choice" in
+          1) codex_config_v2_edit_third_party_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" name; return $? ;;
+          2) codex_config_v2_edit_third_party_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" api; return $? ;;
+          3) codex_config_v2_edit_third_party_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" key; return $? ;;
+          4) codex_config_v2_edit_third_party_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" model; return $? ;;
+          5) codex_config_v2_edit_third_party_field "$CODEX_CONFIG_V2_PROFILE_ID" "$v2_edit_json" all; return $? ;;
+          b|B|back|BACK|返回) return 1 ;;
+          0|q|Q|quit|QUIT|退出) codex_config_exit_config_mode ;;
+          *) codex_warn "请输入 1–5、b 或 0。" ;;
+        esac
+        ;;
+      *)
+        codex_warn "未知配置类型：$v2_edit_mode"
+        return 1
+        ;;
+    esac
+  done
 }
 
 codex_config_v2_use_menu() {
@@ -1506,7 +1704,10 @@ codex_config_v2_compact_menu() {
   codex_config_v2_run "$v2_compact_show" compact-policy show || return 1
   v2_compact_mode="$(codex_config_v2_json_value "$v2_compact_show" compact_policy.mode)"
   v2_compact_value="$(codex_config_v2_json_value "$v2_compact_show" compact_policy.value 2>/dev/null || true)"
-  printf '%s\n' "当前压缩策略：$v2_compact_mode${v2_compact_value:+ / $v2_compact_value}" >&2
+  v2_compact_label="$(codex_config_v2_format_compact_label "$v2_compact_mode" "$v2_compact_value")"
+  printf '%s\n' "" >&2
+  printf '%s\n' "通用：上下文与压缩策略（全站共用，不随中转站切换）" >&2
+  printf '%s\n' "当前：$v2_compact_label" >&2
   while :; do
     printf '%s\n' "1. 跟随模型目录，由 Codex 按真实窗口计算（推荐）" >&2
     printf '%s\n' "2. 使用固定 token 阈值" >&2
@@ -1515,20 +1716,22 @@ codex_config_v2_compact_menu() {
     v2_compact_choice="$(codex_config_tty_read "请选择压缩策略" "1")"
     case "$v2_compact_choice" in
       1|"")
-        codex_config_v2_run "$v2_compact_work/compact-follow.json" compact-policy follow-model
-        return $?
+        codex_config_v2_run "$v2_compact_work/compact-follow.json" compact-policy follow-model || return $?
+        codex_info "已设为跟随模型（全站共用）。"
+        return 0
         ;;
       2)
         while :; do
-          v2_compact_fixed="$(codex_config_tty_read "固定 token 阈值（b 返回，0 退出）" "${v2_compact_value:-220000}")"
+          v2_compact_fixed="$(codex_config_tty_read "固定 token 阈值（b 返回，0 退出）" "${v2_compact_value:-250000}")"
           codex_config_is_back_choice "$v2_compact_fixed" && return 1
           codex_config_is_exit_choice "$v2_compact_fixed" && codex_config_exit_config_mode
           case "$v2_compact_fixed" in
             *[!0-9]*|"") codex_warn "请输入正整数。"; continue ;;
           esac
           [ "$v2_compact_fixed" -gt 0 ] 2>/dev/null || { codex_warn "请输入正整数。"; continue; }
-          codex_config_v2_run "$v2_compact_work/compact-fixed.json" compact-policy fixed "$v2_compact_fixed"
-          return $?
+          codex_config_v2_run "$v2_compact_work/compact-fixed.json" compact-policy fixed "$v2_compact_fixed" || return $?
+          codex_info "已设为固定 $v2_compact_fixed token（全站共用）。"
+          return 0
         done
         ;;
       b|B|back|BACK|返回) return 1 ;;
@@ -1714,25 +1917,43 @@ codex_config_menu() {
     codex_config_v2_run "$v2_menu_status" status || return 1
     v2_menu_active="$(codex_config_v2_json_value "$v2_menu_status" active_profile_id 2>/dev/null || true)"
     v2_menu_label="无"
+    v2_menu_station_detail=""
     if [ -n "$v2_menu_active" ]; then
       if codex_config_v2_run "$v2_menu_work/menu-active.json" profile show "$v2_menu_active"; then
         v2_menu_label="$(codex_config_v2_json_value "$v2_menu_work/menu-active.json" profile.name)"
+        v2_menu_model="$(codex_config_v2_json_value "$v2_menu_work/menu-active.json" profile.model 2>/dev/null || true)"
+        v2_menu_effort="$(codex_config_v2_json_value "$v2_menu_work/menu-active.json" profile.reasoning_effort 2>/dev/null || true)"
+        v2_menu_base="$(codex_config_v2_json_value "$v2_menu_work/menu-active.json" profile.base_url 2>/dev/null || true)"
+        v2_menu_station_detail="${v2_menu_model:-默认}${v2_menu_effort:+ / $v2_menu_effort}"
+        [ -z "$v2_menu_base" ] || v2_menu_station_detail="$v2_menu_station_detail  $v2_menu_base"
         [ "$(codex_config_v2_json_value "$v2_menu_status" runtime_dirty)" != "true" ] ||
           v2_menu_label="$v2_menu_label（运行配置有未保存变化）"
       fi
     fi
+    v2_menu_compact_mode="$(codex_config_v2_json_value "$v2_menu_status" compact_policy.mode 2>/dev/null || true)"
+    v2_menu_compact_value="$(codex_config_v2_json_value "$v2_menu_status" compact_policy.value 2>/dev/null || true)"
+    if [ -z "$v2_menu_compact_mode" ] && [ -n "$v2_menu_active" ] && [ -f "$v2_menu_work/menu-active.json" ]; then
+      v2_menu_compact_mode="$(codex_config_v2_json_value "$v2_menu_work/menu-active.json" compact_policy.mode 2>/dev/null || true)"
+      v2_menu_compact_value="$(codex_config_v2_json_value "$v2_menu_work/menu-active.json" compact_policy.value 2>/dev/null || true)"
+    fi
+    [ -n "$v2_menu_compact_mode" ] || v2_menu_compact_mode="follow-model"
+    v2_menu_compact_label="$(codex_config_v2_format_compact_label "$v2_menu_compact_mode" "$v2_menu_compact_value")"
     printf '%s\n' "" >&2
     printf '%s\n' "Codex 配置模式" >&2
-    printf '%s\n' "当前中转站：$v2_menu_label" >&2
-    printf '%s\n' "说明：通用项（上下文/压缩/权限等）全站共用；各站只切换模型策略、API 与 Key。" >&2
+    printf '%s\n' "当前中转站：$v2_menu_label${v2_menu_station_detail:+  ($v2_menu_station_detail)}" >&2
+    printf '%s\n' "通用策略：压缩=$v2_menu_compact_label；权限/TUI/features 全站共用" >&2
+    printf '%s\n' "结构：站级=名称/模型策略/API/Key；通用=上下文·压缩·权限（第 7–8 项）" >&2
+    printf '%s\n' "—— 中转站 ——" >&2
     printf '%s\n' "1. 新建中转站" >&2
     printf '%s\n' "2. 选择中转站" >&2
-    printf '%s\n' "3. 编辑中转站（模型/API/Key）" >&2
+    printf '%s\n' "3. 编辑中转站字段（名称/API/Key/模型策略）" >&2
     printf '%s\n' "4. 查看中转站" >&2
     printf '%s\n' "5. 删除中转站" >&2
     printf '%s\n' "6. 刷新当前模型目录" >&2
+    printf '%s\n' "—— 通用（全站共用）——" >&2
     printf '%s\n' "7. 通用：上下文与压缩策略" >&2
     printf '%s\n' "8. 通用：修复全权限授权" >&2
+    printf '%s\n' "—— 退出 ——" >&2
     printf '%s\n' "9. 保存并退出配置模式" >&2
     printf '%s\n' "0. 退出，不启动 Codex" >&2
     v2_menu_choice="$(codex_config_tty_read "请输入选项编号" "9")"

@@ -170,8 +170,8 @@ test_apk_upgrade_guards() {
   assert_nonempty_file "$MODEL_PTY_SMOKE"
   python3 -m py_compile "$MODEL_PTY_SMOKE" || fail "model PTY smoke Python syntax failed"
 
-  assert_file_contains "$APK_UPGRADER" 'RELEASE="2.5.20"'
-  assert_file_contains "$APK_UPGRADER" 'VERSION_CODE="86"'
+  assert_file_contains "$APK_UPGRADER" 'RELEASE="2.5.21"'
+  assert_file_contains "$APK_UPGRADER" 'VERSION_CODE="87"'
   assert_file_contains "$APK_UPGRADER" 'EXPECTED_ARCHIVE_SHA256="1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61"'
   assert_file_contains "$APK_UPGRADER" 'EXPECTED_BINARY_SHA256="0cde6d6bad02855732ee0ee2867005408d169c46753d414e6a487884d49e0767"'
   assert_file_contains "$APK_UPGRADER" 'LOCK_DIR="$STATE_ROOT/apk-upgrade.lock"'
@@ -189,8 +189,8 @@ test_apk_upgrade_guards() {
   assert_file_contains "$APK_UPGRADER" 'best_effort_refresh'
   assert_file_contains "$APK_UPGRADER" '第三方模型目录联网刷新失败，已保留离线重建结果。'
 
-  assert_file_contains "$APK_PAYLOAD_PREPARE" 'RELEASE="2.5.20"'
-  assert_file_contains "$APK_PAYLOAD_PREPARE" 'VERSION_CODE="86"'
+  assert_file_contains "$APK_PAYLOAD_PREPARE" 'RELEASE="2.5.21"'
+  assert_file_contains "$APK_PAYLOAD_PREPARE" 'VERSION_CODE="87"'
   assert_file_contains "$APK_PAYLOAD_PREPARE" "tar \\"
   assert_file_contains "$APK_PAYLOAD_PREPARE" "--sort=name"
   assert_file_contains "$APK_PAYLOAD_PREPARE" "--mtime='UTC 1970-01-01'"
@@ -368,8 +368,15 @@ PY
 assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'model_providers are station-owned'
   assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'Stations only own their managed provider'
   assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'doc["model_providers"] = providers'
-  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" '通用项（上下文/压缩/权限等）全站共用'
-  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" '中转站（只含模型策略 / API / Key'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" '结构：站级=名称/模型策略/API/Key；通用=上下文·压缩·权限'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" '编辑中转站字段（名称/API/Key/模型策略）'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" 'codex_config_v2_edit_third_party_field'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" 'codex_config_v2_format_compact_label'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" '—— 通用（全站共用）——'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-config.sh" '中转站列表（站级=名称/模型策略/API/Key'
+  assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'compact_policy is global (index only)'
+  assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'never stored per-station'
+  assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'Drop stale per-station compact_policy'
   assert_file_contains "$CODEX_COMMON" 'libexec/codex-runtime-session-import.py'
   assert_file_contains "$SESSION_ISO/AgentKind.kt" 'codex resume --all -C'
   assert_file_contains "$TERMINAL_VIEW_LAYOUT" 'val requestedId = service.currentSession.value.first'
@@ -509,13 +516,13 @@ PY
     'test_bootstrap_dependency_cancel_does_not_install'
 
   assert_file_contains "$APP_BUILD_GRADLE" 'val verifyCodexUpgradePayload by tasks.registering'
-  assert_file_contains "$APP_BUILD_GRADLE" 'release"] != "2.5.20"'
-  assert_file_contains "$APP_BUILD_GRADLE" 'version_code"] != "86"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'release"] != "2.5.21"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'version_code"] != "87"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex APK manifest SHA256 mismatch'
   assert_file_contains "$APP_BUILD_GRADLE" 'AAPT strips that asset suffix; use .tgz'
   assert_file_contains "$APP_BUILD_GRADLE" 'dependsOn(verifyCodexUpgradePayload)'
-  assert_file_contains "$CODEX_COMMON" ': "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.5.20}"'
-  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.20}"'
+  assert_file_contains "$CODEX_COMMON" ': "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.5.21}"'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.21}"'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'profile_generation=""'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'baseline_model=""'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'baseline_effort=""'
@@ -561,16 +568,16 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 86'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.5.20"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 87'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.5.21"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" '- "release/codex-for-tui-*"'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "86"'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.5.20'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "87"'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.5.21'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -610,7 +617,7 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'sha256sum *.apk > SHA256SUMS'
   assert_file_contains "$BUILD_WORKFLOW" 'android-app/app/build/outputs/apk/release/SHA256SUMS'
   assert_file_contains "$BUILD_WORKFLOW" 'softprops/action-gh-release@v2'
-  assert_file_contains "$BUILD_WORKFLOW" 'body_path: docs/codex-for-tui-2.5.20-release-notes.md'
+  assert_file_contains "$BUILD_WORKFLOW" 'body_path: docs/codex-for-tui-2.5.21-release-notes.md'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Publish verified GitHub release'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Download verified release assets'
   assert_file_order "$BUILD_WORKFLOW" 'name: Promote verified tag to installer channel' 'name: Publish verified GitHub release'
@@ -640,7 +647,7 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-session-defaults-smoke.sh'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release APK offline payload'
   assert_file_contains "$BUILD_WORKFLOW" '../tests/codex-for-tui-apk-payload-inspect.sh "$apk"'
-  assert_file_contains "$APK_PAYLOAD_INSPECT" 'EXPECTED_VERSION_CODE="${CODEX_TUI_EXPECTED_VERSION_CODE:-86}"'
+  assert_file_contains "$APK_PAYLOAD_INSPECT" 'EXPECTED_VERSION_CODE="${CODEX_TUI_EXPECTED_VERSION_CODE:-87}"'
   assert_file_not_contains "$BUILD_WORKFLOW" '0.142.4'
   assert_file_contains "$CODEX_COMMON" ': "${CODEX_ZH_VERSION:=0.144.1}"'
   assert_file_contains "$CODEX_COMMON" 'releases/download/v0.144.1-zh.1'
@@ -790,8 +797,8 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'codex-agent'
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'codex-session-defaults'
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'binary-build-key-v1'
-  assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'runtime_epoch=apk-2.5.20'
-  assert_file_contains "$INSTALLED_DEVICE_SMOKE" '[ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "86" ]'
+  assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'runtime_epoch=apk-2.5.21'
+  assert_file_contains "$INSTALLED_DEVICE_SMOKE" '[ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "87" ]'
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'expected_min_registry=91'
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" '019f212d-4b6e-7e93-b3f4-188eefa2657d'
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" '/root/workspace trust was not inherited'
@@ -1911,7 +1918,7 @@ EOF
     fail "normal codex did not use an isolated profile runtime"
   printf '%s\n' "$output" | grep -F '/sqlite-builds/' >/dev/null 2>&1 ||
     fail "normal codex did not isolate SQLite by binary build"
-  printf '%s\n' "$output" | grep -F 'apk-2.5.20' >/dev/null 2>&1 ||
+  printf '%s\n' "$output" | grep -F 'apk-2.5.21' >/dev/null 2>&1 ||
     fail "normal codex did not include the APK runtime epoch in SQLite isolation"
   printf '%s\n' "$output" | grep -F "$tmp/prefix/local/bin" >/dev/null 2>&1 || fail "normal codex did not carry app bridge bin in PATH"
   printf '%s\n' "$output" | grep -F 'update-ran' >/dev/null 2>&1 && fail "normal codex invoked update path"

@@ -451,6 +451,8 @@ def profile_generation(directory: Path) -> str:
 
 def redact_profile(paths: Paths, meta: dict[str, Any]) -> dict[str, Any]:
     result = dict(meta)
+    # compact_policy is global (index only). Never surface a stale per-profile copy.
+    result.pop("compact_policy", None)
     directory = profile_dir(paths, str(meta["id"]))
     result.update(managed_summary(directory))
     result["has_auth"] = (directory / "auth.json").is_file()
@@ -755,6 +757,9 @@ def create_profile_directory(
     staged = paths.profiles_root / f".profile-{profile_id}-{uuid.uuid4().hex}"
     ensure_private_dir(staged)
     now = utc_now()
+    # Station meta only: identity + mode + runtime path.
+    # Compact / context / permissions are global (index + control config.toml).
+    _ = compact_policy  # retained for call-site compatibility; never stored per-station
     meta = {
         "schema_version": SCHEMA_VERSION,
         "id": profile_id,
@@ -762,8 +767,6 @@ def create_profile_directory(
         "mode": mode,
         "compatibility_model": compatibility_model,
         "runtime_home": str(runtime_home or default_runtime_home(paths, profile_id)),
-        # Compact policy is global; profile field is informational only (not used to materialize).
-        "compact_policy": compact_policy or {"mode": "follow-model"},
         "created_at": existing_created_at or now,
         "updated_at": now,
     }
@@ -856,6 +859,11 @@ def apply_compact_policy(
 
 def materialize_profile(paths: Paths, meta: dict[str, Any], index: dict[str, Any]) -> None:
     directory = profile_dir(paths, str(meta["id"]))
+    # Drop stale per-station compact_policy if an older build wrote it.
+    if isinstance(meta, dict) and "compact_policy" in meta:
+        meta = dict(meta)
+        meta.pop("compact_policy", None)
+        atomic_write_json(directory / "profile.json", meta)
     # Common defaults from control home, then patch managed profile variables.
     # legacy-config.toml is migration/backup only and is never the materialize base.
     doc = load_common_config(paths, index)
@@ -989,7 +997,12 @@ def cmd_profile_list(paths: Paths, _args: argparse.Namespace) -> None:
         recover_transaction(paths)
         index = load_index(paths)
         profiles = [redact_profile(paths, item) for item in list_profiles(paths)]
-    emit(True, active_profile_id=index.get("active_profile_id"), profiles=profiles)
+    emit(
+        True,
+        active_profile_id=index.get("active_profile_id"),
+        compact_policy=profile_compact_policy(None, index),
+        profiles=profiles,
+    )
 
 
 def cmd_profile_show(paths: Paths, args: argparse.Namespace) -> None:
@@ -1001,6 +1014,8 @@ def cmd_profile_show(paths: Paths, args: argparse.Namespace) -> None:
     emit(
         True,
         active=meta["id"] == index.get("active_profile_id"),
+        # Global compact policy for menu display (not a station field).
+        compact_policy=profile_compact_policy(None, index),
         profile=profile,
     )
 
@@ -2231,7 +2246,8 @@ def cmd_migrate_v1(paths: Paths, args: argparse.Namespace) -> None:
                     source_dir=old_dir,
                     runtime_home=paths.legacy_profiles_root / name,
                 )
-                meta["compact_policy"] = index["compact_policy"]
+                # Compact is global (index only); never mirror into station meta.
+                meta.pop("compact_policy", None)
                 atomic_write_json(
                     profile_dir(paths, str(meta["id"])) / "profile.json",
                     meta,
@@ -2240,7 +2256,7 @@ def cmd_migrate_v1(paths: Paths, args: argparse.Namespace) -> None:
                 source_by_name[name] = meta
             if not imported and paths.config.is_file():
                 meta = import_runtime_profile(paths, name="default", source_dir=paths.home)
-                meta["compact_policy"] = index["compact_policy"]
+                meta.pop("compact_policy", None)
                 atomic_write_json(
                     profile_dir(paths, str(meta["id"])) / "profile.json",
                     meta,
@@ -3249,10 +3265,10 @@ def cmd_apk_upgrade(paths: Paths, args: argparse.Namespace) -> None:
                 )
             valid_profiles, _ = list_profiles_tolerant(paths)
 
-            inherited_policy = profile_compact_policy(None, index)
+            # Strip legacy per-station compact_policy copies; index is the sole source.
             for item in valid_profiles:
-                if not isinstance(item.get("compact_policy"), dict):
-                    item["compact_policy"] = inherited_policy
+                if "compact_policy" in item:
+                    item.pop("compact_policy", None)
                     atomic_write_json(
                         profile_dir(paths, str(item["id"])) / "profile.json",
                         item,
