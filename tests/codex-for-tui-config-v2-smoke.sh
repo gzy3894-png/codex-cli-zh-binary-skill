@@ -295,11 +295,13 @@ test_profile_integrity_routing_and_secret_cleanup() {
     "$home/config-runtimes" \
     "$home/auth.json" >/dev/null 2>&1 ||
     fail "deleted profile secret remains in live or transaction storage"
-  # Profile delete must not wipe shared conversation history.
-  [ -s "$third_runtime/sessions/keep.jsonl" ] ||
-    fail "deleting a profile removed preserved session rollouts"
+  # Profile delete may rmtree the runtime home (sqlite/catalogs), but must never
+  # wipe control-home shared conversation history the runtime only linked to.
   [ -s "$home/sessions/keep.jsonl" ] ||
     fail "deleting a profile removed control-home shared sessions"
+  [ ! -e "$third_runtime/config.toml" ] ||
+    fail "deleted profile runtime config.toml should be gone"
+
 
   engine "$home" profile create --name alpha --mode official --model gpt-5.4 > "$home/alpha.json"
   engine "$home" profile create --name beta --mode official --model gpt-5.5 > "$home/beta.json"

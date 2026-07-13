@@ -1112,6 +1112,63 @@ def cmd_profile_activate(paths: Paths, args: argparse.Namespace) -> None:
         emit(True, profile=redact_profile(paths, meta), active=True)
 
 
+# Shared conversation roots that must survive profile delete. They are usually
+# symlinks from each runtime into control CODEX_HOME; never follow/unlink them
+# in a way that wipes the control-home targets.
+_SHARED_RUNTIME_LINK_NAMES = (
+    "sessions",
+    "archived_sessions",
+    "history.jsonl",
+    "shell_snapshots",
+)
+
+
+def _safe_remove_runtime_home(paths: Paths, runtime_home: Path) -> None:
+    """Remove a profile runtime tree without destroying shared sessions.
+
+    Prefer rmtree only when the runtime is a real directory distinct from
+    control home. Shared link names are unlinked first (symlink only) so a
+    subsequent rmtree cannot follow them into control CODEX_HOME.
+    """
+    if not runtime_home.exists() and not runtime_home.is_symlink():
+        return
+    try:
+        if runtime_home.resolve() == paths.home.resolve():
+            return
+    except OSError:
+        return
+
+    # Drop shared conversation links first so rmtree never walks into them.
+    for name in _SHARED_RUNTIME_LINK_NAMES:
+        link = runtime_home / name
+        try:
+            if link.is_symlink() or link.is_file():
+                link.unlink(missing_ok=True)
+            elif link.is_dir():
+                # Real dir copies of shared state are rare; leave them alone so
+                # we never delete conversation history as a side effect.
+                continue
+        except OSError:
+            continue
+
+    if runtime_home.is_symlink():
+        runtime_home.unlink(missing_ok=True)
+        return
+    if not runtime_home.is_dir():
+        runtime_home.unlink(missing_ok=True)
+        return
+    try:
+        shutil.rmtree(runtime_home, ignore_errors=True)
+    except OSError:
+        for runtime_file in (
+            runtime_home / "config.toml",
+            runtime_home / "auth.json",
+            runtime_home / "model_catalog.json",
+            runtime_home / "install-state" / "official-login-mode",
+        ):
+            runtime_file.unlink(missing_ok=True)
+
+
 def cmd_profile_delete(paths: Paths, args: argparse.Namespace) -> None:
     with engine_lock(paths):
         paths.ensure_v2_dirs()
@@ -1123,22 +1180,10 @@ def cmd_profile_delete(paths: Paths, args: argparse.Namespace) -> None:
         runtime_home = runtime_home_for_profile(paths, meta)
         with transaction(paths, "profile-delete"):
             shutil.rmtree(profile_dir(paths, str(meta["id"])))
-            # Drop the whole runtime tree (sqlite epochs, catalogs, links).
-            # Leaving orphan sqlite-builds made config-runtimes grow to hundreds
-            # of MB and slowed every seed/restamp launch.
-            if runtime_home.is_dir() and not runtime_home.is_symlink():
-                # Never delete control home if mis-resolved.
-                try:
-                    if runtime_home.resolve() != paths.home.resolve():
-                        shutil.rmtree(runtime_home, ignore_errors=True)
-                except OSError:
-                    for runtime_file in (
-                        runtime_home / "config.toml",
-                        runtime_home / "auth.json",
-                        runtime_home / "model_catalog.json",
-                        runtime_home / "install-state" / "official-login-mode",
-                    ):
-                        runtime_file.unlink(missing_ok=True)
+            # Drop runtime disk (sqlite epochs, catalogs) without touching shared
+            # conversation state. sessions/history/etc. are often symlinks into
+            # control CODEX_HOME — never follow those links.
+            _safe_remove_runtime_home(paths, runtime_home)
             if index.get("active_profile_id") == meta["id"]:
                 index["active_profile_id"] = None
                 atomic_write_json(paths.index, index)

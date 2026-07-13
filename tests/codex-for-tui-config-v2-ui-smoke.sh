@@ -101,7 +101,7 @@ test_menu_switch_view_delete_and_invalid_choice() (
   json_assert "$tmp/omega-active.json" "v['active'] is True and v['profile']['model'] == 'gpt-5.5'"
   json_assert "$tmp/alpha-inactive.json" "v['active'] is False"
   assert_contains "$tmp/switch.err" "请输入 0 到 9，或输入 b 返回。"
-  assert_contains "$tmp/switch.err" "配置编号超出范围。"
+  assert_contains "$tmp/switch.err" "中转站编号超出范围。"
   assert_contains "$tmp/switch.err" "名称: omega"
   assert_contains "$tmp/switch.out" "已切换配置：omega"
 

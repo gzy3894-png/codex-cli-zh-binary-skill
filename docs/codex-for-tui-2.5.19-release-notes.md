@@ -17,7 +17,7 @@
 - **升级不再刷 `-legacy`**
   - `legacy_profile_already_imported` 按 name / `name-legacy*` / base_url 指纹去重，避免 APK 升级反复再导入 v1 `config-profiles`。
 - **删除中转站更干净**
-  - `profile delete` 删除整棵 runtime_home，不再只删部分文件。
+  - `profile delete` 清理 runtime 磁盘（sqlite/catalog），先卸掉 sessions/history 等共享链接，不跟随链接清空 control home 会话。
 
 ## 版本标识
 
