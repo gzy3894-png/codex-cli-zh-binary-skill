@@ -1,3 +1,12 @@
+## Codex for TUI 2.5.18
+
+Codex for TUI 2.5.18 是 2.5.17 后的原生 `/resume` provider 双写热修。
+
+- 根因：2.5.17 只 restamp SQLite；Codex 启动 `backfill_sessions` 会从 rollout `session_meta.payload.model_provider` 重建 `threads`，旧 provider 再次进入索引，`/resume` 仍空。
+- 对齐 Codex++ Provider 同步：启动 materialize / seed-shared-sessions / `restamp-thread-providers` 时同时改写共享 `sessions/**` 与 `archived_sessions/**` 的 `session_meta.model_provider`，并把各 runtime `state_5.sqlite` 的 `threads.model_provider` 标为当前站 provider；顺带修复 `has_user_event=0`。
+- `versionCode=84`、`versionName=2.5.18`、runtime epoch `apk-2.5.18`。
+- 发布说明见 `docs/codex-for-tui-2.5.18-release-notes.md`。
+
 ## Codex for TUI 2.5.17
 
 Codex for TUI 2.5.17 是 2.5.16 后的原生 `/resume` provider 过滤热修。

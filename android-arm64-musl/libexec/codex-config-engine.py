@@ -1404,10 +1404,11 @@ def materialize_runtime(
         safe_copy(paths.official_marker, runtime_marker, 0o600)
     else:
         runtime_marker.unlink(missing_ok=True)
-    # Shared sessions keep original model_provider stamps. Native /resume filters
-    # by the active provider id, so restamp each runtime SQLite after config is
-    # written so every station lists the shared inventory without --all.
-    restamp_all_runtime_thread_providers(paths)
+    # Native /resume filters by active model_provider_id, and Codex startup
+    # backfill reloads threads from rollout session_meta. Codex++-style dual
+    # sync rewrites shared session_meta + every runtime SQLite so the full
+    # inventory stays visible without --all across stations.
+    sync_provider_visibility(paths, runtime_home=runtime_home)
     return runtime_home, sqlite_home
 
 
@@ -2417,6 +2418,127 @@ def _read_runtime_model_provider(runtime_home: Path) -> str | None:
     return None
 
 
+def _read_control_model_provider(paths: Paths) -> str | None:
+    """Return model_provider from control config.toml when present."""
+    if not paths.config.is_file():
+        return None
+    try:
+        doc = read_toml(paths.config)
+    except Exception:
+        return None
+    value = doc.get("model_provider")
+    if isinstance(value, str):
+        provider = value.strip()
+        if provider:
+            return provider
+    return None
+
+
+def _rewrite_rollout_session_meta_provider(path: Path, target: str) -> bool:
+    """Rewrite session_meta.model_provider in one rollout jsonl. Returns True if changed.
+
+    Codex startup backfill rebuilds SQLite threads from rollout session_meta. Only
+    restamping SQLite is not durable: the next launch reloads the old provider
+    from jsonl and empties /resume again. Codex++ provider-sync rewrites both.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    if not text:
+        return False
+    changed = False
+    out_parts: list[str] = []
+    # splitlines(keepends) preserves endings; empty trailing is fine.
+    for line in text.splitlines(keepends=True):
+        raw = line[:-1] if line.endswith("\n") else line
+        ending = "\n" if line.endswith("\n") else ""
+        stripped = raw.strip()
+        if not stripped:
+            out_parts.append(line)
+            continue
+        try:
+            record = json.loads(stripped)
+        except json.JSONDecodeError:
+            out_parts.append(line)
+            continue
+        if not isinstance(record, dict) or record.get("type") != "session_meta":
+            out_parts.append(line)
+            continue
+        payload = record.get("payload")
+        if not isinstance(payload, dict):
+            out_parts.append(line)
+            continue
+        current = payload.get("model_provider")
+        if current == target:
+            out_parts.append(line)
+            continue
+        payload["model_provider"] = target
+        record["payload"] = payload
+        out_parts.append(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + ending)
+        changed = True
+    if not changed:
+        return False
+    try:
+        stat = path.stat()
+    except OSError:
+        stat = None
+    try:
+        atomic_write_text(path, "".join(out_parts), 0o600)
+        if stat is not None:
+            try:
+                os.utime(path, (stat.st_atime, stat.st_mtime))
+            except OSError:
+                pass
+    except Exception:
+        return False
+    return True
+
+
+def rewrite_shared_session_meta_providers(
+    paths: Paths,
+    provider: str,
+) -> dict[str, Any]:
+    """Rewrite shared rollout session_meta to the active station provider."""
+    summary: dict[str, Any] = {
+        "provider": provider,
+        "files_scanned": 0,
+        "files_updated": 0,
+        "roots": [],
+    }
+    if not provider:
+        summary["skipped"] = True
+        summary["reason"] = "no-model-provider"
+        return summary
+    roots: list[Path] = []
+    for name in ("sessions", "archived_sessions"):
+        root = paths.home / name
+        # Follow symlink to control body; seed makes runtime sessions -> control.
+        try:
+            if root.exists():
+                roots.append(root.resolve() if root.is_symlink() else root)
+        except OSError:
+            continue
+    seen: set[str] = set()
+    for root in roots:
+        key = str(root)
+        if key in seen or not root.is_dir():
+            continue
+        seen.add(key)
+        summary["roots"].append(key)
+        try:
+            files = sorted(root.rglob("rollout-*.jsonl"))
+        except OSError:
+            continue
+        for path in files:
+            if not path.is_file() or path.is_symlink():
+                continue
+            summary["files_scanned"] += 1
+            if _rewrite_rollout_session_meta_provider(path, provider):
+                summary["files_updated"] += 1
+    return summary
+
+
 def restamp_runtime_thread_providers(
     runtime_home: Path,
     provider: str | None = None,
@@ -2427,8 +2549,11 @@ def restamp_runtime_thread_providers(
     are inventory-unified across relays, but historical rows keep the provider
     id from the station that first created them. Without restamping, switching
     to another relay shows an empty picker even though the sessions tree is
-    shared. This only rewrites the per-runtime SQLite index; rollout jsonl is
-    left intact for audit.
+    shared.
+
+    Also set has_user_event=1 when the column exists and is 0: Codex++ does the
+    same visibility repair; preview-empty filtering is separate and already
+    handled by native backfill for normal user threads.
     """
     import sqlite3
 
@@ -2438,6 +2563,7 @@ def restamp_runtime_thread_providers(
         "provider": target,
         "databases": 0,
         "updated_rows": 0,
+        "user_event_rows": 0,
         "skipped": False,
     }
     if not target:
@@ -2474,9 +2600,24 @@ def restamp_runtime_thread_providers(
                         "WHERE model_provider IS NULL OR model_provider != ?",
                         (target, target),
                     )
+                user_event_rows = 0
+                if "has_user_event" in cols:
+                    user_event_rows = int(
+                        con.execute(
+                            "SELECT COUNT(*) FROM threads "
+                            "WHERE COALESCE(has_user_event, 0) = 0"
+                        ).fetchone()[0]
+                    )
+                    if user_event_rows:
+                        con.execute(
+                            "UPDATE threads SET has_user_event = 1 "
+                            "WHERE COALESCE(has_user_event, 0) = 0"
+                        )
+                if before or user_event_rows:
                     con.commit()
                 summary["databases"] += 1
                 summary["updated_rows"] += before
+                summary["user_event_rows"] += user_event_rows
             finally:
                 con.close()
         except sqlite3.Error:
@@ -2505,22 +2646,82 @@ def restamp_all_runtime_thread_providers(paths: Paths) -> dict[str, Any]:
     return result
 
 
+def restamp_all_runtime_thread_providers_to(
+    paths: Paths,
+    provider: str,
+) -> dict[str, Any]:
+    """Restamp every config-runtimes/* SQLite index to one provider id."""
+    root = paths.home / "config-runtimes"
+    result: dict[str, Any] = {}
+    if not root.is_dir():
+        return result
+    try:
+        children = sorted(root.iterdir())
+    except OSError:
+        return result
+    for child in children:
+        if not child.is_dir() or child.is_symlink():
+            continue
+        if not child.name.startswith("p-"):
+            continue
+        result[child.name] = restamp_runtime_thread_providers(child, provider)
+    return result
+
+
+def sync_provider_visibility(
+    paths: Paths,
+    provider: str | None = None,
+    runtime_home: Path | None = None,
+) -> dict[str, Any]:
+    """Codex++-style provider sync for resume visibility.
+
+    1) Rewrite shared rollout session_meta.model_provider to the active provider
+       so startup backfill cannot reintroduce old ids.
+    2) Restamp every runtime SQLite index to the same active provider so any
+       station's local DB lists the full shared inventory without --all.
+    """
+    target = provider
+    if not target and runtime_home is not None:
+        target = _read_runtime_model_provider(runtime_home)
+    if not target:
+        target = _read_control_model_provider(paths)
+    summary: dict[str, Any] = {
+        "provider": target,
+        "session_meta": {},
+        "provider_restamped": {},
+    }
+    if not target:
+        summary["skipped"] = True
+        summary["reason"] = "no-model-provider"
+        return summary
+    summary["session_meta"] = rewrite_shared_session_meta_providers(paths, target)
+    # Force all runtime DBs to the active station provider (Codex++ model).
+    restamped = restamp_all_runtime_thread_providers_to(paths, target)
+    if runtime_home is not None:
+        restamped[runtime_home.name] = restamp_runtime_thread_providers(
+            runtime_home, target
+        )
+    summary["provider_restamped"] = restamped
+    return summary
+
+
 def cmd_seed_shared_sessions(paths: Paths, _args: argparse.Namespace) -> None:
     """CLI entry: repair shared sessions/history links for all runtimes."""
     linked = seed_all_runtime_states(paths)
-    restamped = restamp_all_runtime_thread_providers(paths)
+    synced = sync_provider_visibility(paths)
     emit(
         True,
         repaired=sorted(linked.keys()),
         linked=linked,
-        provider_restamped=restamped,
+        provider_sync=synced,
+        provider_restamped=synced.get("provider_restamped", {}),
     )
 
 
 def cmd_restamp_thread_providers(paths: Paths, _args: argparse.Namespace) -> None:
-    """CLI entry: restamp threads.model_provider for all runtime SQLite DBs."""
-    restamped = restamp_all_runtime_thread_providers(paths)
-    emit(True, provider_restamped=restamped)
+    """CLI entry: Codex++-style provider sync (session_meta + SQLite)."""
+    synced = sync_provider_visibility(paths)
+    emit(True, provider_sync=synced, provider_restamped=synced.get("provider_restamped", {}))
 
 
 def catalog_model_ids(path: Path) -> list[str]:
