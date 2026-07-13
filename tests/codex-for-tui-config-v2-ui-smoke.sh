@@ -150,7 +150,7 @@ test_back_navigation_and_non_destructive_exit() (
   assert_contains "$tmp/back.err" "新建配置："
   assert_contains "$tmp/back.err" "配置名称"
   assert_contains "$tmp/back.err" "请选择要切换的配置编号"
-  assert_contains "$tmp/back.err" "请选择要编辑的配置编号"
+  assert_contains "$tmp/back.err" "请选择要编辑的中转站编号"
   assert_contains "$tmp/back.err" "请选择要查看的配置编号"
   assert_contains "$tmp/back.err" "请选择要删除的配置编号"
   assert_contains "$tmp/back.err" "请选择压缩策略"
@@ -185,7 +185,8 @@ test_official_create_and_same_id_edit() (
   json_assert "$tmp/before-edit.json" "v['profile']['model'] == 'gpt-5.6-sol' and v['profile']['reasoning_effort'] == 'ultra'"
   assert_contains "$tmp/create.err" "模型编号超出范围"
 
-  printf '1\n\n\n5\n\n' |
+  # Field-level edit: pick station → 2=模型策略 → keep model → reasoning 5=max → confirm
+  printf '1\n2\n\n5\n\n' |
     codex_config_v2_edit_menu > "$tmp/edit.out" 2> "$tmp/edit.err"
   codex_config_engine profile show official > "$tmp/after-edit.json"
   json_assert "$tmp/after-edit.json" "v['profile']['id'] == '$profile_id' and v['profile']['name'] == 'official' and v['profile']['reasoning_effort'] == 'max'"
