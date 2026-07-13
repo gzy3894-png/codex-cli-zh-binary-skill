@@ -582,6 +582,32 @@ def replace_directory(staged: Path, destination: Path) -> None:
     fsync_dir(destination.parent)
 
 
+def sanitize_service_tier(doc: TOMLDocument | dict[str, Any]) -> bool:
+    """Remove invalid service_tier values. Returns True if the doc changed.
+
+    OpenAI service tiers are empty or "priority". Values like "high" are
+    reasoning-effort names that some configs incorrectly store as service_tier;
+    third-party relays then reject the request.
+    """
+    if not isinstance(doc, dict) and not hasattr(doc, "get"):
+        return False
+    if "service_tier" not in doc:
+        return False
+    value = doc.get("service_tier")
+    if value is None:
+        doc.pop("service_tier", None)
+        return True
+    text = str(value).strip().lower()
+    if text in ("", "priority"):
+        if text == "":
+            doc.pop("service_tier", None)
+            return True
+        return False
+    # Anything else (high/flex/default/...) is not a valid service tier here.
+    doc.pop("service_tier", None)
+    return True
+
+
 def strip_managed_fields(
     doc: TOMLDocument,
     *,
@@ -598,16 +624,12 @@ def strip_managed_fields(
         cleaned.pop(key, None)
     # compact threshold is owned by global compact_policy, not profile snapshots
     cleaned.pop("model_auto_compact_token_limit", None)
-    providers = cleaned.get("model_providers")
-    if providers:
-        for provider_id in list(providers):
-            if (
-                provider_id == previous_provider
-                or MANAGED_PROVIDER_ID_RE.fullmatch(str(provider_id))
-            ):
-                del providers[provider_id]
-        if not providers:
-            cleaned.pop("model_providers", None)
+    # service_tier is not a station-specific setting; invalid values break krill.
+    sanitize_service_tier(cleaned)
+    # model_providers are station-owned (API/base_url/key). Never keep them in
+    # common defaults, or orphan entries like [model_providers.custom] leak
+    # across stations and reappear in every runtime materialization.
+    cleaned.pop("model_providers", None)
     return cleaned
 
 
@@ -857,11 +879,11 @@ def materialize_profile(paths: Paths, meta: dict[str, Any], index: dict[str, Any
         if "model_reasoning_effort" in managed:
             doc["model_reasoning_effort"] = str(managed["model_reasoning_effort"])
             new_owned.add("model_reasoning_effort")
-        providers = doc.get("model_providers")
-        if providers is None:
-            providers = table()
-            doc["model_providers"] = providers
+        # Stations only own their managed provider. Replace the whole table so
+        # leftover custom/other station providers cannot survive activation.
+        providers = table()
         providers[new_provider] = copy.deepcopy(provider)
+        doc["model_providers"] = providers
         source_auth = directory / "auth.json"
         if source_auth.is_file():
             safe_copy(source_auth, paths.auth, 0o600)
@@ -1101,13 +1123,22 @@ def cmd_profile_delete(paths: Paths, args: argparse.Namespace) -> None:
         runtime_home = runtime_home_for_profile(paths, meta)
         with transaction(paths, "profile-delete"):
             shutil.rmtree(profile_dir(paths, str(meta["id"])))
-            for runtime_file in (
-                runtime_home / "config.toml",
-                runtime_home / "auth.json",
-                runtime_home / "model_catalog.json",
-                runtime_home / "install-state" / "official-login-mode",
-            ):
-                runtime_file.unlink(missing_ok=True)
+            # Drop the whole runtime tree (sqlite epochs, catalogs, links).
+            # Leaving orphan sqlite-builds made config-runtimes grow to hundreds
+            # of MB and slowed every seed/restamp launch.
+            if runtime_home.is_dir() and not runtime_home.is_symlink():
+                # Never delete control home if mis-resolved.
+                try:
+                    if runtime_home.resolve() != paths.home.resolve():
+                        shutil.rmtree(runtime_home, ignore_errors=True)
+                except OSError:
+                    for runtime_file in (
+                        runtime_home / "config.toml",
+                        runtime_home / "auth.json",
+                        runtime_home / "model_catalog.json",
+                        runtime_home / "install-state" / "official-login-mode",
+                    ):
+                        runtime_file.unlink(missing_ok=True)
             if index.get("active_profile_id") == meta["id"]:
                 index["active_profile_id"] = None
                 atomic_write_json(paths.index, index)
@@ -1393,7 +1424,15 @@ def materialize_runtime(
     doc["sqlite_home"] = str(sqlite_home)
     # Apply only explicitly tracked runtime-local extras; common control keys are authoritative.
     merge_runtime_local_overlay(doc, runtime_local)
+    # Drop unsupported OpenAI service_tier values. Catalogs only expose
+    # "priority" (or empty); "high"/"flex"/etc. cause relay errors on krill.
+    sanitize_service_tier(doc)
     atomic_write_text(runtime_config, tomlkit.dumps(doc), 0o600)
+    # Keep control home free of the same invalid tier so materialize stays clean.
+    if paths.config.is_file():
+        control_doc = read_toml(paths.config)
+        if sanitize_service_tier(control_doc):
+            atomic_write_text(paths.config, tomlkit.dumps(control_doc), 0o600)
     write_profile_base_config(paths.config, profile_directory / COMMON_BASE_FILE)
 
     if paths.auth.is_file():
@@ -1408,7 +1447,8 @@ def materialize_runtime(
     # backfill reloads threads from rollout session_meta. Codex++-style dual
     # sync rewrites shared session_meta + every runtime SQLite so the full
     # inventory stays visible without --all across stations.
-    sync_provider_visibility(paths, runtime_home=runtime_home)
+    # Fast path: skip full dual-sync when marker already matches this provider.
+    sync_provider_visibility(paths, runtime_home=runtime_home, fast=True)
     return runtime_home, sqlite_home
 
 
@@ -1929,25 +1969,95 @@ def legacy_profile_dirs(root: Path) -> list[Path]:
     ]
 
 
+def _legacy_import_fingerprint(config_path: Path) -> tuple[str, str, str] | None:
+    """Name-independent fingerprint: provider base_url + model + provider name."""
+    if not config_path.is_file():
+        return None
+    try:
+        doc = read_toml(config_path)
+    except Exception:
+        return None
+    model = str(doc.get("model", "") or "").strip()
+    provider_id = str(doc.get("model_provider", "") or "").strip()
+    base_url = ""
+    provider_name = ""
+    providers = doc.get("model_providers") or {}
+    if isinstance(providers, dict) and provider_id:
+        provider = providers.get(provider_id) or {}
+        if isinstance(provider, dict):
+            base_url = str(provider.get("base_url", "") or "").strip()
+            provider_name = str(provider.get("name", "") or "").strip()
+    if not base_url and not model:
+        return None
+    return (base_url.rstrip("/").lower(), model.lower(), provider_name.lower())
+
+
 def legacy_profile_already_imported(
     paths: Paths,
     valid_profiles: list[dict[str, Any]],
     legacy_dir: Path,
 ) -> bool:
+    """Skip re-import when the station already exists under V2.
+
+    Byte-equal legacy-config.toml alone is too strict: after the user edits a
+    station (model/key/url), the next APK upgrade would create name-legacy,
+    name-legacy-2, ... forever. Match by profile name or by base_url+model.
+    """
     source = legacy_dir / "config.toml"
     if not source.is_file():
         return False
+    preferred = legacy_dir.name.strip().lower()
+    for item in valid_profiles:
+        name = str(item.get("name", "")).strip().lower()
+        if preferred and name == preferred:
+            return True
+        # Also treat name / name-legacy* as the same station family.
+        if preferred and (
+            name == preferred
+            or name.startswith(f"{preferred}-legacy")
+            or preferred.startswith(f"{name}-legacy")
+        ):
+            return True
     try:
         source_bytes = source.read_bytes()
     except OSError:
-        return False
+        source_bytes = b""
+    source_fp = _legacy_import_fingerprint(source)
     for item in valid_profiles:
-        candidate = profile_dir(paths, str(item["id"])) / "legacy-config.toml"
+        directory = profile_dir(paths, str(item["id"]))
+        for candidate_name in ("legacy-config.toml", "common-base.toml"):
+            candidate = directory / candidate_name
+            try:
+                if source_bytes and candidate.is_file() and candidate.read_bytes() == source_bytes:
+                    return True
+            except OSError:
+                pass
+        # Fingerprint against managed provider + model.
+        managed = directory / "managed.toml"
         try:
-            if candidate.is_file() and candidate.read_bytes() == source_bytes:
-                return True
-        except OSError:
+            if managed.is_file():
+                mdoc = read_toml(managed)
+                model = str(mdoc.get("model", "") or "").strip().lower()
+                provider = mdoc.get("provider") or {}
+                base_url = ""
+                provider_name = ""
+                if isinstance(provider, dict):
+                    base_url = str(provider.get("base_url", "") or "").strip().rstrip("/").lower()
+                    provider_name = str(provider.get("name", "") or "").strip().lower()
+                if source_fp and (base_url, model, provider_name) == source_fp:
+                    return True
+                if source_fp and base_url and base_url == source_fp[0]:
+                    # Same gateway already has a station; do not spawn -legacy.
+                    return True
+        except Exception:
             continue
+        # Live redact_profile fields when available.
+        item_url = str(item.get("base_url", "") or "").strip().rstrip("/").lower()
+        item_model = str(item.get("model", "") or "").strip().lower()
+        if source_fp and item_url and item_url == source_fp[0]:
+            return True
+        if source_fp and item_url and item_model and (item_url, item_model) == source_fp[:2]:
+            return True
     return False
 
 
@@ -2668,10 +2778,68 @@ def restamp_all_runtime_thread_providers_to(
     return result
 
 
+def _provider_sync_marker_path(paths: Paths) -> Path:
+    return paths.home / "install-state" / "provider-sync-v1.json"
+
+
+def _provider_sync_marker_matches(paths: Paths, provider: str) -> bool:
+    marker = _provider_sync_marker_path(paths)
+    if not marker.is_file() or not provider:
+        return False
+    try:
+        data = read_json(marker, {})
+    except Exception:
+        return False
+    if not isinstance(data, dict):
+        return False
+    if str(data.get("provider", "")) != provider:
+        return False
+    # Marker is only trusted when session inventory mtime has not advanced.
+    try:
+        sessions = paths.home / "sessions"
+        newest = 0.0
+        if sessions.is_dir():
+            for path in sessions.rglob("rollout-*.jsonl"):
+                try:
+                    newest = max(newest, path.stat().st_mtime)
+                except OSError:
+                    continue
+        if float(data.get("sessions_mtime", -1)) + 0.0001 < newest:
+            return False
+    except OSError:
+        return False
+    return True
+
+
+def _write_provider_sync_marker(paths: Paths, provider: str) -> None:
+    newest = 0.0
+    try:
+        sessions = paths.home / "sessions"
+        if sessions.is_dir():
+            for path in sessions.rglob("rollout-*.jsonl"):
+                try:
+                    newest = max(newest, path.stat().st_mtime)
+                except OSError:
+                    continue
+    except OSError:
+        newest = 0.0
+    ensure_private_dir(paths.home / "install-state")
+    atomic_write_json(
+        _provider_sync_marker_path(paths),
+        {
+            "provider": provider,
+            "sessions_mtime": newest,
+            "updated_at": utc_now(),
+        },
+    )
+
+
 def sync_provider_visibility(
     paths: Paths,
     provider: str | None = None,
     runtime_home: Path | None = None,
+    *,
+    fast: bool = False,
 ) -> dict[str, Any]:
     """Codex++-style provider sync for resume visibility.
 
@@ -2679,6 +2847,9 @@ def sync_provider_visibility(
        so startup backfill cannot reintroduce old ids.
     2) Restamp every runtime SQLite index to the same active provider so any
        station's local DB lists the full shared inventory without --all.
+
+    When fast=True and a marker already matches the target provider, only the
+    launching runtime SQLite is restamped (cheap path for warm launches).
     """
     target = provider
     if not target and runtime_home is not None:
@@ -2689,10 +2860,25 @@ def sync_provider_visibility(
         "provider": target,
         "session_meta": {},
         "provider_restamped": {},
+        "fast": bool(fast),
     }
     if not target:
         summary["skipped"] = True
         summary["reason"] = "no-model-provider"
+        return summary
+    if fast and _provider_sync_marker_matches(paths, target):
+        restamped: dict[str, Any] = {}
+        if runtime_home is not None:
+            restamped[runtime_home.name] = restamp_runtime_thread_providers(
+                runtime_home, target
+            )
+        summary["session_meta"] = {
+            "skipped": True,
+            "reason": "marker-match",
+            "provider": target,
+        }
+        summary["provider_restamped"] = restamped
+        summary["skipped_full_sync"] = True
         return summary
     summary["session_meta"] = rewrite_shared_session_meta_providers(paths, target)
     # Force all runtime DBs to the active station provider (Codex++ model).
@@ -2702,13 +2888,18 @@ def sync_provider_visibility(
             runtime_home, target
         )
     summary["provider_restamped"] = restamped
+    try:
+        _write_provider_sync_marker(paths, target)
+    except Exception:
+        pass
     return summary
 
 
 def cmd_seed_shared_sessions(paths: Paths, _args: argparse.Namespace) -> None:
     """CLI entry: repair shared sessions/history links for all runtimes."""
     linked = seed_all_runtime_states(paths)
-    synced = sync_provider_visibility(paths)
+    # Seed path is pre-launch repair; use fast marker when already synced.
+    synced = sync_provider_visibility(paths, fast=True)
     emit(
         True,
         repaired=sorted(linked.keys()),
@@ -2720,7 +2911,8 @@ def cmd_seed_shared_sessions(paths: Paths, _args: argparse.Namespace) -> None:
 
 def cmd_restamp_thread_providers(paths: Paths, _args: argparse.Namespace) -> None:
     """CLI entry: Codex++-style provider sync (session_meta + SQLite)."""
-    synced = sync_provider_visibility(paths)
+    # Explicit CLI always does a full dual-write (no fast skip).
+    synced = sync_provider_visibility(paths, fast=False)
     emit(True, provider_sync=synced, provider_restamped=synced.get("provider_restamped", {}))
 
 

@@ -950,13 +950,18 @@ with open(sys.argv[1], encoding="utf-8") as handle:
     value = json.load(handle)
 active = value.get("active_profile_id")
 for item in value.get("profiles", []):
+    name = str(item.get("name", "") or "")
+    # Hide upgrade-spawned duplicates from the picker; they confuse the menu.
+    if "-legacy" in name:
+        continue
     fields = [
         item.get("id", ""),
-        item.get("name", ""),
+        name,
         item.get("mode", ""),
         item.get("model", ""),
         item.get("reasoning_effort") or "",
         "1" if item.get("id") == active else "0",
+        item.get("base_url") or "",
     ]
     print("|".join(str(field).replace("|", "/").replace("\n", " ") for field in fields))
 PY
@@ -976,12 +981,17 @@ codex_config_v2_choose_profile() {
     return 1
   }
   while :; do
-    printf '%s\n' "配置档：" >&2
+    printf '%s\n' "中转站（只含模型策略 / API / Key；通用策略见配置模式第 7 项）：" >&2
     awk -F '|' '{
       active = ($6 == "1" ? " *当前" : "")
       effort = ($5 != "" ? "/" $5 : "")
       model = ($4 != "" ? $4 effort : "默认模型")
-      printf "%2d. %s%s  [%s]  %s\n", NR, $2, active, $3, model
+      url = ($7 != "" ? $7 : "")
+      if (url != "") {
+        printf "%2d. %s%s  %s  %s\n", NR, $2, active, model, url
+      } else {
+        printf "%2d. %s%s  [%s]  %s\n", NR, $2, active, $3, model
+      }
     }' "$v2_choose_lines" >&2
     printf '%s\n' "b. 返回上一层" >&2
     printf '%s\n' "0. 退出，不启动 Codex" >&2
@@ -1000,7 +1010,7 @@ codex_config_v2_choose_profile() {
       CODEX_CONFIG_V2_PROFILE_NAME="$(printf '%s\n' "$v2_choose_line" | cut -d '|' -f 2)"
       return 0
     fi
-    codex_warn "配置编号超出范围。"
+    codex_warn "中转站编号超出范围。"
   done
 }
 
@@ -1713,15 +1723,16 @@ codex_config_menu() {
     fi
     printf '%s\n' "" >&2
     printf '%s\n' "Codex 配置模式" >&2
-    printf '%s\n' "当前配置：$v2_menu_label" >&2
-    printf '%s\n' "1. 新建配置" >&2
-    printf '%s\n' "2. 选择配置" >&2
-    printf '%s\n' "3. 编辑配置" >&2
-    printf '%s\n' "4. 查看配置" >&2
-    printf '%s\n' "5. 删除配置" >&2
+    printf '%s\n' "当前中转站：$v2_menu_label" >&2
+    printf '%s\n' "说明：通用项（上下文/压缩/权限等）全站共用；各站只切换模型策略、API 与 Key。" >&2
+    printf '%s\n' "1. 新建中转站" >&2
+    printf '%s\n' "2. 选择中转站" >&2
+    printf '%s\n' "3. 编辑中转站（模型/API/Key）" >&2
+    printf '%s\n' "4. 查看中转站" >&2
+    printf '%s\n' "5. 删除中转站" >&2
     printf '%s\n' "6. 刷新当前模型目录" >&2
-    printf '%s\n' "7. 上下文与压缩策略" >&2
-    printf '%s\n' "8. 修复全权限授权" >&2
+    printf '%s\n' "7. 通用：上下文与压缩策略" >&2
+    printf '%s\n' "8. 通用：修复全权限授权" >&2
     printf '%s\n' "9. 保存并退出配置模式" >&2
     printf '%s\n' "0. 退出，不启动 Codex" >&2
     v2_menu_choice="$(codex_config_tty_read "请输入选项编号" "9")"

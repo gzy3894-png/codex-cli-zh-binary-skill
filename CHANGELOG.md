@@ -1,3 +1,16 @@
+## Codex for TUI 2.5.19
+
+Codex for TUI 2.5.19 是 2.5.18 后的配置模式 / 启动性能 / 本机配置清理热修。
+
+- 配置模式：中转站只切换模型策略 / API / Key；上下文、压缩、权限等为通用项；隐藏 `-legacy*` 噪声站。
+- 站级 provider 隔离：激活时整表替换 managed provider，剥离孤儿 `model_providers.custom`，避免跨站泄漏。
+- `sanitize_service_tier` 去掉无效 `service_tier=high`（krill 报错根因）。
+- provider 同步 fast path：热启动跳过未变化的 dual-sync（约 3s → ~0.5s）。
+- legacy 导入按 name/base_url 指纹去重，APK 升级不再反复制造 `-legacy` 站。
+- 删除中转站时 `rmtree` 整棵 runtime_home。
+- `versionCode=85`、`versionName=2.5.19`、runtime epoch `apk-2.5.19`。
+- 发布说明见 `docs/codex-for-tui-2.5.19-release-notes.md`。
+
 ## Codex for TUI 2.5.18
 
 Codex for TUI 2.5.18 是 2.5.17 后的原生 `/resume` provider 双写热修。
