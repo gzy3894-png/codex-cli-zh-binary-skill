@@ -200,6 +200,66 @@ append_settings "$transcript" xhigh plan "$provider_id"
 run_adapter migrate-latest > "$TMP_ROOT/plan.json"
 [ ! -e "$pending" ] || fail "plan-mode reasoning was staged as a persistent default"
 
+# Live TUI writes land in the isolated runtime first. The explicit sync and
+# watcher paths must immediately advance the owning profile + control config.
+runtime_config="$runtime_home/config.toml"
+sed 's/model_reasoning_effort = "ultra"/model_reasoning_effort = "high"/' \
+  "$runtime_config" > "$TMP_ROOT/runtime-high.toml"
+mv "$TMP_ROOT/runtime-high.toml" "$runtime_config"
+run_adapter sync-runtime > "$TMP_ROOT/sync-runtime.json"
+[ "$(json_value "$TMP_ROOT/sync-runtime.json" status)" = "applied" ] ||
+  fail "explicit runtime selection sync was not applied"
+generation="$(json_value "$TMP_ROOT/sync-runtime.json" generation)"
+grep -F 'model_reasoning_effort = "high"' "$home/config.toml" >/dev/null ||
+  fail "runtime selection did not update control config immediately"
+grep -F 'model_reasoning_effort = "high"' \
+  "$home/config-profiles-v2/profiles/$profile_id/managed.toml" >/dev/null ||
+  fail "runtime selection did not update profile defaults"
+
+run_adapter watch-runtime --parent-pid "$$" --poll-ms 50 --max-polls 20 \
+  > "$TMP_ROOT/watch-runtime.json" &
+watch_pid="$!"
+sleep 0.1
+sed 's/model_reasoning_effort = "high"/model_reasoning_effort = "medium"/' \
+  "$runtime_config" > "$TMP_ROOT/runtime-medium.toml"
+mv "$TMP_ROOT/runtime-medium.toml" "$runtime_config"
+wait "$watch_pid"
+[ "$(json_value "$TMP_ROOT/watch-runtime.json" sync_count)" = "1" ] ||
+  fail "runtime watcher did not observe exactly one model-default change"
+grep -F 'model_reasoning_effort = "medium"' "$home/config.toml" >/dev/null ||
+  fail "runtime watcher did not update control config"
+
+# Installed support commands live in bin while the engine stays under the
+# shared scripts tree. Exercise that real layout instead of only sibling files.
+installed_home="$TMP_ROOT/installed-home"
+installed_adapter="$installed_home/bin/codex-session-defaults"
+installed_engine_root="$installed_home/.local/share/codex-zh/scripts/libexec"
+mkdir -p "$(dirname "$installed_adapter")" "$installed_engine_root"
+cp "$ADAPTER" "$installed_adapter"
+cp "$ENGINE" "$installed_engine_root/codex-config-engine.py"
+chmod 755 "$installed_adapter" "$installed_engine_root/codex-config-engine.py"
+PYTHONNOUSERSITE=1 python3 "$ENGINE" --codex-home "$home" \
+  profile show "$profile_id" > "$TMP_ROOT/installed-show.json"
+generation="$(json_value "$TMP_ROOT/installed-show.json" profile.generation)"
+sed 's/model_reasoning_effort = "medium"/model_reasoning_effort = "high"/' \
+  "$runtime_config" > "$TMP_ROOT/runtime-installed-high.toml"
+mv "$TMP_ROOT/runtime-installed-high.toml" "$runtime_config"
+HOME="$installed_home" \
+  CODEX_FOR_TUI_CONTROL_HOME="$home" \
+  CODEX_FOR_TUI_PROFILE_ID="$profile_id" \
+  CODEX_FOR_TUI_PROFILE_GENERATION="$generation" \
+  CODEX_FOR_TUI_BASELINE_MODEL="$baseline_model" \
+  CODEX_FOR_TUI_BASELINE_REASONING_EFFORT="medium" \
+  CODEX_FOR_TUI_MODEL_PROVIDER_ID="$provider_id" \
+  CODEX_HOME="$runtime_home" \
+  PYTHONPATH="$ROOT_DIR/android-arm64-musl/vendor/python" \
+    PYTHONNOUSERSITE=1 python3 "$installed_adapter" sync-runtime \
+    > "$TMP_ROOT/installed-sync-runtime.json"
+[ "$(json_value "$TMP_ROOT/installed-sync-runtime.json" status)" = "applied" ] ||
+  fail "installed-layout runtime selection sync was not applied"
+grep -F 'model_reasoning_effort = "high"' "$home/config.toml" >/dev/null ||
+  fail "installed-layout adapter did not update control config"
+
 PYTHONPYCACHEPREFIX="$TMP_ROOT/pycache" python3 -m py_compile "$ADAPTER" "$ENGINE"
 test_binary_build_cache
 printf 'OK: Codex session default persistence smoke passed\n'

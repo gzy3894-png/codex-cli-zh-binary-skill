@@ -1347,6 +1347,42 @@ def profile_catalog_for_defaults(paths: Paths, meta: dict[str, Any]) -> dict[str
     return validate_catalog(read_json(candidate))
 
 
+def validate_profile_selection(
+    paths: Paths,
+    meta: dict[str, Any],
+    model_value: Any,
+    effort_value: Any,
+    provider_value: Any,
+) -> tuple[str, str | None]:
+    model = model_value
+    effort = effort_value
+    if not isinstance(model, str) or not model.strip():
+        raise EngineError("会话默认模型无效", 7, reason="invalid-model")
+    model = model.strip()
+    if effort is not None and (not isinstance(effort, str) or not effort.strip()):
+        raise EngineError("会话默认推理等级无效", 7, reason="invalid-reasoning")
+    effort = effort.strip() if isinstance(effort, str) else None
+
+    summary = managed_summary(profile_dir(paths, str(meta["id"])))
+    expected_provider = str(summary.get("provider_id") or "")
+    provider_id = provider_value if isinstance(provider_value, str) else ""
+    if expected_provider and provider_id != expected_provider:
+        raise EngineError("会话 Provider 与配置档不匹配", 7, reason="provider-mismatch")
+
+    catalog = profile_catalog_for_defaults(paths, meta)
+    model_entry = catalog_by_slug(catalog).get(model)
+    if model_entry is None:
+        raise EngineError("会话模型不在当前目录中", 7, reason="model-not-in-catalog")
+    levels = {
+        str(item.get("effort"))
+        for item in model_entry.get("supported_reasoning_levels", [])
+        if isinstance(item, dict) and isinstance(item.get("effort"), str)
+    }
+    if effort is not None and effort not in levels:
+        raise EngineError("模型不支持该推理等级", 7, reason="reasoning-not-supported")
+    return model, effort
+
+
 def apply_pending_session_defaults(
     paths: Paths,
     meta: dict[str, Any],
@@ -1376,31 +1412,19 @@ def apply_pending_session_defaults(
         return {"status": "rejected", "reason": "stale-generation"}, pending_path
 
     managed = read_toml(directory / "managed.toml")
-    summary = managed_summary(directory)
-    model = pending.get("model")
-    effort = pending.get("reasoning_effort")
-    provider_id = pending.get("model_provider_id")
-    if not isinstance(model, str) or not model.strip():
-        return {"status": "rejected", "reason": "invalid-model"}, pending_path
-    model = model.strip()
-    if effort is not None and (not isinstance(effort, str) or not effort.strip()):
-        return {"status": "rejected", "reason": "invalid-reasoning"}, pending_path
-    effort = effort.strip() if isinstance(effort, str) else None
-    expected_provider = str(summary.get("provider_id") or "")
-    if expected_provider and provider_id != expected_provider:
-        return {"status": "rejected", "reason": "provider-mismatch"}, pending_path
-
-    catalog = profile_catalog_for_defaults(paths, meta)
-    model_entry = catalog_by_slug(catalog).get(model)
-    if model_entry is None:
-        return {"status": "rejected", "reason": "model-not-in-catalog"}, pending_path
-    levels = {
-        str(item.get("effort"))
-        for item in model_entry.get("supported_reasoning_levels", [])
-        if isinstance(item, dict) and isinstance(item.get("effort"), str)
-    }
-    if effort is not None and effort not in levels:
-        return {"status": "rejected", "reason": "reasoning-not-supported"}, pending_path
+    try:
+        model, effort = validate_profile_selection(
+            paths,
+            meta,
+            pending.get("model"),
+            pending.get("reasoning_effort"),
+            pending.get("model_provider_id"),
+        )
+    except EngineError as exc:
+        return {
+            "status": "rejected",
+            "reason": str(exc.details.get("reason") or "invalid-selection"),
+        }, pending_path
 
     previous_model = str(managed.get("model") or "")
     previous_effort = (
@@ -1476,7 +1500,12 @@ def materialize_runtime(
         runtime_local.pop(key, None)
     write_runtime_local_overlay(profile_directory, runtime_local)
     if paths.catalog.is_file():
-        write_catalog_with_visibility_policy(paths.catalog, runtime_catalog)
+        fixed_compact_policy = profile_compact_policy(meta, index).get("mode") == "fixed"
+        write_catalog_with_visibility_policy(
+            paths.catalog,
+            runtime_catalog,
+            fixed_compact_policy=fixed_compact_policy,
+        )
         doc["model_catalog_json"] = str(runtime_catalog)
     else:
         runtime_catalog.unlink(missing_ok=True)
@@ -1541,6 +1570,82 @@ def cmd_profile_launch(paths: Paths, args: argparse.Namespace) -> None:
             runtime_home=str(runtime_home),
             sqlite_home=str(sqlite_home),
             session_defaults=pending_result,
+        )
+
+
+def cmd_profile_sync_selection(paths: Paths, args: argparse.Namespace) -> None:
+    """Persist one live TUI model selection into its owning profile immediately."""
+    if not PROFILE_GENERATION_RE.fullmatch(args.base_generation):
+        raise EngineError("配置档代次无效", 2, reason="invalid-generation")
+    with engine_lock(paths):
+        paths.ensure_v2_dirs()
+        recover_transaction(paths)
+        current = resolve_profile(paths, args.profile)
+        expected_runtime = runtime_home_for_profile(paths, current)
+        source_dir = Path(args.source_dir).expanduser().resolve()
+        if source_dir != expected_runtime:
+            raise EngineError(
+                "运行目录与配置档不匹配",
+                7,
+                reason="runtime-mismatch",
+                expected=str(expected_runtime),
+                actual=str(source_dir),
+            )
+
+        directory = profile_dir(paths, str(current["id"]))
+        current_generation = profile_generation(directory)
+        if args.base_generation != current_generation:
+            raise EngineError(
+                "配置档已由其他会话更新",
+                9,
+                reason="stale-generation",
+                current_generation=current_generation,
+            )
+
+        runtime_doc = read_toml(source_dir / "config.toml")
+        model, effort = validate_profile_selection(
+            paths,
+            current,
+            runtime_doc.get("model"),
+            runtime_doc.get("model_reasoning_effort"),
+            runtime_doc.get("model_provider"),
+        )
+        managed_path = directory / "managed.toml"
+        managed = read_toml(managed_path)
+        previous_model = str(managed.get("model") or "")
+        previous_effort = (
+            str(managed["model_reasoning_effort"])
+            if "model_reasoning_effort" in managed
+            else None
+        )
+        changed = previous_model != model or previous_effort != effort
+        if changed:
+            with transaction(paths, "profile-sync-selection"):
+                managed["model"] = model
+                if effort is None:
+                    managed.pop("model_reasoning_effort", None)
+                else:
+                    managed["model_reasoning_effort"] = effort
+                atomic_write_text(managed_path, tomlkit.dumps(managed), 0o600)
+                updated_meta = dict(current)
+                updated_meta["updated_at"] = utc_now()
+                atomic_write_json(directory / "profile.json", updated_meta)
+                index = load_index(paths, create=True)
+                if index.get("active_profile_id") == current["id"]:
+                    materialize_profile(paths, updated_meta, index)
+                current = updated_meta
+
+        pending_session_defaults_path(paths, str(current["id"])).unlink(missing_ok=True)
+        generation = profile_generation(directory)
+        emit(
+            True,
+            status="applied" if changed else "unchanged",
+            model=model,
+            reasoning_effort=effort,
+            previous_model=previous_model,
+            previous_reasoning_effort=previous_effort,
+            generation=generation,
+            profile=redact_profile(paths, current),
         )
 
 
@@ -1790,13 +1895,26 @@ def apply_catalog_visibility_policy(model: dict[str, Any]) -> None:
         model["tool_mode"] = None
 
 
-def write_catalog_with_visibility_policy(source: Path, destination: Path) -> None:
+def write_catalog_with_visibility_policy(
+    source: Path,
+    destination: Path,
+    *,
+    fixed_compact_policy: bool = False,
+) -> None:
     value = read_json(source)
     if not isinstance(value, dict) or not isinstance(value.get("models"), list):
         raise EngineError("模型目录格式无效", 7, path=str(source))
     for model in value["models"]:
         if isinstance(model, dict):
             apply_catalog_visibility_policy(model)
+            if fixed_compact_policy:
+                # Native Codex treats a changed comp_hash as an unconditional
+                # auto-compact, even when usage is far below the user's fixed
+                # threshold. Runtime-only neutralization makes the explicit
+                # fixed limit authoritative; the profile catalog keeps the
+                # upstream values so follow-model can restore them.
+                model["comp_hash"] = None
+                model["auto_compact_token_limit"] = None
     text = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     atomic_write_text(destination, text, 0o600)
 
@@ -3618,6 +3736,11 @@ def build_parser() -> argparse.ArgumentParser:
     launch.add_argument("profile", nargs="?")
     launch.add_argument("--sqlite-build-key", required=True)
     launch.set_defaults(handler=cmd_profile_launch)
+    sync_selection = profile_sub.add_parser("sync-selection")
+    sync_selection.add_argument("profile")
+    sync_selection.add_argument("--source-dir", required=True)
+    sync_selection.add_argument("--base-generation", required=True)
+    sync_selection.set_defaults(handler=cmd_profile_sync_selection)
     sync_runtime = profile_sub.add_parser("sync-runtime")
     sync_runtime.add_argument("profile")
     sync_runtime.add_argument("--source-dir", required=True)

@@ -1,3 +1,14 @@
+## Codex for TUI 2.5.26
+
+Codex for TUI 2.5.26：模型真源与固定压缩策略热修。
+
+- `/model` 的 runtime 配置变化由 generation 约束的 watcher 即时同步到当前 profile 与 control config。
+- 固定 token 策略下，runtime 模型目录清除 `comp_hash` / 模型 auto-limit，避免低占用切模无条件 auto compact；follow-model 会恢复上游元数据。
+- `codex --version/--help` 改为只读直通，不再物化 runtime 或消费 pending defaults。
+- 新增 session-defaults watcher、sync-selection、固定压缩目录以及 launcher 零副作用回归门禁。
+- `versionCode=92`、`versionName=2.5.26`、runtime epoch `apk-2.5.26`。
+- 发布说明见 `docs/codex-for-tui-2.5.26-release-notes.md`。
+
 ## Codex for TUI 2.5.25
 
 Codex for TUI 2.5.25：session-fold Runtime Emitter（fold-bridge，默认 flag off）+ 文件托盘文本可复制。

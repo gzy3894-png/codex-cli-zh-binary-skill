@@ -17,8 +17,10 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
@@ -419,26 +421,228 @@ def cmd_migrate_latest() -> int:
     return 0
 
 
+def config_engine_path() -> Path:
+    adapter_path = Path(__file__).resolve()
+    candidates = [adapter_path.with_name("codex-config-engine.py")]
+    script_roots = (
+        os.environ.get("CODEX_ZH_SCRIPT_INSTALL_ROOT", ""),
+        os.environ.get("CODEX_ZH_ACTIVE_SCRIPT_DIR", ""),
+        str(Path.home() / ".local" / "share" / "codex-zh" / "scripts"),
+        "/usr/local/share/codex-zh/scripts",
+        str(Path.home() / ".cache" / "codex-zh" / "scripts"),
+    )
+    for root in script_roots:
+        if root:
+            candidates.append(
+                Path(root).expanduser().resolve() / "libexec" / "codex-config-engine.py"
+            )
+    for path in candidates:
+        if path.is_file():
+            return path
+    raise DefaultsError("config engine is unavailable")
+
+
+def sync_runtime_selection(
+    context: LaunchContext,
+    generation: str,
+) -> dict[str, Any]:
+    runtime_value = checked_env("CODEX_HOME")
+    runtime_home = Path(runtime_value).expanduser().resolve()
+    command = [
+        sys.executable,
+        str(config_engine_path()),
+        "--codex-home",
+        str(context.control_home),
+        "profile",
+        "sync-selection",
+        context.profile_id,
+        "--source-dir",
+        str(runtime_home),
+        "--base-generation",
+        generation,
+    ]
+    env = dict(os.environ)
+    env["PYTHONNOUSERSITE"] = "1"
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=env,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise DefaultsError("config engine sync failed") from exc
+    try:
+        result = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise DefaultsError("config engine returned invalid output") from exc
+    if not isinstance(result, dict):
+        raise DefaultsError("config engine returned invalid output")
+    return result
+
+
+def watch_status_path(context: LaunchContext, parent_pid: int = 0) -> Path:
+    suffix = f".watch-{parent_pid}" if parent_pid > 1 else ".watch"
+    return (
+        context.control_home
+        / "install-state"
+        / "session-defaults"
+        / f"{context.profile_id}{suffix}.json"
+    )
+
+
+def process_alive(pid: int) -> bool:
+    if pid <= 1:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def runtime_config_stamp() -> tuple[int, int]:
+    runtime_home = Path(checked_env("CODEX_HOME")).expanduser().resolve()
+    config = runtime_home / "config.toml"
+    stat = config.stat()
+    return stat.st_mtime_ns, stat.st_size
+
+
+def cmd_sync_runtime() -> int:
+    context = launch_context()
+    generation = context.generation
+    parent_value = os.environ.get("CODEX_FOR_TUI_SESSION_DEFAULTS_PARENT_PID", "")
+    parent_pid = int(parent_value) if parent_value.isdigit() else 0
+    status = read_json(watch_status_path(context, parent_pid))
+    watch_generation = status.get("generation") if isinstance(status, dict) else None
+    if isinstance(watch_generation, str) and GENERATION_RE.fullmatch(watch_generation):
+        generation = watch_generation
+    result = sync_runtime_selection(context, generation)
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    return 0 if result.get("ok") is True else int(result.get("code") or 2)
+
+
+def cmd_watch_runtime(parent_pid: int, poll_ms: int, max_polls: int) -> int:
+    context = launch_context()
+    if parent_pid <= 1 or poll_ms < 50 or poll_ms > 5000 or max_polls < 0:
+        raise DefaultsError("invalid watch arguments")
+    generation = context.generation
+    try:
+        last_stamp = runtime_config_stamp()
+    except OSError as exc:
+        raise DefaultsError("runtime config is unavailable") from exc
+    polls = 0
+    sync_count = 0
+    status_path = watch_status_path(context, parent_pid)
+    initial_result = sync_runtime_selection(context, generation)
+    if initial_result.get("ok") is True:
+        next_generation = initial_result.get("generation")
+        if isinstance(next_generation, str) and GENERATION_RE.fullmatch(next_generation):
+            generation = next_generation
+        if initial_result.get("status") == "applied":
+            sync_count = 1
+    atomic_write_json(
+        status_path,
+        {
+            "schema_version": SCHEMA_VERSION,
+            "profile_id": context.profile_id,
+            "status": "running",
+            "parent_pid": parent_pid,
+            "started_at": utc_now(),
+            "sync_count": sync_count,
+            "generation": generation,
+        },
+    )
+    stop_reason = "parent-exited"
+    while process_alive(parent_pid):
+        if max_polls and polls >= max_polls:
+            stop_reason = "max-polls"
+            break
+        polls += 1
+        time.sleep(poll_ms / 1000)
+        try:
+            stamp = runtime_config_stamp()
+        except OSError:
+            continue
+        if stamp == last_stamp:
+            continue
+        last_stamp = stamp
+        result = sync_runtime_selection(context, generation)
+        if result.get("ok") is not True:
+            stop_reason = str(result.get("reason") or "sync-failed")
+            if stop_reason == "stale-generation":
+                break
+            continue
+        next_generation = result.get("generation")
+        if isinstance(next_generation, str) and GENERATION_RE.fullmatch(next_generation):
+            generation = next_generation
+        if result.get("status") == "applied":
+            sync_count += 1
+        atomic_write_json(
+            status_path,
+            {
+                "schema_version": SCHEMA_VERSION,
+                "profile_id": context.profile_id,
+                "status": "running",
+                "parent_pid": parent_pid,
+                "updated_at": utc_now(),
+                "sync_count": sync_count,
+                "last_result": result.get("status"),
+                "generation": generation,
+            },
+        )
+    atomic_write_json(
+        status_path,
+        {
+            "schema_version": SCHEMA_VERSION,
+            "profile_id": context.profile_id,
+            "status": "stopped",
+            "reason": stop_reason,
+            "stopped_at": utc_now(),
+            "sync_count": sync_count,
+            "generation": generation,
+        },
+    )
+    emit(status="stopped", reason=stop_reason, sync_count=sync_count)
+    return 0
+
+
 def cmd_status() -> int:
     control_value = os.environ.get(
         "CODEX_FOR_TUI_CONTROL_HOME",
         str(Path(os.environ.get("HOME", "/root")) / ".codex"),
     )
     state = Path(control_value).expanduser().resolve() / "install-state" / "session-defaults"
-    pending = sorted(path.stem for path in state.glob("p-*.json") if path.is_file())
+    pending = sorted(
+        path.stem
+        for path in state.glob("p-*.json")
+        if path.is_file() and PROFILE_ID_RE.fullmatch(path.stem)
+    )
     emit(status="ready", pending_profiles=pending)
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="codex-session-defaults")
-    parser.add_argument("command", choices=("hook", "migrate-latest", "status"))
+    parser.add_argument(
+        "command",
+        choices=("hook", "migrate-latest", "sync-runtime", "watch-runtime", "status"),
+    )
+    parser.add_argument("--parent-pid", type=int, default=0)
+    parser.add_argument("--poll-ms", type=int, default=250)
+    parser.add_argument("--max-polls", type=int, default=0)
     args = parser.parse_args()
     try:
         if args.command == "hook":
             return cmd_hook()
         if args.command == "migrate-latest":
             return cmd_migrate_latest()
+        if args.command == "sync-runtime":
+            return cmd_sync_runtime()
+        if args.command == "watch-runtime":
+            return cmd_watch_runtime(args.parent_pid, args.poll_ms, args.max_polls)
         return cmd_status()
     except DefaultsError as exc:
         print(

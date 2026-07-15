@@ -329,7 +329,9 @@ PY
 test_profile_runtime_config_persistence_and_isolation() {
   home="$TMP_ROOT/runtime-isolation"
   mkdir -p "$home"
-  printf '%s\n' '{"data":[{"id":"gpt-5.4"},{"id":"gpt-5.5"}]}' > "$home/provider.json"
+  printf '%s\n' \
+    '{"data":[{"id":"gpt-5.4"},{"id":"gpt-5.5"},{"id":"gpt-5.6-sol"}]}' \
+    > "$home/provider.json"
   engine "$home" catalog build \
     --provider-json "$home/provider.json" \
     --output "$home/catalog.json" \
@@ -356,6 +358,7 @@ test_profile_runtime_config_persistence_and_isolation() {
     --reasoning-effort xhigh \
     --auth-file "$home/beta-auth.json" \
     --catalog-file "$home/catalog.json" > "$home/beta-create.json"
+  beta_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["profile"]["id"])' "$home/beta-create.json")"
 
   engine "$home" profile launch alpha \
     --sqlite-build-key codex-cli-0.144.1-build-a > "$home/alpha-launch.json"
@@ -472,6 +475,39 @@ PY
   assert_contains "$home/config.toml" 'model_auto_compact_token_limit = 250000'
   assert_not_contains "$home/config.toml" 'common_marker = "keep-me"'
   assert_contains "$beta_runtime/config.toml" 'model_auto_compact_token_limit = 250000'
+  python3 - \
+    "$home/config-profiles-v2/profiles/$beta_id/model_catalog.json" \
+    "$home/model_catalog.json" \
+    "$beta_runtime/model_catalog.json" <<'PY'
+import json
+import sys
+
+profile, control, runtime = [
+    {item["slug"]: item for item in json.load(open(path, encoding="utf-8"))["models"]}
+    for path in sys.argv[1:]
+]
+assert profile["gpt-5.5"]["comp_hash"] == "2911"
+assert profile["gpt-5.6-sol"]["comp_hash"] == "3000"
+assert control["gpt-5.5"]["comp_hash"] == "2911"
+assert control["gpt-5.6-sol"]["comp_hash"] == "3000"
+assert all(item["comp_hash"] is None for item in runtime.values())
+assert all(item["auto_compact_token_limit"] is None for item in runtime.values())
+PY
+
+  engine "$home" compact-policy follow-model > "$home/compact-follow.json"
+  engine "$home" profile launch beta \
+    --sqlite-build-key codex-cli-0.144.1-build-follow > "$home/beta-follow-launch.json"
+  python3 - "$beta_runtime/model_catalog.json" <<'PY'
+import json
+import sys
+
+models = {
+    item["slug"]: item
+    for item in json.load(open(sys.argv[1], encoding="utf-8"))["models"]
+}
+assert models["gpt-5.5"]["comp_hash"] == "2911"
+assert models["gpt-5.6-sol"]["comp_hash"] == "3000"
+PY
 }
 
 test_compact_policy_without_active_profile_persists_metadata() {

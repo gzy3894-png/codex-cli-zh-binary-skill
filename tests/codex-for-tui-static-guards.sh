@@ -173,8 +173,8 @@ test_apk_upgrade_guards() {
   assert_nonempty_file "$MODEL_PTY_SMOKE"
   python3 -m py_compile "$MODEL_PTY_SMOKE" || fail "model PTY smoke Python syntax failed"
 
-  assert_file_contains "$APK_UPGRADER" 'RELEASE="2.5.25"'
-  assert_file_contains "$APK_UPGRADER" 'VERSION_CODE="91"'
+  assert_file_contains "$APK_UPGRADER" 'RELEASE="2.5.26"'
+  assert_file_contains "$APK_UPGRADER" 'VERSION_CODE="92"'
   assert_file_contains "$APK_UPGRADER" 'EXPECTED_ARCHIVE_SHA256="1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61"'
   assert_file_contains "$APK_UPGRADER" 'EXPECTED_BINARY_SHA256="0cde6d6bad02855732ee0ee2867005408d169c46753d414e6a487884d49e0767"'
   assert_file_contains "$APK_UPGRADER" 'LOCK_DIR="$STATE_ROOT/apk-upgrade.lock"'
@@ -192,8 +192,8 @@ test_apk_upgrade_guards() {
   assert_file_contains "$APK_UPGRADER" 'best_effort_refresh'
   assert_file_contains "$APK_UPGRADER" '第三方模型目录联网刷新失败，已保留离线重建结果。'
 
-  assert_file_contains "$APK_PAYLOAD_PREPARE" 'RELEASE="2.5.25"'
-  assert_file_contains "$APK_PAYLOAD_PREPARE" 'VERSION_CODE="91"'
+  assert_file_contains "$APK_PAYLOAD_PREPARE" 'RELEASE="2.5.26"'
+  assert_file_contains "$APK_PAYLOAD_PREPARE" 'VERSION_CODE="92"'
   assert_file_contains "$APK_PAYLOAD_PREPARE" "tar \\"
   assert_file_contains "$APK_PAYLOAD_PREPARE" "--sort=name"
   assert_file_contains "$APK_PAYLOAD_PREPARE" "--mtime='UTC 1970-01-01'"
@@ -534,13 +534,13 @@ PY
     'test_bootstrap_dependency_cancel_does_not_install'
 
   assert_file_contains "$APP_BUILD_GRADLE" 'val verifyCodexUpgradePayload by tasks.registering'
-  assert_file_contains "$APP_BUILD_GRADLE" 'release"] != "2.5.25"'
-  assert_file_contains "$APP_BUILD_GRADLE" 'version_code"] != "91"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'release"] != "2.5.26"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'version_code"] != "92"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex APK manifest SHA256 mismatch'
   assert_file_contains "$APP_BUILD_GRADLE" 'AAPT strips that asset suffix; use .tgz'
   assert_file_contains "$APP_BUILD_GRADLE" 'dependsOn(verifyCodexUpgradePayload)'
-  assert_file_contains "$CODEX_COMMON" ': "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.5.25}"'
-  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.25}"'
+  assert_file_contains "$CODEX_COMMON" ': "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.5.26}"'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.26}"'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'profile_generation=""'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'baseline_model=""'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'baseline_effort=""'
@@ -559,12 +559,20 @@ PY
   assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'if key in current_clean or key in previous_clean:'
   assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'apply_pending_session_defaults'
   assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'PROFILE_GENERATION_RE'
+  assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'profile-sync-selection'
+  assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'fixed_compact_policy'
+  assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'model["comp_hash"] = None'
   assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'inherit_workspace_trust'
   assert_file_contains "$SCRIPT_DIR/libexec/codex-config-engine.py" 'atomic_write_json(paths.index, index)'
   assert_file_contains "$SCRIPT_DIR/libexec/codex-session-defaults.py" 'thread_settings_applied'
   assert_file_contains "$SCRIPT_DIR/libexec/codex-session-defaults.py" 'collaboration.get("mode") != "default"'
   assert_file_contains "$SCRIPT_DIR/libexec/codex-session-defaults.py" 'base_generation'
   assert_file_contains "$SCRIPT_DIR/libexec/codex-session-defaults.py" 'migrate-latest'
+  assert_file_contains "$SCRIPT_DIR/libexec/codex-session-defaults.py" 'watch-runtime'
+  assert_file_contains "$SCRIPT_DIR/libexec/codex-session-defaults.py" 'sync-selection'
+  assert_file_contains "$SCRIPT_DIR/libexec/codex-session-defaults.py" 'Path.home() / ".local" / "share" / "codex-zh" / "scripts"'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'codex_for_tui_start_session_defaults_watch'
+  assert_file_contains "$SCRIPT_DIR/lib/codex-zh-local.sh" 'codex_for_tui_flush_session_defaults'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-common.sh" 'codex_binary_build_cache_path'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-common.sh" 'binary-build-key-v1'
   assert_file_contains "$SCRIPT_DIR/lib/codex-zh-common.sh" 'codex_write_system_path_profile'
@@ -586,16 +594,16 @@ test_debug_build_uses_test_package_name() {
   assert_file_contains "$APP_BUILD_GRADLE" 'applicationIdSuffix = ".test"'
   assert_file_contains "$APP_BUILD_GRADLE" 'versionNameSuffix = "-TEST"'
   assert_file_contains "$APP_BUILD_GRADLE" 'Codex for TUI Test'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 91'
-  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.5.25"'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionCode = 92'
+  assert_file_contains "$APP_BUILD_GRADLE" 'versionName = "2.5.26"'
 }
 
 test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" '- "release/codex-for-tui-*"'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_RELEASE_CERT_SHA256: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc'
   assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_PACKAGE_NAME: com.gzy3894.codexfortui'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "91"'
-  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.5.25'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_CODE: "92"'
+  assert_file_contains "$BUILD_WORKFLOW" 'CODEX_TUI_EXPECTED_VERSION_NAME: 2.5.26'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release version inputs'
   assert_file_contains "$BUILD_WORKFLOW" 'GITHUB_REF_NAME#codex-for-tui-v'
   assert_file_contains "$BUILD_WORKFLOW" 'Tag/versionName mismatch'
@@ -635,7 +643,7 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'sha256sum *.apk > SHA256SUMS'
   assert_file_contains "$BUILD_WORKFLOW" 'android-app/app/build/outputs/apk/release/SHA256SUMS'
   assert_file_contains "$BUILD_WORKFLOW" 'softprops/action-gh-release@v2'
-  assert_file_contains "$BUILD_WORKFLOW" 'body_path: docs/codex-for-tui-2.5.25-release-notes.md'
+  assert_file_contains "$BUILD_WORKFLOW" 'body_path: docs/codex-for-tui-2.5.26-release-notes.md'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Publish verified GitHub release'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Download verified release assets'
   assert_file_order "$BUILD_WORKFLOW" 'name: Promote verified tag to installer channel' 'name: Publish verified GitHub release'
@@ -665,7 +673,7 @@ test_release_workflow_signature_gate() {
   assert_file_contains "$BUILD_WORKFLOW" 'sh tests/codex-for-tui-session-defaults-smoke.sh'
   assert_file_contains "$BUILD_WORKFLOW" 'name: Verify release APK offline payload'
   assert_file_contains "$BUILD_WORKFLOW" '../tests/codex-for-tui-apk-payload-inspect.sh "$apk"'
-  assert_file_contains "$APK_PAYLOAD_INSPECT" 'EXPECTED_VERSION_CODE="${CODEX_TUI_EXPECTED_VERSION_CODE:-91}"'
+  assert_file_contains "$APK_PAYLOAD_INSPECT" 'EXPECTED_VERSION_CODE="${CODEX_TUI_EXPECTED_VERSION_CODE:-92}"'
   assert_file_not_contains "$BUILD_WORKFLOW" '0.142.4'
   assert_file_contains "$CODEX_COMMON" ': "${CODEX_ZH_VERSION:=0.144.1}"'
   assert_file_contains "$CODEX_COMMON" 'releases/download/v0.144.1-zh.1'
@@ -815,8 +823,8 @@ test_image_preview_bridge_asset() {
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'codex-agent'
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'codex-session-defaults'
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'binary-build-key-v1'
-  assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'runtime_epoch=apk-2.5.25'
-  assert_file_contains "$INSTALLED_DEVICE_SMOKE" '[ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "91" ]'
+  assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'runtime_epoch=apk-2.5.26'
+  assert_file_contains "$INSTALLED_DEVICE_SMOKE" '[ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "92" ]'
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" 'expected_min_registry=91'
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" '019f212d-4b6e-7e93-b3f4-188eefa2657d'
   assert_file_contains "$INSTALLED_DEVICE_SMOKE" '/root/workspace trust was not inherited'
@@ -1885,7 +1893,6 @@ printf 'update-ran:%s\n' "$*"
 EOF
   chmod +x "$tmp/bin/codex-update"
   cp "$tmp/bin/codex-update" "$tmp/home/.local/bin/codex-update"
-
   PYTHONNOUSERSITE=1 python3 "$SCRIPT_DIR/libexec/codex-config-engine.py" \
     --codex-home "$tmp/home/.codex" \
     profile create \
@@ -1902,6 +1909,13 @@ EOF
     export CODEX_ZH_INSTALL_DIR="$tmp/bin"
     codex_local_write_launcher
   )
+  cat > "$tmp/bin/codex-session-defaults" <<'EOF'
+#!/usr/bin/env sh
+printf '%s\n' "$*" >> "$CODEX_WATCH_LOG"
+exit 0
+EOF
+  chmod +x "$tmp/bin/codex-session-defaults"
+  cp "$tmp/bin/codex-session-defaults" "$tmp/home/.local/bin/codex-session-defaults"
 
   assert_file_contains "$tmp/bin/codex" '配置模式'
   assert_file_contains "$tmp/bin/codex" '更新'
@@ -1915,6 +1929,35 @@ EOF
   assert_file_not_contains "$tmp/bin/codex" 'refresh-models'
   assert_file_not_contains "$tmp/bin/codex" 'AGENTS.md'
 
+  profile_id="$(
+    python3 - "$tmp/home/.codex/config-profiles-v2/index.json" <<'PY'
+import json
+import sys
+print(json.load(open(sys.argv[1], encoding="utf-8"))["active_profile_id"])
+PY
+  )"
+  managed="$tmp/home/.codex/config-profiles-v2/profiles/$profile_id/managed.toml"
+  before_config="$(sha256sum "$tmp/home/.codex/config.toml" | awk '{print $1}')"
+  before_managed="$(sha256sum "$managed" | awk '{print $1}')"
+  if ! output="$(
+    HOME="$tmp/home" \
+    CODEX_HOME="$tmp/home/.codex" \
+    CODEX_ZH_BIN_SHA256="$fake_codex_sha" \
+    CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR" \
+    PATH="$tmp/bin:/bin:/usr/bin" \
+    "$tmp/bin/codex" --version
+  )"; then
+    fail "codex --version passthrough failed"
+  fi
+  printf '%s\n' "$output" | grep -F 'codex-cli test-build' >/dev/null 2>&1 ||
+    fail "codex --version did not call the real binary directly"
+  [ "$before_config" = "$(sha256sum "$tmp/home/.codex/config.toml" | awk '{print $1}')" ] ||
+    fail "codex --version mutated control config"
+  [ "$before_managed" = "$(sha256sum "$managed" | awk '{print $1}')" ] ||
+    fail "codex --version consumed or mutated profile defaults"
+  [ ! -e "$tmp/home/.codex/config-runtimes/$profile_id/config.toml" ] ||
+    fail "codex --version materialized a profile runtime"
+
   if ! output="$(PREFIX="$tmp/prefix" "$tmp/bin/codex-preview" probe)"; then
     fail "codex-preview bridge wrapper failed"
   fi
@@ -1924,6 +1967,7 @@ EOF
     HOME="$tmp/home" \
     CODEX_HOME="$tmp/home/.codex" \
     CODEX_ZH_BIN_SHA256="$fake_codex_sha" \
+    CODEX_WATCH_LOG="$tmp/watch-calls" \
     PREFIX="$tmp/prefix" \
     CODEX_ZH_SCRIPT_INSTALL_ROOT="$SCRIPT_DIR" \
     PATH="$tmp/bin:/bin:/usr/bin" \
@@ -1936,11 +1980,13 @@ EOF
     fail "normal codex did not use an isolated profile runtime"
   printf '%s\n' "$output" | grep -F '/sqlite-builds/' >/dev/null 2>&1 ||
     fail "normal codex did not isolate SQLite by binary build"
-  printf '%s\n' "$output" | grep -F 'apk-2.5.25' >/dev/null 2>&1 ||
+  printf '%s\n' "$output" | grep -F 'apk-2.5.26' >/dev/null 2>&1 ||
     fail "normal codex did not include the APK runtime epoch in SQLite isolation"
   printf '%s\n' "$output" | grep -F "$tmp/prefix/local/bin" >/dev/null 2>&1 || fail "normal codex did not carry app bridge bin in PATH"
   printf '%s\n' "$output" | grep -F 'update-ran' >/dev/null 2>&1 && fail "normal codex invoked update path"
   printf '%s\n' "$output" | grep -F ':/root:' >/dev/null 2>&1 && fail "test did not isolate HOME"
+  assert_file_contains "$tmp/watch-calls" 'watch-runtime --parent-pid'
+  assert_file_contains "$tmp/watch-calls" 'sync-runtime'
 
   if ! output="$(
     HOME="$tmp/home" \

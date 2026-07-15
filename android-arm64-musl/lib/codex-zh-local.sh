@@ -196,7 +196,7 @@ codex_for_tui_force_configure() {
 }
 
 codex_for_tui_binary_build_key() {
-  codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.25}"
+  codex_binary_build_key "$real_bin" "${CODEX_ZH_RUNTIME_EPOCH:-apk-2.5.26}"
 }
 
 
@@ -472,6 +472,31 @@ codex_for_tui_ensure_fold_bridge_watch() {
   return 0
 }
 
+codex_for_tui_start_session_defaults_watch() {
+  CODEX_FOR_TUI_SESSION_DEFAULTS_WATCH_STARTED=0
+  [ "${CODEX_FOR_TUI_SESSION_DEFAULTS_WATCH:-1}" = "1" ] || return 0
+  codex_for_tui_is_interactive_start "$@" || return 0
+  command -v codex-session-defaults >/dev/null 2>&1 || return 0
+  [ -n "${CODEX_FOR_TUI_CONTROL_HOME:-}" ] || return 0
+  [ -n "${CODEX_FOR_TUI_PROFILE_ID:-}" ] || return 0
+  watch_state="$CODEX_FOR_TUI_CONTROL_HOME/install-state/session-defaults"
+  mkdir -p "$watch_state" 2>/dev/null || return 0
+  watch_log="$watch_state/$CODEX_FOR_TUI_PROFILE_ID.watch.log"
+  export CODEX_FOR_TUI_SESSION_DEFAULTS_PARENT_PID="$$"
+  codex-session-defaults watch-runtime \
+    --parent-pid "$$" \
+    --poll-ms 100 \
+    </dev/null >>"$watch_log" 2>&1 &
+  CODEX_FOR_TUI_SESSION_DEFAULTS_WATCH_STARTED=1
+}
+
+codex_for_tui_flush_session_defaults() {
+  [ "${CODEX_FOR_TUI_SESSION_DEFAULTS_WATCH_STARTED:-0}" = "1" ] || return 0
+  watch_state="$CODEX_FOR_TUI_CONTROL_HOME/install-state/session-defaults"
+  watch_log="$watch_state/$CODEX_FOR_TUI_PROFILE_ID.watch.log"
+  codex-session-defaults sync-runtime </dev/null >>"$watch_log" 2>&1 || true
+}
+
 codex_for_tui_run_real() {
   run_rc=0
   # Prefer dedicated workspace so user config under CODEX_HOME is not treated as
@@ -479,11 +504,13 @@ codex_for_tui_run_real() {
   workspace="${CODEX_FOR_TUI_WORKSPACE:-$HOME/workspace}"
   mkdir -p "$workspace" 2>/dev/null || true
   codex_for_tui_ensure_fold_bridge_watch "$@"
+  codex_for_tui_start_session_defaults_watch "$@"
   if [ -d "$workspace" ]; then
     (cd "$workspace" && "$real_bin" "$@") || run_rc=$?
   else
     "$real_bin" "$@" || run_rc=$?
   fi
+  codex_for_tui_flush_session_defaults
   codex_for_tui_sync_runtime
   return "$run_rc"
 }
@@ -731,6 +758,12 @@ case "${1:-}" in
   上下文监测|context-monitor|monitor)
     shift
     codex_for_tui_context_monitor "$@"
+    ;;
+esac
+
+case "${1:-}" in
+  --version|-V|--help|-h|help)
+    exec "$real_bin" "$@"
     ;;
 esac
 
