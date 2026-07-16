@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.5.26-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.5.26)
+[![Release](https://img.shields.io/badge/release-v2.5.27-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.5.27)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.144.1-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -8,6 +8,10 @@
 Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基于 ReTerminal 改造，内置 Alpine/proot 终端环境、Codex 中文版 ARM64 musl 安装流程、文件托盘和协作浏览器，让用户不必先手动折腾 Termux、rootfs、依赖、PATH、API 配置、本地维护命令和移动端预览工具。
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
+
+## 重要：2.5.27 首次安装 rootfs 解压热修
+
+2.5.27 修复部分 Android 设备首次打开 App 时，Toybox `tar` 尝试把 Alpine 文件恢复为 `root:root`，连续输出 `chown 0:0 ... Operation not permitted` 并中止初始化的问题。rootfs 解压现在保留 App 沙箱用户所有权；若旧进程被强制关闭并留下安装锁，新版也会识别死锁、清理未完成目录并自动重试。直接覆盖安装 2.5.27 APK 即可，不要清除数据，也不需要申请额外存储权限。发布说明见 `docs/codex-for-tui-2.5.27-release-notes.md`。
 
 ## 重要：2.5.26 模型真源与固定压缩策略热修
 
@@ -87,12 +91,13 @@ codex-ops resume-hint
 
 内置 WebView 继续作为 Agent Browser，保留后台打开、DOM 读取、点击、输入、JS、截图、多标签、Cookie/WebStorage 持久化和 userscript；遇到验证码/风控/外部 scheme 时会进入明确的用户协作状态，而不是让 Agent 猜。
 
-已经安装 2.0.x～2.5.25 的用户，直接从 Releases 下载并覆盖安装 2.5.26 APK，然后打开 App。首次启动会自动完成二进制、launcher、脚本、配置档 V2、模型目录、旧 Codex rollout/SQLite 工作区迁移和运行世代升级；之后进入固定启动台。输入 `codex`、`claude` 或 `grok` 会创建独立工作窗口；历史对话按真实 UUID 恢复，关闭窗口不会删除对话。无需再执行任何 Codex 更新或修复命令。
+已经安装 2.0.x～2.5.26 的用户，直接从 Releases 下载并覆盖安装 2.5.27 APK，然后打开 App。首次启动会自动完成 rootfs、二进制、launcher、脚本、配置档 V2、模型目录、旧 Codex rollout/SQLite 工作区迁移和运行世代升级；之后进入固定启动台。输入 `codex`、`claude` 或 `grok` 会创建独立工作窗口；历史对话按真实 UUID 恢复，关闭窗口不会删除对话。无需再执行任何 Codex 更新或修复命令。
 
 升级只使用 APK 内置载荷完成核心迁移。完成后普通启动仍不会远程更新脚本、自动请求第三方 `/models` 或覆盖用户手写配置。`codex 更新` 只用于用户没有更新 APK、明确只想热更新脚本的场景。
 
 ## 2.0 新功能
 
+- 2.5.27：首次安装 rootfs 解压忽略归档 owner，修复 `chown 0:0 ... Operation not permitted`；自动恢复被强制中断后遗留的安装锁。
 - 2.5.26：`/model` 即时同步 profile/control 配置；固定阈值不再被 `comp_hash` 切模强压缩绕过；只读版本/帮助命令零配置副作用。
 - 2.5.25：配置模式可用性热修；白底选中、Key 显示 •、可删当前站、回车确认。
 - 2.5.22：配置模式单页枢纽；↑↓/回车列表选择；站内增删改查选；compact 仍全站共用。
@@ -200,7 +205,7 @@ codex-ops resume-hint
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.5.26` |
+| Android App | `2.5.27` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug/Test 包名 | `com.gzy3894.codexfortui.test` |
 | Codex CLI | `0.144.1` 中文版 |

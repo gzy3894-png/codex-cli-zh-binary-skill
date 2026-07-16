@@ -36,15 +36,53 @@ wait_for_rootfs_ready() {
       rootfs_mark_ready
       return 0
     fi
+    # A force-stopped first install cannot run its EXIT trap. Recover its
+    # legacy empty lock (or a lock whose recorded process is no longer alive)
+    # after a short grace period, then let the caller retry atomically.
+    if clear_stale_rootfs_lock "$waited"; then
+      return 2
+    fi
     sleep 1
     waited=$((waited + 1))
   done
   return 1
 }
 
+process_start_token() {
+  awk '{print $22}' "/proc/$1/stat" 2>/dev/null || true
+}
+
+clear_stale_rootfs_lock() {
+  stale_waited="$1"
+  [ "$stale_waited" -ge 2 ] || return 1
+
+  holder="$(sed -n '1p' "$ROOTFS_LOCK/pid" 2>/dev/null || true)"
+  case "$holder" in
+    ""|*[!0-9]*) holder="" ;;
+  esac
+  holder_start="$(sed -n '1p' "$ROOTFS_LOCK/start" 2>/dev/null || true)"
+  current_start=""
+  [ -z "$holder" ] || current_start="$(process_start_token "$holder")"
+  if [ -n "$holder" ] &&
+    kill -0 "$holder" 2>/dev/null &&
+    [ -n "$holder_start" ] &&
+    [ "$holder_start" = "$current_start" ]
+  then
+    return 1
+  fi
+
+  rm -f "$ROOTFS_LOCK/pid" "$ROOTFS_LOCK/start" 2>/dev/null || true
+  rmdir "$ROOTFS_LOCK" 2>/dev/null || return 1
+  rm -rf "$PREFIX"/local/alpine.extracting.*
+  return 0
+}
+
 cleanup_rootfs_install() {
   [ -n "${ROOTFS_EXTRACT_DIR:-}" ] && rm -rf "$ROOTFS_EXTRACT_DIR"
-  [ -n "${ROOTFS_LOCK_HELD:-}" ] && rmdir "$ROOTFS_LOCK" 2>/dev/null || true
+  if [ -n "${ROOTFS_LOCK_HELD:-}" ]; then
+    rm -f "$ROOTFS_LOCK/pid" "$ROOTFS_LOCK/start" 2>/dev/null || true
+    rmdir "$ROOTFS_LOCK" 2>/dev/null || true
+  fi
 }
 
 install_rootfs_if_needed() {
@@ -64,6 +102,8 @@ install_rootfs_if_needed() {
   mkdir -p "$PREFIX/local"
   if mkdir "$ROOTFS_LOCK" 2>/dev/null; then
     ROOTFS_LOCK_HELD=1
+    printf '%s\n' "$$" > "$ROOTFS_LOCK/pid"
+    printf '%s\n' "$(process_start_token "$$")" > "$ROOTFS_LOCK/start"
     ROOTFS_EXTRACT_DIR="$PREFIX/local/alpine.extracting.$$"
     ROOTFS_OLD_DIR="$PREFIX/local/alpine.previous.$$"
     trap cleanup_rootfs_install EXIT
@@ -80,7 +120,11 @@ install_rootfs_if_needed() {
 
     rm -rf "$ROOTFS_EXTRACT_DIR" "$ROOTFS_OLD_DIR"
     mkdir -p "$ROOTFS_EXTRACT_DIR"
-    tar -xf "$ALPINE_TARBALL" -C "$ROOTFS_EXTRACT_DIR"
+    # Android's Toybox tar restores archived uid/gid by default. App processes
+    # cannot chown files to root:root, so a first install otherwise ends with
+    # "chown 0:0: Operation not permitted".  -o means "ignore owner" for both
+    # Toybox tar and GNU tar; ownership stays with the app sandbox user.
+    tar -oxf "$ALPINE_TARBALL" -C "$ROOTFS_EXTRACT_DIR"
     mkdir -p "$ROOTFS_EXTRACT_DIR/tmp"
     chmod 1777 "$ROOTFS_EXTRACT_DIR/tmp" 2>/dev/null || true
     printf 'ready %s\n' "$(date '+%s' 2>/dev/null || printf unknown)" > "$ROOTFS_EXTRACT_DIR/$ROOTFS_READY_MARKER"
@@ -102,6 +146,7 @@ install_rootfs_if_needed() {
       cp -a "$ROOTFS_OLD_DIR/root/." "$ALPINE_DIR/root/" 2>/dev/null || true
     fi
     rm -rf "$ROOTFS_OLD_DIR"
+    rm -f "$ROOTFS_LOCK/pid" "$ROOTFS_LOCK/start" 2>/dev/null || true
     rmdir "$ROOTFS_LOCK" 2>/dev/null || true
 
     ROOTFS_LOCK_HELD=
@@ -109,10 +154,17 @@ install_rootfs_if_needed() {
     ROOTFS_OLD_DIR=
     trap - EXIT HUP INT TERM
   else
-    wait_for_rootfs_ready || {
+    if wait_for_rootfs_ready; then
+      :
+    else
+      wait_rc=$?
+      if [ "$wait_rc" -eq 2 ]; then
+        install_rootfs_if_needed
+        return
+      fi
       echo "Timed out waiting for Alpine rootfs install lock: $ROOTFS_LOCK" >&2
       exit 1
-    }
+    fi
   fi
 }
 

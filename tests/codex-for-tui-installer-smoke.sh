@@ -72,6 +72,68 @@ test_syntax_and_asset_sync() {
   cmp "$BOOTSTRAP" "$BOOTSTRAP_ASSET"
 }
 
+test_init_host_ignores_rootfs_archive_owner() {
+  tmp="${TMPDIR:-/tmp}/codex-tui-test-rootfs-owner.$$"
+  rm -rf "$tmp"
+  mkdir -p \
+    "$tmp/bin" \
+    "$tmp/prefix/files" \
+    "$tmp/prefix/local/alpine.install.lock" \
+    "$tmp/prefix/local/alpine.extracting.interrupted"
+  : > "$tmp/prefix/files/alpine.tar.gz"
+  : > "$tmp/prefix/local/alpine.extracting.interrupted/partial"
+
+  cat > "$tmp/bin/tar" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+printf '%s\n' "$*" > "$TEST_TAR_LOG"
+[ "${1:-}" = "-oxf" ] || exit 64
+extract_dir=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-C" ]; then
+    shift
+    extract_dir="${1:-}"
+  fi
+  shift
+done
+[ -n "$extract_dir" ] || exit 65
+mkdir -p "$extract_dir/bin" "$extract_dir/etc" "$extract_dir/root"
+printf '3.20.0\n' > "$extract_dir/etc/alpine-release"
+EOF
+  chmod +x "$tmp/bin/tar"
+
+  cat > "$tmp/bin/proot" <<'EOF'
+#!/usr/bin/env sh
+exit 0
+EOF
+  chmod +x "$tmp/bin/proot"
+
+  (
+    export PREFIX="$tmp/prefix"
+    export PATH="$tmp/bin:/usr/bin:/bin"
+    export PROOT="$tmp/bin/proot"
+    export PROOT_TMP_DIR="$tmp/proot-tmp"
+    export TEST_TAR_LOG="$tmp/tar.log"
+    export CODEX_FOR_TUI_FILTER_PROOT_WARNINGS=0
+    sh "$ROOT_DIR/android-app/core/main/src/main/assets/init-host.sh" \
+      > "$tmp/stdout" 2> "$tmp/stderr"
+  ) || {
+    sed -n '1,160p' "$tmp/stderr" >&2 || true
+    fail "init-host rootfs extraction failed"
+  }
+
+  assert_file_contains "$tmp/tar.log" "-oxf $tmp/prefix/files/alpine.tar.gz"
+  [ -s "$tmp/prefix/local/alpine/etc/alpine-release" ] ||
+    fail "rootfs payload was not activated"
+  [ -s "$tmp/prefix/local/alpine/.codex-rootfs-ready" ] ||
+    fail "rootfs ready marker was not written"
+  [ ! -d "$tmp/prefix/local/alpine.install.lock" ] ||
+    fail "rootfs install lock was not released"
+  [ ! -d "$tmp/prefix/local/alpine.extracting.interrupted" ] ||
+    fail "interrupted rootfs extraction was not cleaned before retry"
+  rm -rf "$tmp"
+}
+
 test_dev_transfer_smoke() {
   sh "$ROOT_DIR/tests/codex-for-tui-dev-transfer-smoke.sh"
 }
@@ -798,6 +860,7 @@ test_no_startup_auto_refresh_symbols_remain() {
 }
 
 run_step test_syntax_and_asset_sync
+run_step test_init_host_ignores_rootfs_archive_owner
 run_step test_bootstrap_normal_start_does_not_fetch_when_codex_exists
 run_step test_bootstrap_explicit_update_fetches_scripts
 run_step test_bootstrap_prepares_python_dependency_with_retry

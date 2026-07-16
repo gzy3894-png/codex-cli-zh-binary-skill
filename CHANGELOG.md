@@ -1,3 +1,14 @@
+## Codex for TUI 2.5.27
+
+Codex for TUI 2.5.27：首次安装 Alpine rootfs 解压热修。
+
+- Android Toybox `tar` 解压 rootfs 时显式忽略归档 uid/gid，不再尝试 `chown 0:0`。
+- 修复普通 App 沙箱无法恢复 `root:root` 所有者而连续报 `Operation not permitted`、初始化中止的问题。
+- rootfs 安装锁记录进程与启动 token；强制关闭遗留的旧空锁/死锁会在下次启动自动清理并重试。
+- 新增“遗留安装锁 + 首次解压 + 原子激活”的回归门禁。
+- `versionCode=93`、`versionName=2.5.27`、runtime epoch `apk-2.5.27`。
+- 发布说明见 `docs/codex-for-tui-2.5.27-release-notes.md`。
+
 ## Codex for TUI 2.5.26
 
 Codex for TUI 2.5.26：模型真源与固定压缩策略热修。
