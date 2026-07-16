@@ -61,6 +61,16 @@ RUNTIME_GENERATED_ROOT_KEYS = {
     "model_auto_compact_token_limit",
     "model_providers",
 }
+THIRD_PARTY_FALLBACK_CONTEXT_WINDOW = 272_000
+THIRD_PARTY_AUTO_COMPACT_PERCENT = 80
+THIRD_PARTY_DEFAULT_REASONING_LEVEL = "medium"
+THIRD_PARTY_DEFAULT_REASONING_LEVELS = (
+    ("low", "响应更快，推理较轻"),
+    ("medium", "在日常任务中平衡速度和推理深度"),
+    ("high", "为复杂问题提供更深推理"),
+    ("xhigh", "为复杂问题提供极高推理深度"),
+)
+MAX_CONTEXT_WINDOW = (1 << 63) - 1
 
 
 class EngineError(Exception):
@@ -1094,6 +1104,7 @@ def cmd_profile_update(paths: Paths, args: argparse.Namespace) -> None:
                 compact_policy=profile_compact_policy(current, load_index(paths, create=True)),
             )
             preserve_runtime_metadata(paths, str(current["id"]), staged)
+            preserve_catalog_context_window_overrides(directory, staged)
             replace_directory(staged, directory)
             maybe_failpoint("after-profile-replace")
             index = load_index(paths, create=True)
@@ -1275,6 +1286,10 @@ def import_runtime_profile(
         updated_meta["compatibility_model"] = existing_meta.get("compatibility_model")
         atomic_write_json(meta_path, updated_meta)
         preserve_runtime_metadata(paths, profile_id, staged)
+        preserve_catalog_context_window_overrides(
+            profile_dir(paths, profile_id),
+            staged,
+        )
     replace_directory(staged, profile_dir(paths, profile_id))
     return profile_meta(paths, profile_id)
 
@@ -1833,6 +1848,103 @@ def fallback_instructions(official: dict[str, Any]) -> tuple[str, str]:
     raise EngineError("官方模型目录缺少可用的基础指令", 7)
 
 
+def third_party_reasoning_levels() -> list[dict[str, str]]:
+    return [
+        {"effort": effort, "description": description}
+        for effort, description in THIRD_PARTY_DEFAULT_REASONING_LEVELS
+    ]
+
+
+def validate_context_window(value: Any) -> int:
+    if (
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or value <= 0
+        or value > MAX_CONTEXT_WINDOW
+    ):
+        raise EngineError("上下文长度必须是正整数", 2)
+    return value
+
+
+def default_auto_compact_limit(context_window: int) -> int:
+    return max(
+        1,
+        (validate_context_window(context_window) * THIRD_PARTY_AUTO_COMPACT_PERCENT)
+        // 100,
+    )
+
+
+def apply_third_party_catalog_defaults(
+    model: dict[str, Any],
+    *,
+    conservative_fallback: bool,
+) -> None:
+    context_window = model.get("context_window")
+    max_context_window = model.get("max_context_window")
+    resolved_context_window = (
+        context_window if isinstance(context_window, int) else max_context_window
+    )
+    if not isinstance(resolved_context_window, int) or resolved_context_window <= 0:
+        resolved_context_window = THIRD_PARTY_FALLBACK_CONTEXT_WINDOW
+        model["context_window"] = resolved_context_window
+        if not isinstance(max_context_window, int) or max_context_window <= 0:
+            model["max_context_window"] = resolved_context_window
+
+    default_limit = default_auto_compact_limit(resolved_context_window)
+    configured_limit = model.get("auto_compact_token_limit")
+    model["auto_compact_token_limit"] = (
+        min(configured_limit, default_limit)
+        if isinstance(configured_limit, int) and configured_limit > 0
+        else default_limit
+    )
+    if conservative_fallback:
+        model["default_reasoning_level"] = THIRD_PARTY_DEFAULT_REASONING_LEVEL
+        model["supported_reasoning_levels"] = third_party_reasoning_levels()
+        model["codex_tui_conservative_fallback"] = True
+
+
+def apply_context_window_override(model: dict[str, Any], context_window: int) -> None:
+    context_window = validate_context_window(context_window)
+    model["context_window"] = context_window
+    max_context_window = model.get("max_context_window")
+    if not isinstance(max_context_window, int) or max_context_window < context_window:
+        model["max_context_window"] = context_window
+    model["auto_compact_token_limit"] = default_auto_compact_limit(context_window)
+
+
+def normalize_context_window_overrides(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, int] = {}
+    for slug, context_window in value.items():
+        if not isinstance(slug, str) or not slug:
+            continue
+        try:
+            result[slug] = validate_context_window(context_window)
+        except EngineError:
+            continue
+    return result
+
+
+def apply_context_window_overrides(
+    catalog: dict[str, Any],
+    overrides: dict[str, int],
+) -> dict[str, int]:
+    applied: dict[str, int] = {}
+    by_slug = {
+        str(item["slug"]): item
+        for item in catalog.get("models", [])
+        if isinstance(item, dict) and isinstance(item.get("slug"), str)
+    }
+    for slug, context_window in overrides.items():
+        model = by_slug.get(slug)
+        if model is None:
+            continue
+        apply_context_window_override(model, context_window)
+        applied[slug] = context_window
+    return applied
+
+
 def conservative_unknown_model(slug: str, base_instructions: str) -> dict[str, Any]:
     return {
         "prefer_websockets": False,
@@ -1844,9 +1956,11 @@ def conservative_unknown_model(slug: str, base_instructions: str) -> dict[str, A
         "supports_image_detail_original": False,
         "truncation_policy": {"mode": "bytes", "limit": 10000},
         "supports_parallel_tool_calls": False,
-        "context_window": None,
-        "max_context_window": None,
-        "auto_compact_token_limit": None,
+        "context_window": THIRD_PARTY_FALLBACK_CONTEXT_WINDOW,
+        "max_context_window": THIRD_PARTY_FALLBACK_CONTEXT_WINDOW,
+        "auto_compact_token_limit": default_auto_compact_limit(
+            THIRD_PARTY_FALLBACK_CONTEXT_WINDOW
+        ),
         "reasoning_summary_format": "none",
         "default_reasoning_summary": "none",
         "additional_speed_tiers": [],
@@ -1855,8 +1969,8 @@ def conservative_unknown_model(slug: str, base_instructions: str) -> dict[str, A
         "slug": slug,
         "display_name": slug,
         "description": f"{slug} (provider metadata unavailable)",
-        "default_reasoning_level": None,
-        "supported_reasoning_levels": [],
+        "default_reasoning_level": THIRD_PARTY_DEFAULT_REASONING_LEVEL,
+        "supported_reasoning_levels": third_party_reasoning_levels(),
         "shell_type": "shell_command",
         "visibility": "list",
         "minimal_client_version": "0.0.0",
@@ -1877,6 +1991,7 @@ def conservative_unknown_model(slug: str, base_instructions: str) -> dict[str, A
         "tool_mode": None,
         "multi_agent_version": None,
         "include_skills_usage_instructions": False,
+        "codex_tui_conservative_fallback": True,
     }
 
 
@@ -1923,6 +2038,7 @@ def build_catalog_value(
     paths: Paths,
     ids: list[str],
     mappings: dict[str, Any] | None = None,
+    context_window_overrides: dict[str, int] | None = None,
     *,
     offline: bool = False,
     bundled_only: bool = False,
@@ -1942,6 +2058,9 @@ def build_catalog_value(
     mappings = mappings or {}
     if not isinstance(mappings, dict):
         raise EngineError("模型映射文件必须是 JSON 对象", 2)
+    context_window_overrides = normalize_context_window_overrides(
+        context_window_overrides
+    )
     models: list[dict[str, Any]] = []
     unknown: list[str] = []
     mapped: dict[str, str] = {}
@@ -1957,9 +2076,17 @@ def build_catalog_value(
         else:
             model = conservative_unknown_model(slug, fallback_instruction_text)
             unknown.append(slug)
+        apply_third_party_catalog_defaults(
+            model,
+            conservative_fallback=slug in unknown,
+        )
         apply_catalog_visibility_policy(model)
         models.append(model)
     result = {"models": models}
+    applied_context_overrides = apply_context_window_overrides(
+        result,
+        context_window_overrides,
+    )
     output_text = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     meta = {
         "schema_version": 1,
@@ -1971,6 +2098,9 @@ def build_catalog_value(
             fallback_instruction_slug if unknown else None
         ),
         "manual_mappings": mapped,
+        "context_window_overrides": applied_context_overrides,
+        "fallback_context_window": THIRD_PARTY_FALLBACK_CONTEXT_WINDOW,
+        "auto_compact_percent": THIRD_PARTY_AUTO_COMPACT_PERCENT,
         "upstream": source_meta,
         "sha256": hashlib.sha256(output_text.encode("utf-8")).hexdigest(),
     }
@@ -2003,6 +2133,49 @@ def cmd_catalog_build(paths: Paths, args: argparse.Namespace) -> None:
         output = Path(args.output)
         write_catalog_pair(output, result, meta)
     emit(True, output=str(output), **meta)
+
+
+def cmd_catalog_set_context(paths: Paths, args: argparse.Namespace) -> None:
+    with engine_lock(paths):
+        output = Path(args.catalog_file)
+        catalog = validate_catalog(read_json(output))
+        by_slug = {
+            str(item["slug"]): item
+            for item in catalog["models"]
+            if isinstance(item, dict) and isinstance(item.get("slug"), str)
+        }
+        model = by_slug.get(args.model)
+        if model is None:
+            raise EngineError("模型不在目录中", 4, model=args.model)
+        context_window = validate_context_window(args.context_window)
+        apply_context_window_override(model, context_window)
+
+        meta_path = output.with_suffix(output.suffix + ".meta.json")
+        try:
+            meta = read_json(meta_path, {}) or {}
+        except EngineError:
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        overrides = normalize_context_window_overrides(
+            meta.get("context_window_overrides")
+        )
+        overrides[args.model] = context_window
+        meta = {
+            **meta,
+            "context_window_overrides": overrides,
+            "fallback_context_window": THIRD_PARTY_FALLBACK_CONTEXT_WINDOW,
+            "auto_compact_percent": THIRD_PARTY_AUTO_COMPACT_PERCENT,
+            "context_override_updated_at": utc_now(),
+        }
+        write_catalog_pair(output, catalog, meta)
+    emit(
+        True,
+        model=args.model,
+        context_window=context_window,
+        auto_compact_token_limit=default_auto_compact_limit(context_window),
+        auto_compact_percent=THIRD_PARTY_AUTO_COMPACT_PERCENT,
+    )
 
 
 def cmd_catalog_status(paths: Paths, _args: argparse.Namespace) -> None:
@@ -2090,7 +2263,10 @@ def model_capability_summary(model: dict[str, Any]) -> dict[str, Any]:
         "auto_compact_source": auto_compact_source,
         "supports_parallel_tool_calls": bool(model.get("supports_parallel_tool_calls")),
         "input_modalities": model.get("input_modalities") or ["text"],
-        "conservative_fallback": resolved_context_window is None,
+        "conservative_fallback": bool(
+            model.get("codex_tui_conservative_fallback")
+        )
+        or resolved_context_window is None,
     }
 
 
@@ -3234,6 +3410,49 @@ def catalog_manual_mappings(directory: Path) -> dict[str, str]:
     }
 
 
+def catalog_context_window_overrides(directory: Path) -> dict[str, int]:
+    try:
+        meta = read_json(directory / "catalog.meta.json", {}) or {}
+    except EngineError:
+        return {}
+    return normalize_context_window_overrides(
+        meta.get("context_window_overrides") if isinstance(meta, dict) else None
+    )
+
+
+def preserve_catalog_context_window_overrides(
+    existing_directory: Path,
+    staged_directory: Path,
+) -> None:
+    catalog_path = staged_directory / "model_catalog.json"
+    if not catalog_path.is_file():
+        return
+    existing = catalog_context_window_overrides(existing_directory)
+    incoming = catalog_context_window_overrides(staged_directory)
+    merged = {**existing, **incoming}
+    if not merged:
+        return
+    catalog = validate_catalog(read_json(catalog_path))
+    applied = apply_context_window_overrides(catalog, merged)
+    meta_path = staged_directory / "catalog.meta.json"
+    try:
+        meta = read_json(meta_path, {}) or {}
+    except EngineError:
+        meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    meta = {
+        **meta,
+        "context_window_overrides": applied,
+        "fallback_context_window": THIRD_PARTY_FALLBACK_CONTEXT_WINDOW,
+        "auto_compact_percent": THIRD_PARTY_AUTO_COMPACT_PERCENT,
+    }
+    output_text = json.dumps(catalog, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    meta["sha256"] = hashlib.sha256(output_text.encode("utf-8")).hexdigest()
+    atomic_write_text(catalog_path, output_text, 0o600)
+    atomic_write_json(meta_path, meta, 0o600)
+
+
 def catalog_by_slug(value: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {
         str(item["slug"]): item
@@ -3311,6 +3530,7 @@ def rebuild_profile_catalog(
         paths,
         ids,
         catalog_manual_mappings(directory),
+        catalog_context_window_overrides(directory),
         offline=True,
         bundled_only=True,
     )
@@ -3619,6 +3839,7 @@ def cmd_apk_refresh_active(paths: Paths, args: argparse.Namespace) -> None:
             paths,
             ids,
             catalog_manual_mappings(directory),
+            catalog_context_window_overrides(directory),
             offline=True,
             bundled_only=True,
         )
@@ -3755,6 +3976,11 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--offline", action="store_true")
     build.set_defaults(handler=cmd_catalog_build)
     catalog_sub.add_parser("status").set_defaults(handler=cmd_catalog_status)
+    set_context = catalog_sub.add_parser("set-context")
+    set_context.add_argument("--catalog-file", required=True)
+    set_context.add_argument("--model", required=True)
+    set_context.add_argument("--context-window", required=True, type=int)
+    set_context.set_defaults(handler=cmd_catalog_set_context)
     inspect = catalog_sub.add_parser("inspect")
     inspect.add_argument("--catalog-file", required=True)
     inspect.add_argument("--model")

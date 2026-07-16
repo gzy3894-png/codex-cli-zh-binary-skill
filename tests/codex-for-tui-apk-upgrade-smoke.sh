@@ -65,7 +65,7 @@ printf 'fake-codex:%s:%s\n' "${CODEX_HOME:-}" "${CODEX_SQLITE_HOME:-}" >> "${COD
 EOF
   chmod 755 "$fake_binary"
 
-  support_archive="codex-support-2.5.27.tgz"
+  support_archive="codex-support-2.5.28.tgz"
   binary_archive="codex-test-0.144.1.tgz"
   tar -czf "$payload/$support_archive" -C "$support" .
   tar -czf "$payload/$binary_archive" -C "$binary_root" .
@@ -74,11 +74,11 @@ EOF
   binary_sha="$(sha256_file "$fake_binary")"
   cat > "$payload/manifest.properties" <<EOF
 schema_version=1
-release=2.5.27
-version_code=93
+release=2.5.28
+version_code=94
 codex_version=0.144.1
 target=aarch64-unknown-linux-musl
-runtime_epoch=apk-2.5.27
+runtime_epoch=apk-2.5.28
 support_archive=$support_archive
 support_sha256=$support_sha
 support_file_count=33
@@ -302,7 +302,7 @@ db = sqlite3.connect(home / "state_5.sqlite")
 assert db.execute("SELECT cwd FROM threads").fetchone()[0] == "/root/workspace"
 db.close()
 migration = json.loads(
-    (home / "install-state/apk-upgrades/2.5.27/workspace-migration.json").read_text(
+    (home / "install-state/apk-upgrades/2.5.28/workspace-migration.json").read_text(
         encoding="utf-8"
     )
 )
@@ -340,10 +340,10 @@ assert sol["default_reasoning_level"] == "low"
 assert [item["effort"] for item in sol["supported_reasoning_levels"]][-2:] == ["max", "ultra"]
 assert models["codex-auto-review"]["visibility"] == "hide"
 launch = json.loads(
-    (home / "install-state/apk-upgrades/2.5.27/launch-check.json").read_text(encoding="utf-8")
+    (home / "install-state/apk-upgrades/2.5.28/launch-check.json").read_text(encoding="utf-8")
 )
 assert launch["runtime_home"] == str(runtime)
-assert "apk-2.5.27" in launch["sqlite_home"]
+assert "apk-2.5.28" in launch["sqlite_home"]
 assert (install / "codex").is_file()
 assert (install / "codex-session-defaults").is_file()
 assert (home / "install-state/binary-build-key-v1").is_file()
@@ -434,7 +434,7 @@ test_failure_rolls_back_managed_and_config() {
     fail "failed APK upgrade did not restore root config"
   [ ! -e "$home/config-profiles-v2/index.json" ] ||
     fail "failed APK upgrade left V2 state active"
-  [ ! -e "$home/install-state/apk-upgrades/2.5.27/complete" ] ||
+  [ ! -e "$home/install-state/apk-upgrades/2.5.28/complete" ] ||
     fail "failed APK upgrade wrote a completion marker"
 }
 
@@ -487,7 +487,7 @@ assert (runtime / "sessions/2026/07/10/preserve.jsonl").is_file()
 assert (home / "sessions/2026/07/10/preserve.jsonl").is_file()
 assert not (runtime / "state_5.sqlite").exists()
 assert (home / "state_5.sqlite").is_file()
-corrupt = home / "install-state/apk-upgrades/2.5.27/corrupt"
+corrupt = home / "install-state/apk-upgrades/2.5.28/corrupt"
 assert any(path.name.startswith("index.json-") for path in corrupt.iterdir())
 assert any(path.name.startswith("config-v2-transaction.json-") for path in corrupt.iterdir())
 PY
@@ -509,6 +509,20 @@ test_normal_v2_upgrade_preserves_identity_and_fixed_policy() {
     --model gpt-5.6-sol \
     --reasoning-effort xhigh \
     --activate > "$root/create.json"
+  printf '%s\n' '{"data":[{"id":"gpt-5.6-sol"}]}' > "$root/provider.json"
+  python3 "$ENGINE" --codex-home "$home" \
+    catalog build \
+    --provider-json "$root/provider.json" \
+    --output "$root/catalog.json" \
+    --offline > "$root/catalog-build.json"
+  python3 "$ENGINE" --codex-home "$home" \
+    catalog set-context \
+    --catalog-file "$root/catalog.json" \
+    --model gpt-5.6-sol \
+    --context-window 400000 > "$root/catalog-context.json"
+  python3 "$ENGINE" --codex-home "$home" \
+    profile update stable-v2 \
+    --catalog-file "$root/catalog.json" > "$root/profile-context.json"
   python3 "$ENGINE" --codex-home "$home" \
     compact-policy fixed 180000 > "$root/compact.json"
   python3 "$ENGINE" --codex-home "$home" \
@@ -564,6 +578,19 @@ index = json.loads((home / "config-profiles-v2/index.json").read_text(encoding="
 assert index["active_profile_id"] == before_id
 profile_dir = home / "config-profiles-v2/profiles" / before_id
 profile = json.loads((profile_dir / "profile.json").read_text(encoding="utf-8"))
+profile_catalog = json.loads(
+    (profile_dir / "model_catalog.json").read_text(encoding="utf-8")
+)
+profile_catalog_meta = json.loads(
+    (profile_dir / "catalog.meta.json").read_text(encoding="utf-8")
+)
+profile_sol = next(
+    item for item in profile_catalog["models"] if item["slug"] == "gpt-5.6-sol"
+)
+assert profile_sol["context_window"] == 400000
+assert profile_sol["max_context_window"] == 400000
+assert profile_sol["auto_compact_token_limit"] == 320000
+assert profile_catalog_meta["context_window_overrides"] == {"gpt-5.6-sol": 400000}
 # 2.5.11+: compact policy is global (index); profile field is not the source of truth.
 assert index.get("compact_policy") == {"mode": "fixed", "value": 180000}
 assert Path(profile["runtime_home"]) == before_runtime
@@ -585,10 +612,18 @@ assert (home / "config-profiles/mixed-v1/sessions/2026/07/10/mixed.jsonl").is_fi
 assert (home / "sessions/2026/07/10/detach.jsonl").is_file()
 root_config = (home / "config.toml").read_text(encoding="utf-8")
 assert "model_auto_compact_token_limit = 180000" in root_config
-launch = json.loads(
-    (home / "install-state/apk-upgrades/2.5.27/launch-check.json").read_text(encoding="utf-8")
+runtime_catalog = json.loads(
+    (before_runtime / "model_catalog.json").read_text(encoding="utf-8")
 )
-assert "apk-2.5.27" in launch["sqlite_home"]
+runtime_sol = next(
+    item for item in runtime_catalog["models"] if item["slug"] == "gpt-5.6-sol"
+)
+assert runtime_sol["context_window"] == 400000
+assert runtime_sol["auto_compact_token_limit"] is None
+launch = json.loads(
+    (home / "install-state/apk-upgrades/2.5.28/launch-check.json").read_text(encoding="utf-8")
+)
+assert "apk-2.5.28" in launch["sqlite_home"]
 assert "old-2.4.1-build" not in launch["sqlite_home"]
 assert (before_runtime / "sqlite-builds/old-2.4.1-build/state_5.sqlite").is_file()
 # 2.5.5+: keep shared conversation state (symlink to control CODEX_HOME).
@@ -721,7 +756,7 @@ test_missing_binary_is_installed() {
 
   [ -x "$install/codex-zh-bin" ] || fail "missing Codex binary was not installed"
   [ -x "$install/codex" ] || fail "launcher was not installed with missing binary"
-  assert_contains "$home/install-state/apk-upgrades/2.5.27/complete" "version_code=93"
+  assert_contains "$home/install-state/apk-upgrades/2.5.28/complete" "version_code=94"
 }
 
 test_stale_empty_lock_is_recovered() {
@@ -735,7 +770,7 @@ test_stale_empty_lock_is_recovered() {
   run_upgrade "$home" "$install" "$scripts" \
     env CODEX_APK_UPGRADE_LOCK_WAIT_SECONDS=5
 
-  [ -s "$home/install-state/apk-upgrades/2.5.27/complete" ] ||
+  [ -s "$home/install-state/apk-upgrades/2.5.28/complete" ] ||
     fail "stale lock recovery did not complete the upgrade"
   [ ! -d "$home/install-state/apk-upgrade.lock" ] ||
     fail "stale lock recovery left the lock behind"
@@ -761,7 +796,7 @@ test_concurrent_upgrade_is_serialized() {
   second_pid=$!
   wait "$first_pid"
   wait "$second_pid"
-  [ -s "$home/install-state/apk-upgrades/2.5.27/complete" ] ||
+  [ -s "$home/install-state/apk-upgrades/2.5.28/complete" ] ||
     fail "concurrent upgrade did not complete"
   [ ! -d "$home/install-state/apk-upgrade.lock" ] ||
     fail "concurrent upgrade left the lock behind"
@@ -803,7 +838,7 @@ test_corrupt_payload_is_rejected_before_install() {
   set -e
   [ "$rc" -ne 0 ] || fail "corrupt payload unexpectedly succeeded"
   assert_contains "$install/codex" "old"
-  [ ! -e "$home/install-state/apk-upgrades/2.5.27/complete" ] ||
+  [ ! -e "$home/install-state/apk-upgrades/2.5.28/complete" ] ||
     fail "corrupt payload wrote a completion marker"
 }
 

@@ -226,7 +226,7 @@ test_third_party_create_refresh_and_secret_redaction() (
   }
 
   codex_config_v2_prepare
-  printf 'krill\nhttps://api.krill-ai.com/codex/v1\nsecret-redaction-check\n\n6\n\n' |
+  printf 'krill\nhttps://api.krill-ai.com/codex/v1\nsecret-redaction-check\n\n400000\n6\n\n' |
     codex_config_v2_create_third_party > "$tmp/create.out" 2> "$tmp/create.err"
   codex_config_engine profile show krill > "$tmp/show.json"
   assert_not_contains "$tmp/create.out" "secret-redaction-check"
@@ -234,10 +234,37 @@ test_third_party_create_refresh_and_secret_redaction() (
   assert_not_contains "$tmp/show.json" "secret-redaction-check"
   assert_contains "$CODEX_HOME/auth.json" "secret-redaction-check"
   json_assert "$tmp/show.json" "v['profile']['model'] == 'gpt-5.6-sol' and v['profile']['reasoning_effort'] == 'ultra' and v['profile']['has_catalog'] is True"
+  assert_contains "$tmp/create.err" "上下文: 400000 token；自动压缩: 320000 token（80%）"
+  python3 - "$CODEX_HOME/config-profiles-v2/profiles" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+directories = [path for path in Path(sys.argv[1]).iterdir() if path.is_dir()]
+assert len(directories) == 1
+catalog = json.loads((directories[0] / "model_catalog.json").read_text(encoding="utf-8"))
+model = next(item for item in catalog["models"] if item["slug"] == "gpt-5.6-sol")
+assert model["context_window"] == 400000
+assert model["max_context_window"] == 400000
+assert model["auto_compact_token_limit"] == 320000
+PY
 
   codex_config_refresh_models > "$tmp/refresh.out" 2> "$tmp/refresh.err"
   codex_config_engine profile show krill > "$tmp/refreshed.json"
   json_assert "$tmp/refreshed.json" "v['profile']['model'] == 'gpt-5.6-sol' and v['profile']['reasoning_effort'] == 'ultra'"
+  python3 - "$CODEX_HOME/config-profiles-v2/profiles" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+directory = next(path for path in Path(sys.argv[1]).iterdir() if path.is_dir())
+catalog = json.loads((directory / "model_catalog.json").read_text(encoding="utf-8"))
+meta = json.loads((directory / "catalog.meta.json").read_text(encoding="utf-8"))
+model = next(item for item in catalog["models"] if item["slug"] == "gpt-5.6-sol")
+assert model["context_window"] == 400000
+assert model["auto_compact_token_limit"] == 320000
+assert meta["context_window_overrides"] == {"gpt-5.6-sol": 400000}
+PY
 )
 
 test_runtime_dirty_sync_signal() (

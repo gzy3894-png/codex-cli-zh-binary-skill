@@ -1,3 +1,15 @@
+## Codex for TUI 2.5.28
+
+Codex for TUI 2.5.28：第三方模型上下文兜底与 80% 压缩策略更新。
+
+- 未知第三方模型默认使用 `272000` token 上下文、`217600` token（80%）自动压缩阈值。
+- 未知模型提供 `low/medium/high/xhigh` 四档基础推理并默认 `medium`；只有精确识别或显式映射的模型才保留官方 `max/ultra` 等额外档位。
+- 新建或改选第三方模型后提示输入上下文长度，并按输入值计算 80% 自动压缩阈值。
+- 上下文覆盖值写入模型目录元数据，在编辑配置、刷新 `/models`、APK 离线升级重建时继续保留。
+- 新增目录构建、真实 Codex 解析、配置交互、刷新保留和 APK 升级保留回归门禁。
+- `versionCode=94`、`versionName=2.5.28`、runtime epoch `apk-2.5.28`。
+- 发布说明见 `docs/codex-for-tui-2.5.28-release-notes.md`。
+
 ## Codex for TUI 2.5.27
 
 Codex for TUI 2.5.27：首次安装 Alpine rootfs 解压热修。

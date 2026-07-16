@@ -81,7 +81,7 @@ codex-for-tui-bootstrap --update-scripts
 codex-local refresh-models
 ```
 
-Provider `/models` 只提供可用模型 ID；配置引擎会与随包 OpenAI Codex 官方目录精确合并真实推理等级、上下文窗口和工具能力。未知模型不会模糊猜测，默认使用保守能力并支持显式映射。所有 `codex-auto-*` 辅助模型会保留但标记为隐藏，使 Codex 原生 `/model` 直接进入完整普通模型页；已有 profile 会在启动物化时做同样的纯本地规范化，不请求 `/models`。刷新会保留当前 `model` 和 `model_reasoning_effort`；如果当前选择不再受支持，会要求重新选择。
+Provider `/models` 只提供可用模型 ID；配置引擎会与随包 OpenAI Codex 官方目录精确合并真实推理等级、上下文窗口和工具能力。未知模型默认使用 `272000` token 上下文、80% 自动压缩阈值和 `low/medium/high/xhigh` 四档推理（默认 `medium`）；只有明确识别的模型才保留官方声明的 `max/ultra` 等额外档位。用户选模后可以确认或输入上下文长度，覆盖值会在刷新目录和 APK 升级重建后保留。所有 `codex-auto-*` 辅助模型会保留但标记为隐藏，使 Codex 原生 `/model` 直接进入完整普通模型页；已有 profile 会在启动物化时做同样的纯本地规范化，不请求 `/models`。刷新会保留当前 `model`、上下文覆盖值和 `model_reasoning_effort`；如果当前选择不再受支持，会要求重新选择。
 
 新建、编辑、切换或保存第三方 API 配置时运行：
 
@@ -186,6 +186,7 @@ curl -fsSL https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-ski
 1. API Base URL，例如 `https://api.example.com` 或 `https://api.example.com/v1`
 2. API Key
 3. 默认模型编号
+4. 该模型的上下文长度（未知模型推荐值为 `272000`）
 
 Base URL 会自动规范化：
 
@@ -222,7 +223,7 @@ refresh_interval_ms = 300000
 cwd = "/root/.codex"
 ```
 
-配置引擎只管理当前配置档拥有的 model/provider 字段，用户已有的 `[features]`、`[tui]`、MCP、hooks、注释和其他未知字段会保留。默认压缩策略为 `follow-model`，不会硬写固定 `model_auto_compact_token_limit`；只有用户选择固定策略时才写入该字段。
+配置引擎只管理当前配置档拥有的 model/provider 字段，用户已有的 `[features]`、`[tui]`、MCP、hooks、注释和其他未知字段会保留。默认压缩策略为 `follow-model`：第三方模型目录按各模型上下文写入 80% 自动压缩阈值，不在根配置硬写固定 `model_auto_compact_token_limit`；只有用户选择固定 token 策略时才写入根字段并覆盖目录阈值。
 
 `/model` 菜单的模型目录来自 `model_catalog_json`；其中 `codex-auto-*` 辅助模型会隐藏，不占用首层 auto 快捷页。后续服务端模型变化时，手动执行：
 
@@ -236,7 +237,7 @@ codex-local refresh-models
 codex 配置模式
 ```
 
-该命令会进入配置菜单；选择新建/编辑时会重新请求 `/models`，再按官方能力目录展示模型和推理等级，同时保留用户通用配置。
+该命令会进入配置菜单；选择新建/编辑时会重新请求 `/models`，再展示模型、上下文输入和推理等级，同时保留用户通用配置。无法识别的模型使用 272k/80%/四档基础推理兜底，已识别模型保留官方额外档位。
 
 ## 本地维护命令
 

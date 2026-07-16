@@ -833,8 +833,10 @@ with open(sys.argv[1], encoding="utf-8") as handle:
 
 assert models["gpt-5.4"]["context_window"] == 272000
 assert models["gpt-5.4"]["max_context_window"] == 1000000
+assert models["gpt-5.4"]["auto_compact_token_limit"] == 217600
 assert models["gpt-5.5"]["context_window"] == 272000
 assert models["gpt-5.6-sol"]["context_window"] == 372000
+assert models["gpt-5.6-sol"]["auto_compact_token_limit"] == 297600
 assert models["gpt-5.6-terra"]["context_window"] == 372000
 assert models["gpt-5.6-luna"]["context_window"] == 372000
 assert [item["effort"] for item in models["gpt-5.6-sol"]["supported_reasoning_levels"]][-2:] == ["max", "ultra"]
@@ -845,11 +847,14 @@ assert models["codex-auto-review"]["visibility"] == "hide"
 assert models["codex-auto-sol"]["visibility"] == "hide"
 assert models["codex-auto-fast"]["visibility"] == "hide"
 assert [item["effort"] for item in models["codex-auto-sol"]["supported_reasoning_levels"]][-2:] == ["max", "ultra"]
-assert models["codex-auto-fast"]["supported_reasoning_levels"] == []
+assert [item["effort"] for item in models["codex-auto-fast"]["supported_reasoning_levels"]] == ["low", "medium", "high", "xhigh"]
 assert models["vendor-sol"]["context_window"] == 372000
-assert models["vendor-unknown"]["context_window"] is None
-assert models["vendor-unknown"]["default_reasoning_level"] is None
-assert models["vendor-unknown"]["supported_reasoning_levels"] == []
+assert models["vendor-unknown"]["context_window"] == 272000
+assert models["vendor-unknown"]["max_context_window"] == 272000
+assert models["vendor-unknown"]["auto_compact_token_limit"] == 217600
+assert models["vendor-unknown"]["default_reasoning_level"] == "medium"
+assert [item["effort"] for item in models["vendor-unknown"]["supported_reasoning_levels"]] == ["low", "medium", "high", "xhigh"]
+assert models["vendor-unknown"]["codex_tui_conservative_fallback"] is True
 assert models["vendor-unknown"]["base_instructions"]
 assert "Codex" in models["vendor-unknown"]["base_instructions"]
 PY
@@ -858,11 +863,48 @@ PY
   engine "$home" catalog inspect \
     --catalog-file "$home/catalog.json" \
     --model gpt-5.6-sol > "$home/inspect-sol.json"
-  assert_json "$home/inspect-sol.json" "v['model']['resolved_context_window'] == 372000 and v['model']['effective_context_window'] == 353400 and v['model']['auto_compact_token_limit'] == 334800 and v['model']['reasoning_levels'][-1] == 'ultra'"
+  assert_json "$home/inspect-sol.json" "v['model']['resolved_context_window'] == 372000 and v['model']['effective_context_window'] == 353400 and v['model']['auto_compact_token_limit'] == 297600 and v['model']['auto_compact_source'] == 'catalog-explicit' and v['model']['reasoning_levels'][-1] == 'ultra'"
   engine "$home" catalog inspect \
     --catalog-file "$home/catalog.json" \
     --model vendor-unknown > "$home/inspect-unknown.json"
-  assert_json "$home/inspect-unknown.json" "v['model']['conservative_fallback'] is True and v['model']['auto_compact_token_limit'] is None"
+  assert_json "$home/inspect-unknown.json" "v['model']['conservative_fallback'] is True and v['model']['resolved_context_window'] == 272000 and v['model']['auto_compact_token_limit'] == 217600 and v['model']['reasoning_levels'] == ['low', 'medium', 'high', 'xhigh']"
+  engine "$home" catalog set-context \
+    --catalog-file "$home/catalog.json" \
+    --model vendor-unknown \
+    --context-window 400000 > "$home/set-context.json"
+  assert_json "$home/set-context.json" "v['context_window'] == 400000 and v['auto_compact_token_limit'] == 320000 and v['auto_compact_percent'] == 80"
+  assert_json "$home/catalog.json.meta.json" "v['context_window_overrides'] == {'vendor-unknown': 400000} and v['auto_compact_percent'] == 80"
+  engine "$home" profile create \
+    --name context-override \
+    --mode third_party \
+    --provider-name OpenAI \
+    --base-url https://example.invalid/v1 \
+    --model vendor-unknown \
+    --reasoning-effort medium \
+    --catalog-file "$home/catalog.json" > "$home/context-profile.json"
+  engine "$home" catalog build \
+    --provider-json "$home/provider.json" \
+    --output "$home/fresh-catalog.json" \
+    --mapping-file "$home/mapping.json" \
+    --offline > "$home/fresh-build.json"
+  engine "$home" profile update context-override \
+    --catalog-file "$home/fresh-catalog.json" > "$home/context-refresh.json"
+  python3 - "$home/config-profiles-v2/profiles" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+profiles = Path(sys.argv[1])
+directories = [path for path in profiles.iterdir() if path.is_dir()]
+assert len(directories) == 1
+catalog = json.loads((directories[0] / "model_catalog.json").read_text(encoding="utf-8"))
+meta = json.loads((directories[0] / "catalog.meta.json").read_text(encoding="utf-8"))
+unknown = next(item for item in catalog["models"] if item["slug"] == "vendor-unknown")
+assert unknown["context_window"] == 400000
+assert unknown["max_context_window"] == 400000
+assert unknown["auto_compact_token_limit"] == 320000
+assert meta["context_window_overrides"] == {"vendor-unknown": 400000}
+PY
 
   cached="$TMP_ROOT/catalog-cache"
   mkdir -p "$cached"

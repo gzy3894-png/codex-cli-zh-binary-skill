@@ -90,6 +90,10 @@ efforts = [
 ]
 if efforts[-2:] != ["max", "ultra"]:
     raise SystemExit(f"unexpected gpt-5.6-sol reasoning levels: {efforts}")
+if sol.get("auto_compact_token_limit") != 297600:
+    raise SystemExit(
+        f"unexpected gpt-5.6-sol compact limit: {sol.get('auto_compact_token_limit')}"
+    )
 
 for slug in ("codex-auto-review", "codex-auto-fast"):
     if by_slug[slug].get("visibility") != "hide":
@@ -98,14 +102,25 @@ for slug in ("codex-auto-review", "codex-auto-fast"):
         )
 
 unknown = by_slug["vendor-unknown"]
-if unknown.get("default_reasoning_level") is not None:
+if unknown.get("context_window") != 272000:
     raise SystemExit(
-        f"unknown model invented a default reasoning level: {unknown.get('default_reasoning_level')}"
+        f"unexpected unknown-model context: {unknown.get('context_window')}"
     )
-if unknown.get("supported_reasoning_levels") != []:
+if unknown.get("auto_compact_token_limit") != 217600:
     raise SystemExit(
-        f"unknown model invented reasoning levels: {unknown.get('supported_reasoning_levels')}"
+        f"unexpected unknown-model compact limit: {unknown.get('auto_compact_token_limit')}"
     )
+if unknown.get("default_reasoning_level") != "medium":
+    raise SystemExit(
+        f"unexpected unknown-model reasoning default: {unknown.get('default_reasoning_level')}"
+    )
+unknown_efforts = [
+    item.get("effort")
+    for item in unknown.get("supported_reasoning_levels", [])
+    if isinstance(item, dict)
+]
+if unknown_efforts != ["low", "medium", "high", "xhigh"]:
+    raise SystemExit(f"unexpected unknown-model reasoning levels: {unknown_efforts}")
 if not unknown.get("base_instructions"):
     raise SystemExit("unknown model is missing Codex base instructions")
 
@@ -118,5 +133,5 @@ if 'model_reasoning_effort = "high"' not in config:
 print(f"PASS: Codex parsed {len(models)} generated catalog entries")
 print("PASS: gpt-5.6-sol exposes max and ultra")
 print("PASS: codex-auto helper models are hidden from /model")
-print("PASS: unknown models do not invent reasoning levels")
+print("PASS: unknown models use 272k, 80% compact, and four baseline reasoning levels")
 PY

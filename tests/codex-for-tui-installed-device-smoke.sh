@@ -134,7 +134,7 @@ if [ -s "$app_codex_home/config.toml" ]; then
   if safe_grep "可用模型" "$app_codex_home/config.toml"; then
     fail "config.toml model field appears polluted by menu text"
   fi
-  if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "93" ]; then
+  if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "94" ]; then
     safe_grep '"/root/workspace"' "$app_codex_home/config.toml" &&
       safe_grep 'trust_level = "trusted"' "$app_codex_home/config.toml" ||
       fail "/root/workspace trust was not inherited into control config"
@@ -149,9 +149,9 @@ else
 fi
 
 build_key_file="$app_codex_home/install-state/binary-build-key-v1"
-if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "93" ]; then
+if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "94" ]; then
   [ -s "$build_key_file" ] || fail "binary build key cache missing: $build_key_file"
-  safe_grep "runtime_epoch=apk-2.5.27" "$build_key_file" ||
+  safe_grep "runtime_epoch=apk-2.5.28" "$build_key_file" ||
     fail "binary build key cache has wrong runtime epoch"
 fi
 
@@ -164,7 +164,7 @@ if [ -d "$codex_transcript_root" ]; then
   wait_seconds="${CODEX_TUI_INSTALLED_WAIT_SECONDS:-20}"
   expected_min_registry="${CODEX_TUI_EXPECTED_CODEX_REGISTRY_MIN:-}"
   expected_uuid="${CODEX_TUI_EXPECTED_CODEX_UUID:-}"
-  if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "93" ]; then
+  if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "94" ]; then
     [ -n "$expected_min_registry" ] || expected_min_registry=91
     [ -n "$expected_uuid" ] ||
       expected_uuid="019f212d-4b6e-7e93-b3f4-188eefa2657d"
@@ -226,19 +226,19 @@ fi
 
 workspace_release="${CODEX_TUI_WORKSPACE_MIGRATION_RELEASE:-}"
 if [ -z "$workspace_release" ] &&
-  [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "93" ]
+  [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "94" ]
 then
   # Workspace import ran once in 2.5.12. Later APK upgrades only emit
   # already_migrated markers, so history integrity still audits the 2.5.12 report.
   workspace_release="2.5.12"
 fi
-if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "93" ]; then
-  current_workspace_report="$app_codex_home/install-state/apk-upgrades/2.5.27/workspace-migration.json"
+if [ "${CODEX_TUI_EXPECTED_VERSION_CODE:-}" = "94" ]; then
+  current_workspace_report="$app_codex_home/install-state/apk-upgrades/2.5.28/workspace-migration.json"
   [ -s "$current_workspace_report" ] ||
-    fail "2.5.27 workspace migration report missing: $current_workspace_report"
+    fail "2.5.28 workspace migration report missing: $current_workspace_report"
   safe_grep '"already_migrated": true' "$current_workspace_report" ||
     safe_grep '"ok": true' "$current_workspace_report" ||
-    fail "2.5.27 workspace migration report is not successful"
+    fail "2.5.28 workspace migration report is not successful"
   printf 'workspace_report_2_5_16=ok\n'
 fi
 if [ -n "$workspace_release" ]; then

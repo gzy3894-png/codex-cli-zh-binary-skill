@@ -1287,7 +1287,51 @@ codex_config_v2_choose_model() {
   CODEX_CONFIG_V2_MODEL="$(printf '%s\n' "$v2_model_line" | cut -d '|' -f 1)"
   CODEX_CONFIG_V2_LEVELS="$(printf '%s\n' "$v2_model_line" | cut -d '|' -f 3)"
   CODEX_CONFIG_V2_DEFAULT_LEVEL="$(printf '%s\n' "$v2_model_line" | cut -d '|' -f 4)"
+  CODEX_CONFIG_V2_CONTEXT_DEFAULT="$(printf '%s\n' "$v2_model_line" | cut -d '|' -f 5)"
   return 0
+}
+
+codex_config_v2_choose_context_window() {
+  v2_context_catalog="$1"
+  v2_context_model="$2"
+  v2_context_default="${3:-${CODEX_CONFIG_V2_CONTEXT_DEFAULT:-272000}}"
+  [ -n "$v2_context_default" ] || v2_context_default=272000
+  while :; do
+    v2_context_value="$(
+      codex_config_tty_read \
+        "上下文长度（token；回车使用推荐值；b 返回，0 退出）" \
+        "$v2_context_default"
+    )"
+    codex_config_is_back_choice "$v2_context_value" && return 1
+    codex_config_is_exit_choice "$v2_context_value" && codex_config_exit_config_mode
+    case "$v2_context_value" in
+      *[!0-9]*|"")
+        codex_warn "上下文长度必须是正整数。"
+        continue
+        ;;
+    esac
+    [ "$v2_context_value" -gt 0 ] 2>/dev/null || {
+      codex_warn "上下文长度必须是正整数。"
+      continue
+    }
+    v2_context_work="$(codex_config_v2_work_root)"
+    v2_context_result="$v2_context_work/catalog-context.json"
+    if codex_config_v2_run "$v2_context_result" \
+      catalog set-context \
+      --catalog-file "$v2_context_catalog" \
+      --model "$v2_context_model" \
+      --context-window "$v2_context_value"
+    then
+      CODEX_CONFIG_V2_CONTEXT="$v2_context_value"
+      CODEX_CONFIG_V2_COMPACT_LIMIT="$(
+        codex_config_v2_json_value \
+          "$v2_context_result" \
+          auto_compact_token_limit
+      )"
+      return 0
+    fi
+    return 1
+  done
 }
 
 codex_config_v2_choose_reasoning() {
@@ -1491,6 +1535,9 @@ codex_config_v2_create_third_party() {
     "$CODEX_CONFIG_V2_CATALOG" \
     "${CODEX_ZH_DEFAULT_MODEL:-}" \
     0 || return 1
+  codex_config_v2_choose_context_window \
+    "$CODEX_CONFIG_V2_CATALOG" \
+    "$CODEX_CONFIG_V2_MODEL" || return 1
   codex_config_v2_choose_reasoning "$CODEX_CONFIG_V2_LEVELS" "" || return 1
   printf '%s\n' "将创建第三方配置：$CODEX_CONFIG_V2_NAME" >&2
   printf '%s\n' "  Base URL: $v2_create_base" >&2
@@ -1498,6 +1545,9 @@ codex_config_v2_create_third_party() {
   [ -z "$CODEX_CONFIG_V2_REASONING" ] ||
     v2_create_model_summary="$v2_create_model_summary / $CODEX_CONFIG_V2_REASONING"
   printf '%s\n' "  模型: $v2_create_model_summary" >&2
+  printf '%s\n' \
+    "  上下文: $CODEX_CONFIG_V2_CONTEXT token；自动压缩: $CODEX_CONFIG_V2_COMPACT_LIMIT token（80%）" \
+    >&2
   codex_config_tty_confirm "创建并切换到该配置？" "" || return 1
   v2_create_work="$(codex_config_v2_work_root)"
   v2_create_auth="$v2_create_work/auth-input.json"
@@ -1684,6 +1734,9 @@ codex_config_v2_edit_third_party_field() {
       then
         codex_warn "当前模型不在新 API 目录中，请重新选择模型。"
         codex_config_v2_choose_model "$CODEX_CONFIG_V2_CATALOG" "$v2_edit_model" 0 || return 1
+        codex_config_v2_choose_context_window \
+          "$CODEX_CONFIG_V2_CATALOG" \
+          "$CODEX_CONFIG_V2_MODEL" || return 1
         codex_config_v2_choose_reasoning "$CODEX_CONFIG_V2_LEVELS" "$v2_edit_effort" || return 1
       else
         v2_edit_levels="$(codex_config_v2_json_value "$v2_edit_work/edit-model-check.json" model.reasoning_levels)"
@@ -1714,6 +1767,9 @@ codex_config_v2_edit_third_party_field() {
       then
         codex_warn "当前模型不在该 Key 可见目录中，请重新选择模型。"
         codex_config_v2_choose_model "$CODEX_CONFIG_V2_CATALOG" "$v2_edit_model" 0 || return 1
+        codex_config_v2_choose_context_window \
+          "$CODEX_CONFIG_V2_CATALOG" \
+          "$CODEX_CONFIG_V2_MODEL" || return 1
         codex_config_v2_choose_reasoning "$CODEX_CONFIG_V2_LEVELS" "$v2_edit_effort" || return 1
       fi
       v2_edit_auth="$v2_edit_work/auth-input.json"
@@ -1728,6 +1784,9 @@ codex_config_v2_edit_third_party_field() {
       }
       codex_config_v2_build_catalog "$v2_edit_new_base" "$v2_edit_existing_key" || return 1
       codex_config_v2_choose_model "$CODEX_CONFIG_V2_CATALOG" "$v2_edit_model" 0 || return 1
+      codex_config_v2_choose_context_window \
+        "$CODEX_CONFIG_V2_CATALOG" \
+        "$CODEX_CONFIG_V2_MODEL" || return 1
       codex_config_v2_choose_reasoning "$CODEX_CONFIG_V2_LEVELS" "$v2_edit_effort" || return 1
       v2_edit_catalog_args=1
       ;;
@@ -1751,6 +1810,9 @@ codex_config_v2_edit_third_party_field() {
       }
       codex_config_v2_build_catalog "$v2_edit_new_base" "$v2_edit_key" || return 1
       codex_config_v2_choose_model "$CODEX_CONFIG_V2_CATALOG" "$v2_edit_model" 0 || return 1
+      codex_config_v2_choose_context_window \
+        "$CODEX_CONFIG_V2_CATALOG" \
+        "$CODEX_CONFIG_V2_MODEL" || return 1
       codex_config_v2_choose_reasoning "$CODEX_CONFIG_V2_LEVELS" "$v2_edit_effort" || return 1
       v2_edit_auth="$v2_edit_work/auth-input.json"
       codex_config_v2_write_auth_input "$v2_edit_auth" "$v2_edit_key"
