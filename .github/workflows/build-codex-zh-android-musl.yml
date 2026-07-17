@@ -23,7 +23,7 @@ concurrency:
 
 env:
   CODEX_REPO_REF: ${{ inputs.codex_ref || 'rust-v0.144.1' }}
-  CODEX_SKILLS_COMMIT: ab1573aaa545c5a027b05274471d115b53fe0f5b
+  CODEX_SKILLS_COMMIT: 7a48ce10b422c58a8b04b87c0364130d31a0edd1
   CODEX_TARGET: aarch64-unknown-linux-musl
 
 jobs:
@@ -148,6 +148,14 @@ jobs:
           echo "CARGO_PROFILE_RELEASE_LTO=false" >> "$GITHUB_ENV"
           echo "RUST_MIN_STACK=67108864" >> "$GITHUB_ENV"
 
+      - name: Test remote compaction safety patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 \
+            build-skills/codex-android-musl-zh/tests/test-remote-compaction-safety-patch.py \
+            2>&1 | tee build-evidence/remote-compaction-patch-fixture.log
+
       - name: Prepare localized musl source with pinned skills
         shell: pwsh
         run: |
@@ -217,6 +225,11 @@ jobs:
           test -s "$session_trait"
           test -s "$session_stub"
           test -s "$generated_code_mode_lib"
+          provider_info=codex-src/codex-rs/model-provider-info/src/lib.rs
+          provider_tests=codex-src/codex-rs/model-provider-info/src/model_provider_info_tests.rs
+          grep -Fq '(self.is_openai() && self.requires_openai_auth)' "$provider_info"
+          ! grep -Fq 'self.is_openai() || is_azure_responses_provider' "$provider_info"
+          grep -Fq 'test_openai_named_third_party_provider_uses_local_compaction' "$provider_tests"
           ! grep -Fq '__CODE_MODE_SESSION_COMPAT_METHODS__' "$session_stub"
           if grep -Fq 'fn is_alive(&self) -> bool;' "$session_trait"; then
             grep -Fq 'fn is_alive(&self) -> bool {' "$session_stub"
@@ -274,6 +287,20 @@ jobs:
             -p codex-cli \
             --bin codex \
             2>&1 | tee "${GITHUB_WORKSPACE}/build-evidence/cargo-build.log"
+
+      - name: Test remote compaction provider capability
+        shell: bash
+        working-directory: codex-src/codex-rs
+        run: |
+          set -euo pipefail
+          cargo test \
+            --locked \
+            --release \
+            --target "$CODEX_TARGET" \
+            -p codex-model-provider-info \
+            supports_remote_compaction \
+            --lib \
+            2>&1 | tee "${GITHUB_WORKSPACE}/build-evidence/remote-compaction-rust-tests.log"
 
       - name: Stage unverified build output
         shell: bash
