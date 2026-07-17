@@ -294,6 +294,7 @@ jobs:
         working-directory: codex-src/codex-rs
         run: |
           set -euo pipefail
+          test_log="${GITHUB_WORKSPACE}/build-evidence/remote-compaction-rust-tests.log"
           env \
             -u AR \
             -u CC \
@@ -323,9 +324,17 @@ jobs:
             cargo test \
             --locked \
             -p codex-model-provider-info \
-            supports_remote_compaction \
             --lib \
-            2>&1 | tee "${GITHUB_WORKSPACE}/build-evidence/remote-compaction-rust-tests.log"
+            2>&1 | tee "$test_log"
+          grep -Fq \
+            'test tests::test_openai_named_third_party_provider_uses_local_compaction ... ok' \
+            "$test_log"
+          grep -Fq \
+            'test tests::test_supports_remote_compaction_for_openai ... ok' \
+            "$test_log"
+          grep -Fq \
+            'test tests::test_supports_remote_compaction_for_azure_name ... ok' \
+            "$test_log"
 
       - name: Stage unverified build output
         shell: bash
