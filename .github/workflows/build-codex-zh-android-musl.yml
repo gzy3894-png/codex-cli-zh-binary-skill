@@ -133,6 +133,7 @@ jobs:
             cmake \
             file \
             jq \
+            libssl-dev \
             ninja-build \
             perl
           bash codex-src/.github/scripts/install-musl-build-tools.sh
@@ -293,10 +294,34 @@ jobs:
         working-directory: codex-src/codex-rs
         run: |
           set -euo pipefail
-          cargo test \
+          env \
+            -u AR \
+            -u CC \
+            -u CC_aarch64_unknown_linux_musl \
+            -u CFLAGS \
+            -u CMAKE_ARGS \
+            -u CMAKE_C_COMPILER \
+            -u CMAKE_CXX_COMPILER \
+            -u CXX \
+            -u CXX_aarch64_unknown_linux_musl \
+            -u CXXFLAGS \
+            -u PKG_CONFIG_ALLOW_CROSS \
+            -u PKG_CONFIG_LIBDIR \
+            -u PKG_CONFIG_LIBDIR_aarch64_unknown_linux_musl \
+            -u PKG_CONFIG_PATH \
+            -u PKG_CONFIG_PATH_aarch64_unknown_linux_musl \
+            -u PKG_CONFIG_SYSROOT_DIR \
+            -u RANLIB \
+            -u TARGET_AR \
+            -u TARGET_CC \
+            -u TARGET_CXX \
+            -u TARGET_PKG_CONFIG \
+            -u TARGET_PKG_CONFIG_ALLOW_CROSS \
+            -u TARGET_PKG_CONFIG_SYSROOT_DIR \
+            -u TARGET_RANLIB \
+            -u CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER \
+            cargo test \
             --locked \
-            --release \
-            --target "$CODEX_TARGET" \
             -p codex-model-provider-info \
             supports_remote_compaction \
             --lib \
