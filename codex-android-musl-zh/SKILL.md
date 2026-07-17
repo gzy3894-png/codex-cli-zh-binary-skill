@@ -114,6 +114,11 @@ Perl, or Cargo build setup.
 GitHub Actions and Linux builders can then use `cargo-zigbuild` or `cross`
 natively.
 
+Source preparation also restricts remote compaction to the built-in
+OpenAI-authenticated provider and Azure. OpenAI-compatible third-party
+Responses providers keep their normal request path but use local compaction,
+avoiding unsupported `compaction_trigger` and `compaction` request items.
+
 The musl stub inspects the checked-out `CodeModeSession` trait before writing
 its implementation. It supports the legacy `is_alive` method when present,
 omits it for newer upstream versions, and fails during source preparation if

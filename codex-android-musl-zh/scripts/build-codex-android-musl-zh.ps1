@@ -1155,6 +1155,14 @@ if (-not $SkipPatch) {
         $PythonExe,
         "-SkipBuild"
     )
+
+    Write-Step "Apply remote compaction safety patch"
+    $remoteCompactionPatch = Join-Path $PSScriptRoot "apply-remote-compaction-safety.py"
+    Invoke-Checked -FilePath $PythonExe -Arguments @(
+        $remoteCompactionPatch,
+        "--source-root",
+        $sourcePath
+    )
 }
 
 $sourcePath = Get-PlannedSourceRoot -RequestedSourceRoot $sourcePath -Root $WorkRoot -Ref $RepoRef
