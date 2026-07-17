@@ -3,8 +3,8 @@ set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 APK="${1:-}"
-EXPECTED_RELEASE="${CODEX_TUI_EXPECTED_VERSION_NAME:-2.5.28}"
-EXPECTED_VERSION_CODE="${CODEX_TUI_EXPECTED_VERSION_CODE:-94}"
+EXPECTED_RELEASE="${CODEX_TUI_EXPECTED_VERSION_NAME:-2.5.29}"
+EXPECTED_VERSION_CODE="${CODEX_TUI_EXPECTED_VERSION_CODE:-95}"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -58,7 +58,7 @@ expected_manifest_sha="$(
   fail "payload versionCode does not match $EXPECTED_VERSION_CODE"
 [ "$(manifest_value codex_version)" = "0.144.1" ] || fail "unexpected Codex version"
 [ "$(manifest_value target)" = "aarch64-unknown-linux-musl" ] || fail "unexpected Codex target"
-[ "$(manifest_value runtime_epoch)" = "apk-2.5.28" ] || fail "unexpected runtime epoch"
+[ "$(manifest_value runtime_epoch)" = "apk-2.5.29" ] || fail "unexpected runtime epoch"
 
 support_archive="$(manifest_value support_archive)"
 binary_archive="$(manifest_value binary_archive)"
@@ -80,8 +80,8 @@ unzip -p "$APK" "assets/codex-upgrade/$binary_archive" > "$work/$binary_archive"
   fail "support archive SHA256 mismatch"
 [ "$(sha256_file "$work/$binary_archive")" = "$(manifest_value binary_archive_sha256)" ] ||
   fail "binary archive SHA256 mismatch"
-[ "$(manifest_value binary_archive_sha256)" = "1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61" ] ||
-  fail "binary archive is not the fixed 0.144.1-zh.1 artifact"
+[ "$(manifest_value binary_archive_sha256)" = "ee59f8828b050225cb7729d2577beb8a827fc04696aaa1a1ae3b340fdf955b92" ] ||
+  fail "binary archive is not the fixed 0.144.1-zh.2 artifact"
 
 support_count="$(
   tar -tzf "$work/$support_archive" |
@@ -108,7 +108,7 @@ tar -xzf "$work/$binary_archive" -C "$work" "$binary_member" ||
   fail "fixed Codex binary is missing from archive"
 [ "$(sha256_file "$work/$binary_member")" = "$(manifest_value binary_sha256)" ] ||
   fail "fixed Codex binary SHA256 mismatch"
-[ "$(manifest_value binary_sha256)" = "0cde6d6bad02855732ee0ee2867005408d169c46753d414e6a487884d49e0767" ] ||
+[ "$(manifest_value binary_sha256)" = "24491726825c23627c5e506040f9b69627dfcf360f62074c7c6b5192a614aeae" ] ||
   fail "unexpected fixed Codex binary"
 
 apk_size="$(wc -c < "$APK" | tr -d ' ')"

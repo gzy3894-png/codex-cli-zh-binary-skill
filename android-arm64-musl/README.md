@@ -356,8 +356,8 @@ codex 上下文监测
 ## 文件校验
 
 ```text
-1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61  codex-0.144.1-zh-aarch64-unknown-linux-musl.tar.gz
-0cde6d6bad02855732ee0ee2867005408d169c46753d414e6a487884d49e0767  codex-0.144.1-zh-aarch64-unknown-linux-musl
+ee59f8828b050225cb7729d2577beb8a827fc04696aaa1a1ae3b340fdf955b92  codex-0.144.1-zh-aarch64-unknown-linux-musl.tar.gz
+24491726825c23627c5e506040f9b69627dfcf360f62074c7c6b5192a614aeae  codex-0.144.1-zh-aarch64-unknown-linux-musl
 F55A90F69052C5BD6F92CB09A8F47065970830B194C917A006FB94028E721259  alpine-minirootfs-3.24.1-aarch64.tar.gz
 ```
 

@@ -1,3 +1,17 @@
+## Codex for TUI 2.5.29
+
+Codex for TUI 2.5.29：第三方 Responses API 自动压缩挂死 P0 热修。
+
+- 修复第三方 provider 因显示名为 `OpenAI` 而被误判支持官方远程压缩协议的问题。
+- `requires_openai_auth=false` 的第三方 Responses provider 改用本地压缩；官方 OpenAI 与 Azure 路径保持不变。
+- 避免达到自动压缩阈值时服务返回 `invalid_responses_request`，随后当前会话无法继续。
+- 固定二进制升级为 `0.144.1-zh.2`；GitHub Actions `29588836456` 的 provider 测试为 24 passed / 0 failed。
+- ARM64 musl 构建新增幂等源码补丁 fixture、源码完整性检查和 provider Rust 回归测试。
+- 本热修防止新的错误远程压缩；已经写入远程 compaction replacement history 的受损旧会话不会被自动重建，应先保留 rollout，再新开会话验证或单独恢复。
+- 保留 2.5.28 的第三方模型上下文、80% 阈值、推理档位和覆盖值持久化策略。
+- `versionCode=95`、`versionName=2.5.29`、runtime epoch `apk-2.5.29`。
+- 发布说明见 `docs/codex-for-tui-2.5.29-release-notes.md`。
+
 ## Codex for TUI 2.5.28
 
 Codex for TUI 2.5.28：第三方模型上下文兜底与 80% 压缩策略更新。

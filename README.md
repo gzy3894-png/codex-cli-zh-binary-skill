@@ -1,6 +1,6 @@
 # Codex for TUI
 
-[![Release](https://img.shields.io/badge/release-v2.5.28-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.5.28)
+[![Release](https://img.shields.io/badge/release-v2.5.29-blue)](https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/tag/codex-for-tui-v2.5.29)
 [![Codex](https://img.shields.io/badge/Codex%20CLI-0.144.1-111827)](./android-arm64-musl/README.md)
 [![Target](https://img.shields.io/badge/target-android%20arm64%20musl-0f766e)](./android-arm64-musl/README.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
@@ -8,6 +8,10 @@
 Codex for TUI 是一个面向 Android 手机的 Codex CLI 终端应用。它基于 ReTerminal 改造，内置 Alpine/proot 终端环境、Codex 中文版 ARM64 musl 安装流程、文件托盘和协作浏览器，让用户不必先手动折腾 Termux、rootfs、依赖、PATH、API 配置、本地维护命令和移动端预览工具。
 
 一句话：安装 APK，打开终端，按提示完成依赖和 API 配置，就可以在手机上进入 Codex TUI。
+
+## 重要：2.5.29 第三方自动压缩挂死 P0 热修
+
+2.5.29 修复第三方 Responses API 在达到自动压缩阈值时误走官方远程压缩协议、返回 `invalid_responses_request` 后当前会话无法继续的问题。Codex for TUI 的第三方 provider 为兼容 Responses API 会显示为 `OpenAI`，但并不使用 OpenAI 官方身份验证；新版仅允许官方 OpenAI provider 和 Azure 使用远程压缩，第三方 provider 改回本地压缩。2.5.28 的上下文长度、80% 阈值和模型能力策略继续保留。热修会阻止新的错误压缩，但不会自动重建已写入远程 compaction replacement history 的受损旧会话；这类会话应先保留 rollout，再新开会话验证或单独恢复。发布说明见 `docs/codex-for-tui-2.5.29-release-notes.md`。
 
 ## 重要：2.5.28 第三方模型上下文兜底与 80% 压缩
 
@@ -83,7 +87,7 @@ codex-ops resume-hint
 
 `codex-clean scan` 默认只扫描；`apply` 只移动到 `$PREFIX/local/ops/trash/<task_id>/`，不永久删除；误清理可用 `codex-clean restore <apply_task_id>` 恢复。详细说明见 `docs/codex-for-tui-2.3.1-ops.md`，发布说明见 `docs/codex-for-tui-2.3.1-release-notes.md`。
 
-发布安全说明：正式 APK 构建必须使用 GitHub Secrets/离线签名输入，仓库内不再提供正式 keystore fallback；Release 门禁会校验包名、版本号、非 debuggable、正式签名指纹和 APK 内离线 Codex 载荷。Android 不支持普通覆盖安装降级，2.5.5（`versionCode=71`）出现问题时只发布更高 `versionCode` 的前滚修复包。
+发布安全说明：正式 APK 构建必须使用 GitHub Secrets/离线签名输入，仓库内不再提供正式 keystore fallback；Release 门禁会校验包名、版本号、非 debuggable、正式签名指纹和 APK 内离线 Codex 载荷。Android 不支持普通覆盖安装降级，2.5.29（`versionCode=95`）出现问题时只发布更高 `versionCode` 的前滚修复包。
 
 2.3.0 是 2.2.9 后的稳定化回归版：补齐 `docs/codex-for-tui-2.3.0-regression.md` 和 `tests/codex-for-tui-installed-device-smoke.sh`，把安装/更新/首启、RTK/context、文件托盘、会话折叠、浏览器后台截图、JS、Auth 状态清理和终端性能状态纳入可重复门禁。真机回归时发现 `codex-browser open` 重复打开当前已加载 URL 可能卡到超时并误报 `Page load timed out before userscript completion`，2.3.0 已修复为直接返回当前页面快照；需要强制刷新时仍使用 `codex-browser reload`。
 
@@ -95,12 +99,13 @@ codex-ops resume-hint
 
 内置 WebView 继续作为 Agent Browser，保留后台打开、DOM 读取、点击、输入、JS、截图、多标签、Cookie/WebStorage 持久化和 userscript；遇到验证码/风控/外部 scheme 时会进入明确的用户协作状态，而不是让 Agent 猜。
 
-已经安装 2.0.x～2.5.27 的用户，直接从 Releases 下载并覆盖安装 2.5.28 APK，然后打开 App。首次启动会自动完成 rootfs、二进制、launcher、脚本、配置档 V2、模型目录、旧 Codex rollout/SQLite 工作区迁移和运行世代升级；之后进入固定启动台。输入 `codex`、`claude` 或 `grok` 会创建独立工作窗口；历史对话按真实 UUID 恢复，关闭窗口不会删除对话。无需再执行任何 Codex 更新或修复命令。
+已经安装 2.0.x～2.5.28 的用户，直接从 Releases 下载并覆盖安装 2.5.29 APK，然后打开 App。首次启动会自动完成 rootfs、二进制、launcher、脚本、配置档 V2、模型目录、旧 Codex rollout/SQLite 工作区迁移和运行世代升级；之后进入固定启动台。输入 `codex`、`claude` 或 `grok` 会创建独立工作窗口；历史对话按真实 UUID 恢复，关闭窗口不会删除对话。无需再执行任何 Codex 更新或修复命令。
 
 升级只使用 APK 内置载荷完成核心迁移。完成后普通启动仍不会远程更新脚本、自动请求第三方 `/models` 或覆盖用户手写配置。`codex 更新` 只用于用户没有更新 APK、明确只想热更新脚本的场景。
 
 ## 2.0 新功能
 
+- 2.5.29：第三方 Responses provider 不再误用官方远程压缩协议；达到阈值时改用本地压缩，避免 `invalid_responses_request` 后会话挂死。
 - 2.5.28：第三方未知模型默认 272k 上下文、80% 自动压缩和四档基础推理；选模后可输入上下文，已识别模型保留 `max/ultra`，覆盖值跨刷新/升级保留。
 - 2.5.27：首次安装 rootfs 解压忽略归档 owner，修复 `chown 0:0 ... Operation not permitted`；自动恢复被强制中断后遗留的安装锁。
 - 2.5.26：`/model` 即时同步 profile/control 配置；固定阈值不再被 `comp_hash` 切模强压缩绕过；只读版本/帮助命令零配置副作用。
@@ -210,7 +215,7 @@ codex-ops resume-hint
 
 | 项目 | 当前值 |
 | --- | --- |
-| Android App | `2.5.28` |
+| Android App | `2.5.29` |
 | 包名 | `com.gzy3894.codexfortui` |
 | Debug/Test 包名 | `com.gzy3894.codexfortui.test` |
 | Codex CLI | `0.144.1` 中文版 |
@@ -490,8 +495,8 @@ Alpine 依赖通常可以走国内镜像；Codex 压缩包来自 GitHub Release�
 当前 Codex 二进制校验值：
 
 ```text
-1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61  codex-0.144.1-zh-aarch64-unknown-linux-musl.tar.gz
-0cde6d6bad02855732ee0ee2867005408d169c46753d414e6a487884d49e0767  codex-0.144.1-zh-aarch64-unknown-linux-musl
+ee59f8828b050225cb7729d2577beb8a827fc04696aaa1a1ae3b340fdf955b92  codex-0.144.1-zh-aarch64-unknown-linux-musl.tar.gz
+24491726825c23627c5e506040f9b69627dfcf360f62074c7c6b5192a614aeae  codex-0.144.1-zh-aarch64-unknown-linux-musl
 ```
 
 校验文件位于：

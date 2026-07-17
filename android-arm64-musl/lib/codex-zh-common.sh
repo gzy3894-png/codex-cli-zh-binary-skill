@@ -8,15 +8,15 @@ CODEX_ZH_COMMON_LOADED=1
 : "${CODEX_ZH_REPO_RAW:=https://raw.githubusercontent.com/gzy3894-png/codex-cli-zh-binary-skill}"
 : "${CODEX_ZH_SCRIPT_BASE_URL:=$CODEX_ZH_REPO_RAW/$CODEX_ZH_BRANCH/android-arm64-musl}"
 : "${CODEX_ZH_SCRIPT_RELEASE_BASE_URL:=https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/latest/download}"
-: "${CODEX_ZH_BINARY_BASE_URL:=https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/download/v0.144.1-zh.1}"
+: "${CODEX_ZH_BINARY_BASE_URL:=https://github.com/gzy3894-png/codex-cli-zh-binary-skill/releases/download/v0.144.1-zh.2}"
 : "${CODEX_ZH_INSTALL_NAME:=codex}"
 : "${CODEX_ZH_PROVIDER_ID:=custom}"
 : "${CODEX_ZH_PROVIDER_NAME:=OpenAI}"
-: "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.5.28}"
+: "${CODEX_ZH_RUNTIME_EPOCH:=apk-2.5.29}"
 
 CODEX_ZH_ARCHIVE="codex-${CODEX_ZH_VERSION}-zh-${CODEX_ZH_TARGET}.tar.gz"
-CODEX_ZH_ARCHIVE_SHA256="${CODEX_ZH_ARCHIVE_SHA256:-1b643a0ac10cc316d34d538f7d5fe64a96e7dda6993b1e48fa4a9f4d225fff61}"
-CODEX_ZH_BIN_SHA256="${CODEX_ZH_BIN_SHA256:-0cde6d6bad02855732ee0ee2867005408d169c46753d414e6a487884d49e0767}"
+CODEX_ZH_ARCHIVE_SHA256="${CODEX_ZH_ARCHIVE_SHA256:-ee59f8828b050225cb7729d2577beb8a827fc04696aaa1a1ae3b340fdf955b92}"
+CODEX_ZH_BIN_SHA256="${CODEX_ZH_BIN_SHA256:-24491726825c23627c5e506040f9b69627dfcf360f62074c7c6b5192a614aeae}"
 
 codex_info() { printf '%s\n' "$*"; }
 codex_warn() { printf '警告: %s\n' "$*" >&2; }
