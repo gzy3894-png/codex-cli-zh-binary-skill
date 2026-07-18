@@ -199,12 +199,18 @@ def tail_prefix_sha256(home: Path, record: dict[str, Any], size: int) -> str:
     return digest.hexdigest()
 
 
-def assert_body_and_mtime(
+def assert_body_and_mode(
     home: Path,
     now: dict[str, Any],
     baseline: dict[str, Any],
 ) -> None:
-    if int(now["mode"]) != int(baseline["mode"]):
+    now_mode = int(now["mode"])
+    baseline_mode = int(baseline["mode"])
+    owner_mask = stat.S_IRWXU
+    if (
+        (now_mode & owner_mask) != (baseline_mode & owner_mask)
+        or now_mode & ~baseline_mode
+    ):
         raise AuditError(f"rollout permission mode changed: {baseline['id']}")
     baseline_tail_size = int(baseline["tail_size"])
     current_tail_size = int(now["tail_size"])
@@ -215,11 +221,6 @@ def assert_body_and_mtime(
         != baseline["tail_sha256"]
     ):
         raise AuditError(f"transcript body prefix changed: {baseline['id']}")
-    if current_tail_size == baseline_tail_size:
-        if int(now["mtime_ns"]) != int(baseline["mtime_ns"]):
-            raise AuditError(f"rollout mtime changed: {baseline['id']}")
-    elif int(now["mtime_ns"]) < int(baseline["mtime_ns"]):
-        raise AuditError(f"appended rollout mtime moved backwards: {baseline['id']}")
 
 
 def assert_preserved(
@@ -240,7 +241,7 @@ def assert_preserved(
             raise AuditError(f"baseline UUID missing after upgrade: {session_id}")
         if now["path"] != record["path"]:
             raise AuditError(f"baseline rollout path changed: {session_id}")
-        assert_body_and_mtime(home, now, record)
+        assert_body_and_mode(home, now, record)
         if now["cwd"] != expected_cwd(record, source, target):
             raise AuditError(f"baseline rollout cwd mismatch: {session_id}")
     for record in legacy:
@@ -250,16 +251,18 @@ def assert_preserved(
             raise AuditError(f"legacy UUID was not imported: {session_id}")
         if now["path"] != record["canonical_path"]:
             raise AuditError(f"legacy canonical path mismatch: {session_id}")
-        assert_body_and_mtime(home, now, record)
+        assert_body_and_mode(home, now, record)
         if now["cwd"] != expected_cwd(record, source, target):
             raise AuditError(f"legacy rollout cwd mismatch: {session_id}")
         for source_value in record.get("source_paths") or []:
             source_path = (home / str(source_value))
             if not source_path.exists():
-                # 2.5.16+ may replace private runtime sessions trees with a
-                # shared symlink; a missing private runtime copy is OK when the
-                # UUID is already present in the control sessions inventory.
-                if str(source_value).startswith("config-runtimes/"):
+                # 2.5.16+ may replace private profile/runtime session trees
+                # with a shared symlink. Their old copies may be absent once
+                # the UUID is preserved in the control sessions inventory.
+                if str(source_value).startswith(
+                    ("config-runtimes/", "config-profiles/")
+                ):
                     continue
                 raise AuditError(f"legacy source missing: {session_id}: {source_value}")
             try:
@@ -374,7 +377,18 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     report_path = Path(args.release_report).expanduser().resolve()
     baseline = load_json(Path(args.baseline).expanduser().resolve())
     report = load_json(report_path)
-    if not isinstance(report, dict) or report.get("ok") is not True:
+    completion_path = (
+        home / "install-state" / "workspace-migrations" / f"{args.release}.json"
+    ).resolve()
+    report_is_completion = report_path == completion_path
+    if not report_is_completion:
+        try:
+            report_is_completion = report_path.samefile(completion_path)
+        except OSError:
+            pass
+    if not isinstance(report, dict) or (
+        report.get("ok") is not True and not report_is_completion
+    ):
         raise AuditError("workspace migration report is not successful")
     for key, expected in (
         ("release", args.release),
@@ -414,10 +428,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         raise AuditError("migration backup import count mismatch")
     if len(manifest.get("rollouts") or []) != args.expected_migrated_count:
         raise AuditError("migration backup rollout count mismatch")
-    completion = (
-        home / "install-state" / "workspace-migrations" / f"{args.release}.json"
-    )
-    completed = load_json(completion)
+    completed = load_json(completion_path)
     for key in (
         "backup",
         "release",

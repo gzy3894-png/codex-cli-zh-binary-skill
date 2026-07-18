@@ -305,4 +305,59 @@ grep -F '"recovered_transaction": true' "$TMP_ROOT/recovered.json" >/dev/null ||
   fail "crash recovery was not reported"
 assert_state "$crash_home" /root/workspace present
 
+compat_home="$TMP_ROOT/compat/root/.codex"
+prepare_fixture "$compat_home"
+python3 "$AUDITOR" snapshot --codex-home "$compat_home" \
+  > "$TMP_ROOT/compat-baseline.json"
+python3 "$MIGRATOR" --codex-home "$compat_home" migrate \
+  --from /root --to /root/workspace --release 2.5.12 \
+  --import-legacy-runtimes > "$TMP_ROOT/compat-migrate.json"
+compat_completion="$compat_home/install-state/workspace-migrations/2.5.12.json"
+[ -s "$compat_completion" ] ||
+  fail "durable migration completion report missing"
+python3 - "$compat_home" <<'PY'
+import os
+import shutil
+import sys
+from pathlib import Path
+
+home = Path(sys.argv[1])
+rollout = home / "sessions/2026/07/02/rollout-old.jsonl"
+rollout.chmod(0o600)
+current = rollout.stat()
+os.utime(
+    rollout,
+    ns=(current.st_atime_ns, current.st_mtime_ns + 1_000_000_000),
+)
+shutil.rmtree(home / "config-profiles/legacy/sessions")
+PY
+python3 "$AUDITOR" verify \
+  --codex-home "$compat_home" \
+  --release-report "$compat_completion" \
+  --baseline "$TMP_ROOT/compat-baseline.json" \
+  --release 2.5.12 \
+  --expected-import-count 2 \
+  --expected-migrated-count 2 \
+  --expected-baseline-count 2 \
+  --expected-min-count 4 > "$TMP_ROOT/compat-audit.json"
+grep -F '"ok": true' "$TMP_ROOT/compat-audit.json" >/dev/null ||
+  fail "completion fallback and hardened metadata audit failed"
+chmod 0664 "$compat_home/sessions/2026/07/02/rollout-old.jsonl"
+set +e
+python3 "$AUDITOR" verify \
+  --codex-home "$compat_home" \
+  --release-report "$compat_completion" \
+  --baseline "$TMP_ROOT/compat-baseline.json" \
+  --release 2.5.12 \
+  --expected-import-count 2 \
+  --expected-migrated-count 2 \
+  --expected-baseline-count 2 \
+  --expected-min-count 4 > "$TMP_ROOT/compat-broadened-mode.json"
+rc=$?
+set -e
+[ "$rc" -ne 0 ] ||
+  fail "history audit accepted broadened rollout permissions"
+grep -F 'rollout permission mode changed' "$TMP_ROOT/compat-broadened-mode.json" >/dev/null ||
+  fail "broadened rollout permission failure was not reported"
+
 printf '%s\n' "codex workspace migration smoke: PASS"

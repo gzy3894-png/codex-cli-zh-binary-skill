@@ -265,8 +265,13 @@ if [ -n "$workspace_release" ]; then
       ;;
   esac
   migration_report="$app_codex_home/install-state/apk-upgrades/$workspace_release/workspace-migration.json"
-  [ -s "$migration_report" ] ||
-    fail "workspace migration report missing: $migration_report"
+  if [ ! -s "$migration_report" ]; then
+    completion_report="$app_codex_home/install-state/workspace-migrations/$workspace_release.json"
+    [ -s "$completion_report" ] ||
+      fail "workspace migration report missing: $migration_report (completion fallback: $completion_report)"
+    migration_report="$completion_report"
+    printf 'workspace_migration_report_source=completion\n'
+  fi
   history_status="$(
     python3 "$HISTORY_AUDITOR" verify \
       --codex-home "$app_codex_home" \
